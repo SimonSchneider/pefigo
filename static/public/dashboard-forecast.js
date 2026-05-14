@@ -126,6 +126,7 @@
                         return p.value && p.value[1] !== 0;
                     });
                     if (items.length === 0) return '';
+                    items.sort(function(a, b) { return b.value[1] - a.value[1]; });
                     var date = new Date(items[0].value[0]);
                     var header = date.getFullYear() + '-' + String(date.getMonth()+1).padStart(2,'0') + '-' + String(date.getDate()).padStart(2,'0');
                     var total = items.reduce(function(sum, p) { return sum + p.value[1]; }, 0);
