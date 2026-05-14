@@ -170,7 +170,11 @@ func (s *Service) GetForecastCacheForDashboard(ctx context.Context) (*ForecastDa
 	if err != nil {
 		return nil, fmt.Errorf("listing special dates: %w", err)
 	}
-	marklines := make([]Markline, 0, len(specialDates))
+	marklines := make([]Markline, 0, len(specialDates)+1)
+	marklines = append(marklines, Markline{
+		Date: date.Today().ToStdTime().UnixMilli(),
+		Name: "Today",
+	})
 	for _, sd := range specialDates {
 		marklines = append(marklines, Markline{
 			Date:  sd.Date.ToStdTime().UnixMilli(),
