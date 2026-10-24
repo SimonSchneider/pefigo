@@ -10,7 +10,7 @@ PeFi (Personal Finance) - a personal wealth management and financial forecasting
 - **Database:** SQLite (via `ncruces/go-sqlite3`), SQLC for type-safe query generation
 - **Templates:** Templ (`.templ` files generate Go code)
 - **Frontend:** HTMX (minimal JS), TailwindCSS + DaisyUI, ECharts for visualizations
-- **Architecture:** MPA with SSR, "group by feature" code organization
+- **Architecture:** MPA with SSR; `controller` / `model` / `view` packages, one file per feature within each
 
 ## Common Commands
 
@@ -44,19 +44,24 @@ Assume that the development server is running on port 3002 by the user in dev mo
 ## Project Structure
 
 ```
-cmd/main.go                        # Entry point, delegates to core.Run()
+cmd/main.go                        # Entry point, delegates to controller.Run()
 internal/
-  core/                            # Main feature code (handlers, views, services)
-    handler.go                     # HTTP route registration
+  controller/                      # HTTP layer
+    handler.go                     # Route registration and handlers
+    form.go                        # Form decoding (FromForm implementations)
     run.go                         # App startup & server config
-    service_*.go                   # Feature services
-    {feature}_view.templ           # Templ templates per feature
-  finance/                         # Financial forecasting engine (Monte Carlo, growth models)
+  model/                           # Domain logic: model.Service methods, one {feature}.go per feature
+  view/                            # Templ templates, {feature}_view.templ per feature
+    view.go                        # Aliases for the model types templates use
   pdb/                             # Generated SQLC database code (DO NOT EDIT)
-  ui/                              # UI utilities (formatting, parsing)
+pkg/
+  finance/                         # Financial forecasting engine (Monte Carlo, growth models)
   uncertain/                       # Probabilistic value handling
+  swe/                             # Swedish salary, tax, pension, ISK and parental leave rules
+  currency/                        # Currencies and exchange rates
+  ui/                              # UI utilities (formatting, parsing)
 static/
-  migrations/*.sql                 # SQLite migrations (numbered 0001-0011)
+  migrations/*.sql                 # SQLite migrations (numbered sequentially)
   public/                          # Static assets (CSS, JS, images)
 sqlc/
   queries/*.sql                    # SQL query definitions for SQLC
@@ -70,10 +75,10 @@ When adding a new feature, follow this order:
 
 1. **Database:** Add migration in `static/migrations/*.sql`, add queries in `sqlc/queries/*.sql`
 2. **Generate:** Run `make generate-watch` to create Go code from SQL and templates (templ is handled by the watcher)
-3. **Business logic:** Create `internal/core/{feature}.go` with handlers, types, and CRUD functions
-4. **Views:** Create `internal/core/{feature}_view.templ` with page, list, edit, and form components
-5. **Routes:** Register routes in `internal/core/handler.go`
-6. **Navigation:** Add nav item in `internal/core/view_main.templ`, icon in `view_icons.templ`
+3. **Business logic:** Create `internal/model/{feature}.go` with types and `Service` methods (CRUD, page data)
+4. **Views:** Create `internal/view/{feature}_view.templ` with page, list, edit, and form components; alias any new model types the templates use in `internal/view/view.go`
+5. **Routes:** Register routes and handlers in `internal/controller/handler.go`; add form decoding in `internal/controller/form.go`
+6. **Navigation:** Add nav item in `internal/view/view_main.templ`, icon in `internal/view/view_icons.templ`
 
 ## Code Patterns
 
@@ -88,7 +93,7 @@ When adding a new feature, follow this order:
 
 - Minimal JavaScript — prefer HTMX and server-side rendering
 - No explicit linter configured; use standard Go formatting (`gofmt`)
-- Tests exist in `internal/finance/` and `internal/core/` — run with `go test ./...`
+- Tests exist in `internal/model/` and `pkg/` — run with `go test ./...`
 - Avoid dependencies when possible
 - Always use Red Green TDD when doing any changes.
 
