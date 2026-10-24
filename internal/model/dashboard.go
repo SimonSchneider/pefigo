@@ -249,18 +249,50 @@ func (s *Service) buildSnapshotHistoryChart(ctx context.Context, accountTypes []
 	}, nil
 }
 
-// downsampleDates keeps every stride-th date, anchored at the latest date so
-// the bars stay evenly spaced and the most recent balance is always shown.
+// downsampleDates groups dates into calendar periods (1, 2, 3, 4 or 6 months,
+// then whole years), using the smallest period that fits within maxBars, so
+// finished periods are evenly spaced and stay put as new snapshots are added.
 func downsampleDates(dates []int64, maxBars int) []int64 {
 	if len(dates) <= maxBars || maxBars <= 1 {
 		return dates
 	}
-	n := len(dates)
-	stride := (n + maxBars - 1) / maxBars
-	count := (n-1)/stride + 1
-	out := make([]int64, count)
-	for i := range count {
-		out[count-1-i] = dates[n-1-i*stride]
+	for months := 1; ; months = nextPeriodMonths(months) {
+		if out := lastDatePerPeriod(dates, months); len(out) <= maxBars {
+			return out
+		}
+	}
+}
+
+func nextPeriodMonths(months int) int {
+	switch months {
+	case 1, 2, 3:
+		return months + 1
+	case 4:
+		return 6
+	case 6:
+		return 12
+	default:
+		return months + 12
+	}
+}
+
+// lastDatePerPeriod keeps the last date of each period, so an unfinished final
+// period shows the latest date.
+func lastDatePerPeriod(dates []int64, months int) []int64 {
+	monthIndex := func(d int64) int {
+		dd := date.Date(d)
+		return dd.Year()*12 + int(dd.Month()) - 1
+	}
+	out := make([]int64, 0)
+	prevPeriod := -1
+	for _, d := range dates {
+		period := monthIndex(d) / months
+		if period == prevPeriod {
+			out[len(out)-1] = d
+		} else {
+			out = append(out, d)
+		}
+		prevPeriod = period
 	}
 	return out
 }
