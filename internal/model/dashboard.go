@@ -249,15 +249,18 @@ func (s *Service) buildSnapshotHistoryChart(ctx context.Context, accountTypes []
 	}, nil
 }
 
+// downsampleDates keeps every stride-th date, anchored at the latest date so
+// the bars stay evenly spaced and the most recent balance is always shown.
 func downsampleDates(dates []int64, maxBars int) []int64 {
 	if len(dates) <= maxBars || maxBars <= 1 {
 		return dates
 	}
-	out := make([]int64, 0, maxBars)
 	n := len(dates)
-	for i := 0; i < maxBars; i++ {
-		idx := (n - 1) * i / (maxBars - 1)
-		out = append(out, dates[idx])
+	stride := (n + maxBars - 1) / maxBars
+	count := (n-1)/stride + 1
+	out := make([]int64, count)
+	for i := range count {
+		out[count-1-i] = dates[n-1-i*stride]
 	}
 	return out
 }
