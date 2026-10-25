@@ -107,7 +107,6 @@ func (s *Service) UpsertAccount(ctx context.Context, inp AccountInput) (Account,
 	if err != nil {
 		return Account{}, fmt.Errorf("failed to upsert account: %w", err)
 	}
-	s.invalidateForecast()
 	return accountFromDB(acc), nil
 }
 
@@ -129,7 +128,6 @@ func (s *Service) UpsertAccountWithStartupShares(ctx context.Context, inp Accoun
 			}
 		}
 	}
-	s.invalidateForecast()
 	return acc, nil
 }
 
@@ -138,7 +136,6 @@ func (s *Service) DeleteAccount(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete account: %w", err)
 	}
-	s.invalidateForecast()
 	return nil
 }
 

@@ -223,7 +223,6 @@ func (s *Service) UpsertSalary(ctx context.Context, inp Salary) (Salary, error) 
 	if err != nil {
 		return Salary{}, fmt.Errorf("upserting salary: %w", err)
 	}
-	s.invalidateForecast()
 	return salaryFromDB(sal), nil
 }
 
@@ -272,7 +271,6 @@ func (s *Service) DeleteSalary(ctx context.Context, id string) error {
 	if err := s.q.DeleteSalary(ctx, id); err != nil {
 		return fmt.Errorf("deleting salary: %w", err)
 	}
-	s.invalidateForecast()
 	return nil
 }
 
@@ -296,7 +294,6 @@ func (s *Service) UpsertSalaryAmount(ctx context.Context, inp SalaryAmount) (Sal
 	if err != nil {
 		return SalaryAmount{}, fmt.Errorf("upserting salary amount: %w", err)
 	}
-	s.invalidateForecast()
 	return salaryAmountFromDB(a)
 }
 
@@ -320,7 +317,6 @@ func (s *Service) DeleteSalaryAmount(ctx context.Context, id string) error {
 	if err := s.q.DeleteSalaryAmount(ctx, id); err != nil {
 		return fmt.Errorf("deleting salary amount: %w", err)
 	}
-	s.invalidateForecast()
 	return nil
 }
 
@@ -355,7 +351,6 @@ func (s *Service) UpsertSalaryAdjustment(ctx context.Context, inp SalaryAdjustme
 	if err != nil {
 		return SalaryAdjustment{}, fmt.Errorf("upserting salary adjustment: %w", err)
 	}
-	s.invalidateForecast()
 	return salaryAdjustmentFromDB(a), nil
 }
 
@@ -375,7 +370,6 @@ func (s *Service) DeleteSalaryAdjustment(ctx context.Context, id string) error {
 	if err := s.q.DeleteSalaryAdjustment(ctx, id); err != nil {
 		return fmt.Errorf("deleting salary adjustment: %w", err)
 	}
-	s.invalidateForecast()
 	return nil
 }
 
@@ -410,7 +404,6 @@ func (s *Service) UpsertPartialParentalLeave(ctx context.Context, inp PartialPar
 	if err != nil {
 		return PartialParentalLeave{}, fmt.Errorf("upserting partial parental leave: %w", err)
 	}
-	s.invalidateForecast()
 	return partialParentalLeaveFromDB(a), nil
 }
 
@@ -430,7 +423,6 @@ func (s *Service) DeletePartialParentalLeave(ctx context.Context, id string) err
 	if err := s.q.DeletePartialParentalLeave(ctx, id); err != nil {
 		return fmt.Errorf("deleting partial parental leave: %w", err)
 	}
-	s.invalidateForecast()
 	return nil
 }
 
@@ -461,7 +453,6 @@ func (s *Service) UpsertFullParentalLeave(ctx context.Context, inp FullParentalL
 	if err != nil {
 		return FullParentalLeave{}, fmt.Errorf("upserting full parental leave: %w", err)
 	}
-	s.invalidateForecast()
 	return fullParentalLeaveFromDB(a), nil
 }
 
@@ -481,7 +472,6 @@ func (s *Service) DeleteFullParentalLeave(ctx context.Context, id string) error 
 	if err := s.q.DeleteFullParentalLeave(ctx, id); err != nil {
 		return fmt.Errorf("deleting full parental leave: %w", err)
 	}
-	s.invalidateForecast()
 	return nil
 }
 

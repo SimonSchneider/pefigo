@@ -69,7 +69,6 @@ func (s *Service) UpsertAccountType(ctx context.Context, inp AccountTypeInput) (
 	if err != nil {
 		return AccountType{}, fmt.Errorf("failed to upsert account type: %w", err)
 	}
-	s.invalidateForecast()
 	return accountTypeFromDB(at), nil
 }
 
@@ -78,7 +77,6 @@ func (s *Service) DeleteAccountType(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete account type: %w", err)
 	}
-	s.invalidateForecast()
 	return nil
 }
 

@@ -26,12 +26,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	defer cancel()
 	logger := srvu.LogToOutput(log.New(stdout, "", log.LstdFlags|log.Lshortfile))
 
-	db, err := model.GetMigratedDB(ctx, pefigo.StaticEmbeddedFS, "static/migrations", cfg.DbURL)
+	svc, err := model.Open(ctx, pefigo.StaticEmbeddedFS, "static/migrations", cfg.DbURL)
 	if err != nil {
-		return fmt.Errorf("failed to migrate db: %w", err)
+		return fmt.Errorf("failed to open db: %w", err)
 	}
-
-	svc := model.New(db)
 
 	runner := model.NewForecastRunner(5*time.Second, func(ctx context.Context) {
 		if err := svc.RunForecastCache(ctx); err != nil {

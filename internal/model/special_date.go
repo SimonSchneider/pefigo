@@ -59,7 +59,6 @@ func (s *Service) UpsertSpecialDate(ctx context.Context, inp SpecialDateInput) (
 	if err != nil {
 		return SpecialDate{}, fmt.Errorf("failed to upsert special date: %w", err)
 	}
-	s.invalidateForecast()
 	return specialDateFromDB(sd), nil
 }
 
@@ -68,7 +67,6 @@ func (s *Service) DeleteSpecialDate(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete special date: %w", err)
 	}
-	s.invalidateForecast()
 	return nil
 }
 

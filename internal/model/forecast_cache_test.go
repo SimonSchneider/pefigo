@@ -87,56 +87,33 @@ func TestRunForecastCache(t *testing.T) {
 	}
 }
 
-func TestServiceForecastRunnerInvalidation(t *testing.T) {
+func TestForecastRunnerRecomputesStaleDashboardForecast(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()
+	seedForecastableData(t, svc)
 
-	runner := model.NewForecastRunner(50*time.Millisecond, func(ctx context.Context) {
-		svc.RunForecastCache(ctx)
+	done := make(chan error, 1)
+	runner := model.NewForecastRunner(time.Millisecond, func(ctx context.Context) {
+		select {
+		case done <- svc.RunForecastCache(ctx):
+		default:
+		}
 	})
 	svc.SetForecastRunner(runner)
 	defer runner.Stop()
 
-	// Create account type
-	at, err := svc.UpsertAccountType(ctx, model.AccountTypeInput{Name: "Savings", Color: "#00ff00"})
-	if err != nil {
-		t.Fatalf("create account type: %v", err)
+	if err := svc.SetForecastSamples(ctx, 100); err != nil {
+		t.Fatalf("set forecast samples: %v", err)
 	}
 
-	// Create account with snapshot and growth model
-	acc, err := svc.UpsertAccount(ctx, model.AccountInput{Name: "Test", TypeID: at.ID})
-	if err != nil {
-		t.Fatalf("create account: %v", err)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run forecast cache: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("forecast runner did not run after a Forecast Input write")
 	}
-	_, err = svc.UpsertAccountSnapshot(ctx, acc.ID, model.AccountSnapshotInput{
-		Date:    mustParseDate("2026-01-01"),
-		Balance: newFixedValue(10000),
-	})
-	if err != nil {
-		t.Fatalf("create snapshot: %v", err)
-	}
-	_, err = svc.UpsertAccountGrowthModel(ctx, model.AccountGrowthModelInput{
-		AccountID:        acc.ID,
-		Type:             "fixed",
-		AnnualRate:       newFixedValue(0.05),
-		AnnualVolatility: newFixedValue(0),
-		StartDate:        mustParseDate("2026-01-01"),
-	})
-	if err != nil {
-		t.Fatalf("create growth model: %v", err)
-	}
-
-	// Add special date
-	_, err = svc.UpsertSpecialDate(ctx, model.SpecialDateInput{
-		Name: "Target",
-		Date: mustParseDate("2028-01-01"),
-	})
-	if err != nil {
-		t.Fatalf("create special date: %v", err)
-	}
-
-	// Wait for debounce + forecast run
-	time.Sleep(500 * time.Millisecond)
 
 	// Verify cache was populated by the runner
 	rows, err := svc.ListForecastCache(ctx)

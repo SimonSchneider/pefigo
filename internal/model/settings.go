@@ -64,7 +64,6 @@ func (s *Service) SetForecastConfidence(ctx context.Context, confidence float64)
 	}); err != nil {
 		return err
 	}
-	s.invalidateForecast()
 	return nil
 }
 
@@ -93,7 +92,6 @@ func (s *Service) SetForecastSamples(ctx context.Context, samples int64) error {
 	}); err != nil {
 		return err
 	}
-	s.invalidateForecast()
 	return nil
 }
 
@@ -119,6 +117,5 @@ func (s *Service) SetForecastSnapshotInterval(ctx context.Context, interval stri
 	}); err != nil {
 		return err
 	}
-	s.invalidateForecast()
 	return nil
 }

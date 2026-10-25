@@ -258,7 +258,6 @@ func (s *Service) UpsertInvestmentRound(ctx context.Context, inp InvestmentRound
 	if err != nil {
 		return InvestmentRound{}, fmt.Errorf("failed to upsert investment round: %w", err)
 	}
-	s.invalidateForecast()
 	return investmentRoundFromDB(ir), nil
 }
 
@@ -300,7 +299,6 @@ func (s *Service) DeleteInvestmentRound(ctx context.Context, id string) error {
 	if err := s.q.DeleteInvestmentRound(ctx, id); err != nil {
 		return fmt.Errorf("failed to delete investment round: %w", err)
 	}
-	s.invalidateForecast()
 	return nil
 }
 
@@ -320,7 +318,6 @@ func (s *Service) UpsertShareChange(ctx context.Context, inp ShareChangeInput) (
 	if err != nil {
 		return ShareChange{}, fmt.Errorf("failed to upsert share change: %w", err)
 	}
-	s.invalidateForecast()
 	return shareChangeFromDB(sc), nil
 }
 
@@ -348,7 +345,6 @@ func (s *Service) DeleteShareChange(ctx context.Context, id string) error {
 	if err := s.q.DeleteShareChange(ctx, id); err != nil {
 		return fmt.Errorf("failed to delete share change: %w", err)
 	}
-	s.invalidateForecast()
 	return nil
 }
 
@@ -401,7 +397,6 @@ func (s *Service) UpsertStartupShareOption(ctx context.Context, inp StartupShare
 	if err != nil {
 		return StartupShareOption{}, fmt.Errorf("failed to upsert startup share option: %w", err)
 	}
-	s.invalidateForecast()
 	return startupShareOptionFromDB(opt), nil
 }
 
@@ -429,7 +424,6 @@ func (s *Service) DeleteStartupShareOption(ctx context.Context, id string) error
 	if err := s.q.DeleteStartupShareOption(ctx, id); err != nil {
 		return fmt.Errorf("failed to delete startup share option: %w", err)
 	}
-	s.invalidateForecast()
 	return nil
 }
 
