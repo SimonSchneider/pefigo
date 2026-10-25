@@ -11,6 +11,7 @@ import (
 	"github.com/SimonSchneider/pefigo/internal/pdb"
 	"github.com/SimonSchneider/pefigo/pkg/currency"
 	"github.com/SimonSchneider/pefigo/pkg/swe"
+	"github.com/ncruces/go-sqlite3/driver"
 )
 
 type Service struct {
@@ -18,21 +19,21 @@ type Service struct {
 	q              *pdb.Queries
 	sweClient      *swe.Client
 	currencyClient *currency.Client
-	forecastRunner *ForecastRunner
+	forecastInputs *forecastInputWatcher
 }
 
+// SetForecastRunner sets the runner that recomputes the Dashboard Forecast whenever it becomes Stale.
 func (s *Service) SetForecastRunner(runner *ForecastRunner) {
-	s.forecastRunner = runner
+	s.forecastInputs.runner.Store(runner)
 }
 
 func (s *Service) ForecastRunner() *ForecastRunner {
-	return s.forecastRunner
+	return s.forecastInputs.runner.Load()
 }
 
-func (s *Service) invalidateForecast() {
-	if s.forecastRunner != nil {
-		s.forecastRunner.Invalidate()
-	}
+// ForecastInputGeneration advances every time a Forecast Input is written.
+func (s *Service) ForecastInputGeneration() uint64 {
+	return s.forecastInputs.generation.Load()
 }
 
 type ServiceOption func(*Service)
@@ -44,7 +45,23 @@ func WithCurrencyOptions(opts ...currency.ClientOption) ServiceOption {
 	}
 }
 
-func New(db *sql.DB, opts ...ServiceOption) *Service {
+// Open opens and migrates the SQLite database at conn, with the migrations in dir under path, and
+// returns a Service on it. Writes to Forecast Inputs are detected on every pooled connection.
+func Open(ctx context.Context, dir fs.FS, path string, conn string, opts ...ServiceOption) (*Service, error) {
+	forecastInputs := &forecastInputWatcher{}
+	db, err := driver.Open(conn, forecastInputs.register)
+	if err != nil {
+		return nil, err
+	}
+	migrations, err := fs.Sub(dir, path)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := migrate.Migrate(ctx, migrations, db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	cache := NewSQLiteCache(db)
 	ttlCache := NewTTLSQLiteCache(db)
 	s := &Service{
@@ -52,11 +69,12 @@ func New(db *sql.DB, opts ...ServiceOption) *Service {
 		q:              pdb.New(db),
 		sweClient:      swe.NewClient(cache),
 		currencyClient: currency.NewClient(ttlCache),
+		forecastInputs: forecastInputs,
 	}
 	for _, o := range opts {
 		o(s)
 	}
-	return s
+	return s, nil
 }
 
 func (s *Service) SweClient() *swe.Client {
@@ -76,21 +94,6 @@ type Config struct {
 func ParseConfig(args []string, getEnv func(string) string) (cfg Config, err error) {
 	err = config.ParseInto(&cfg, flag.NewFlagSet("", flag.ExitOnError), args, getEnv)
 	return cfg, err
-}
-
-func GetMigratedDB(ctx context.Context, dir fs.FS, path string, conn string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", conn)
-	if err != nil {
-		return nil, err
-	}
-	migrations, err := fs.Sub(dir, path)
-	if err != nil {
-		return nil, err
-	}
-	if err := migrate.Migrate(ctx, migrations, db); err != nil {
-		return nil, err
-	}
-	return db, nil
 }
 
 func KeyBy[T any](items []T, key func(T) string) map[string]T {

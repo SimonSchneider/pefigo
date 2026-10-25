@@ -67,10 +67,11 @@ func (s *Service) RunForecastCache(ctx context.Context) error {
 		return fmt.Errorf("deleting old forecast cache: %w", err)
 	}
 
+	runner := s.ForecastRunner()
 	handler := &forecastCacheEventHandler{
 		ctx:    ctx,
 		q:      s.q,
-		runner: s.forecastRunner,
+		runner: runner,
 	}
 
 	params := PredictionParams{
@@ -85,8 +86,8 @@ func (s *Service) RunForecastCache(ctx context.Context) error {
 		return fmt.Errorf("running prediction for forecast cache: %w", err)
 	}
 
-	if s.forecastRunner != nil {
-		s.forecastRunner.Broadcast(ForecastEvent{Type: ForecastEventDone})
+	if runner != nil {
+		runner.Broadcast(ForecastEvent{Type: ForecastEventDone})
 	}
 
 	return nil

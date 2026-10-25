@@ -142,7 +142,6 @@ func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTempla
 	if err != nil {
 		return TransferTemplate{}, fmt.Errorf("failed to upsert template: %w", err)
 	}
-	s.invalidateForecast()
 	return transferTemplateFromDB(t)
 }
 
@@ -307,6 +306,5 @@ func (s *Service) DeleteTransferTemplate(ctx context.Context, id string) error {
 	if err := s.q.DeleteTransferTemplate(ctx, id); err != nil {
 		return fmt.Errorf("failed to delete template: %w", err)
 	}
-	s.invalidateForecast()
 	return nil
 }

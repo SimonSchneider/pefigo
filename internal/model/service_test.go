@@ -42,12 +42,12 @@ func mustParseDate(s string) date.Date {
 
 func newTestService(t *testing.T) *model.Service {
 	t.Helper()
-	db, err := model.GetMigratedDB(t.Context(), pefigo.StaticEmbeddedFS, "static/migrations", ":memory:")
+	svc, err := model.Open(t.Context(), pefigo.StaticEmbeddedFS, "static/migrations", ":memory:")
 	if err != nil {
 		t.Fatalf("failed to create test db: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
-	return model.New(db)
+	t.Cleanup(func() { svc.DB().Close() })
+	return svc
 }
 
 // ---- Account Type CRUD ----
@@ -3492,12 +3492,12 @@ func newTestServiceWithCurrencyServer(t *testing.T, handler http.Handler) *model
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	db, err := model.GetMigratedDB(t.Context(), pefigo.StaticEmbeddedFS, "static/migrations", ":memory:")
+	svc, err := model.Open(t.Context(), pefigo.StaticEmbeddedFS, "static/migrations", ":memory:", model.WithCurrencyOptions(currency.WithBaseURL(srv.URL)))
 	if err != nil {
 		t.Fatalf("failed to create test db: %v", err)
 	}
-	t.Cleanup(func() { db.Close() })
-	return model.New(db, model.WithCurrencyOptions(currency.WithBaseURL(srv.URL)))
+	t.Cleanup(func() { svc.DB().Close() })
+	return svc
 }
 
 func TestBillWithForeignCurrencyE2E(t *testing.T) {
