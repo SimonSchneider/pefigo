@@ -55,7 +55,7 @@ git push -u origin HEAD
 gh pr create --title "<title>" --body-file <body.md>
 ```
 
-- Write the body with the `pr` skill and start it with `Fixes #<NUMBER>`, so GitHub links the PR and closes the issue on merge.
+- Write the body as CLAUDE.md's "Pull requests" section says, and start it with `Fixes #<NUMBER>`, so GitHub links the PR and closes the issue on merge.
 - Add `--draft` when the user asks for a draft PR.
 - With several remotes or a fork, name the target with `--repo OWNER/REPO`.
 
@@ -65,7 +65,7 @@ Give the user the PR URL and say that it closes #<NUMBER> on merge.
 
 ### 7. Update the PR after every change
 
-When an update is finished (review feedback, a requested change, a follow-up fix): `make ci-pr` passes, commit, `git push`, then rewrite the body so its Summary, Evidence and Merge Danger describe the PR as it now stands:
+When an update is finished (review feedback, a requested change, a follow-up fix): `make ci-pr` passes, commit, `git push`, then rewrite the body so it describes the PR as it now stands:
 
 ```bash
 gh pr edit <PR> --body-file <body.md>

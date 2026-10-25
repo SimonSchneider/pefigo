@@ -101,7 +101,7 @@ When adding a new feature, follow this order:
 
 Finished work ends as a pushed PR, without waiting to be asked. Before every push, run `make ci-pr` (tests, formatting, build, bench, Docker image) until it passes.
 
-- **Finished an implementation:** commit, push the branch and open a PR. Write the body with the `pr` skill.
+- **Finished an implementation:** commit, push the branch and open a PR. Write the body with the `pr` skill. Where that skill isn't installed, use its three sections: **Summary** (the smallest diagram, call tree or diff sketch that shows the change), **Evidence** (before and after, as screenshots or test runs) and **Merge Danger** (one-way or two-way door, and the blast radius).
 - **Finished an update to an open PR** (review feedback, follow-up changes): commit, push to the PR's branch, then rewrite the body with `gh pr edit <number> --body-file <file>` so its Summary, Evidence and Merge Danger describe the PR as it now stands.
 
 ## Agent skills
