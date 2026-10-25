@@ -97,9 +97,12 @@ When adding a new feature, follow this order:
 - Avoid dependencies when possible
 - Always use Red Green TDD when doing any changes.
 
-## Before creating a PR
+## Pull requests
 
-Ensure the CI will pass by running `make ci-pr` locally, which runs all checks including tests, formatting, and build verification. This helps catch issues early and ensures a smooth review process.
+Finished work ends as a pushed PR, without waiting to be asked. Before every push, run `make ci-pr` (tests, formatting, build, bench, Docker image) until it passes.
+
+- **Finished an implementation:** commit, push the branch and open a PR. Write the body with the `pr` skill.
+- **Finished an update to an open PR** (review feedback, follow-up changes): commit, push to the PR's branch, then rewrite the body with `gh pr edit <number> --body-file <file>` so its Summary, Evidence and Merge Danger describe the PR as it now stands.
 
 ## Agent skills
 
