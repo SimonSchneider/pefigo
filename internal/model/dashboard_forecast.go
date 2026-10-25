@@ -452,8 +452,9 @@ type ForecastDashboardData struct {
 }
 
 // GetDashboardForecastHistory returns a series for Uncategorized and every Account Type that has
-// Balance History or appears in rows, in the order of the Account Types with Uncategorized last.
-// A series holds its Balance History only: its forecast points are rows.
+// Balance History or forecast points, in the order of the Account Types with Uncategorized last.
+// Forecast points are in rows, or still to come for an Account Type with an account the
+// prediction projects. A series holds its Balance History only: its forecast points are rows.
 func (s *Service) GetDashboardForecastHistory(ctx context.Context, rows []ForecastCacheRow) (*ForecastDashboardData, error) {
 	accountTypes, err := s.ListAccountTypes(ctx)
 	if err != nil {
@@ -464,7 +465,14 @@ func (s *Service) GetDashboardForecastHistory(ctx context.Context, rows []Foreca
 	if err != nil {
 		return nil, fmt.Errorf("building balance history: %w", err)
 	}
+	projected, err := s.q.ListProjectedAccountTypeIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing projected account types: %w", err)
+	}
 	forecast := make(map[string]bool)
+	for _, typeID := range projected {
+		forecast[typeID] = true
+	}
 	for _, row := range rows {
 		forecast[row.AccountTypeID] = true
 	}

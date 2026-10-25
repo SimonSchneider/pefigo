@@ -583,3 +583,27 @@ func TestDashboardForecastStreamSendsEveryPointAsADateAndABalance(t *testing.T) 
 	}
 	stream.expectEnd()
 }
+
+func TestDashboardForecastStreamWhenIdleSendsTheSeriesTheForecastProjects(t *testing.T) {
+	fx := newStreamFixture(t)
+	acc, err := fx.svc.UpsertAccount(t.Context(), model.AccountInput{Name: "Future pension", TypeID: fx.pension.ID})
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	if _, err := fx.svc.UpsertAccountSnapshot(t.Context(), acc.ID, model.AccountSnapshotInput{Date: date.Today().Add(30 * date.Day), Balance: uncertain.NewFixed(500)}); err != nil {
+		t.Fatalf("create snapshot: %v", err)
+	}
+	rows := forecastRows(fx.pension.ID, 2)
+	fx.compute = emitting(rows, nil)
+
+	stream := fx.connect(t)
+	// Pension has no history and no stored rows yet, but the Forecast Run will fill it.
+	fx.expectHistory(stream, fx.pensionEntity(), fx.savingsEntity(t))
+	fx.timers.fire()
+	fx.stop()
+
+	stream.expect("started")
+	expectSnapshots(stream, rows...)
+	stream.expect("done")
+	stream.expectEnd()
+}

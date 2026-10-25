@@ -881,6 +881,47 @@ func (q *Queries) ListLatestSnapshotPerAccount(ctx context.Context) ([]AccountSn
 	return items, nil
 }
 
+const listProjectedAccountTypeIDs = `-- name: ListProjectedAccountTypeIDs :many
+SELECT DISTINCT COALESCE(a.type_id, '') AS type_id
+FROM account a
+WHERE EXISTS (
+    SELECT 1
+    FROM account_snapshot s
+    WHERE s.account_id = a.id
+  )
+  OR EXISTS (
+    SELECT 1
+    FROM startup_share_account ssa
+    WHERE ssa.account_id = a.id
+  )
+ORDER BY type_id
+`
+
+// Returns the type_id of every account a prediction projects: one with a snapshot, or a Startup
+// Share account. Accounts without a type have ”.
+func (q *Queries) ListProjectedAccountTypeIDs(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectedAccountTypeIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var type_id string
+		if err := rows.Scan(&type_id); err != nil {
+			return nil, err
+		}
+		items = append(items, type_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listShareChanges = `-- name: ListShareChanges :many
 SELECT id, account_id, date, delta_shares, total_price, created_at, updated_at
 FROM share_change

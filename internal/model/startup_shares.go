@@ -478,7 +478,7 @@ func (s *Service) listStartupShareHistories(ctx context.Context, withSnapshots m
 
 // balanceOn is the account's balance on day, the mean of the value derived from its latest
 // investment round and its share changes on or before day. ok is false when there is no such
-// investment round, or it has no shares.
+// investment round, or it has no shares or no price per share.
 func (h *startupShareHistory) balanceOn(ucfg *uncertain.Config, day date.Date) (balance float64, ok bool) {
 	var best *pdb.ListStartupShareSnapshotHistoryRow
 	for i := range h.rounds {
@@ -490,7 +490,7 @@ func (h *startupShareHistory) balanceOn(ucfg *uncertain.Config, day date.Date) (
 		return 0, false
 	}
 	postMoneyValuation, postMoneyShares := PostMoneyValuationAndShares(best.Valuation, best.PreMoneyShares, best.Investment)
-	if postMoneyShares <= 0 {
+	if !(postMoneyShares > 0) { // NaN when the round has neither a valuation nor an investment
 		return 0, false
 	}
 	sharesOwned, avgPurchasePrice := DeriveShareState(h.shareChanges, day)
