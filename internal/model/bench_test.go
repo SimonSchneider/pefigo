@@ -11,11 +11,12 @@ import (
 
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/embed"
+	"github.com/ncruces/go-sqlite3/vfs/memdb"
 )
 
 func newBenchService(b *testing.B) *model.Service {
 	b.Helper()
-	svc, err := model.Open(context.Background(), pefigo.StaticEmbeddedFS, "static/migrations", ":memory:")
+	svc, err := model.Open(context.Background(), pefigo.StaticEmbeddedFS, "static/migrations", memdb.TestDB(b))
 	if err != nil {
 		b.Fatalf("failed to create bench db: %v", err)
 	}

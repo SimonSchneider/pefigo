@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/embed"
+	"github.com/ncruces/go-sqlite3/vfs/memdb"
 )
 
 func newFixedValue(v float64) uncertain.Value {
@@ -42,12 +43,28 @@ func mustParseDate(s string) date.Date {
 
 func newTestService(t *testing.T) *model.Service {
 	t.Helper()
-	svc, err := model.Open(t.Context(), pefigo.StaticEmbeddedFS, "static/migrations", ":memory:")
+	svc, err := model.Open(t.Context(), pefigo.StaticEmbeddedFS, "static/migrations", memdb.TestDB(t))
 	if err != nil {
 		t.Fatalf("failed to create test db: %v", err)
 	}
 	t.Cleanup(func() { svc.DB().Close() })
 	return svc
+}
+
+func TestTestServiceConnectionsShareOneDatabase(t *testing.T) {
+	svc := newTestService(t)
+	ctx := t.Context()
+
+	// Hold one pooled connection so the Service has to open another, as a background forecast run does.
+	conn, err := svc.DB().Conn(ctx)
+	if err != nil {
+		t.Fatalf("get connection: %v", err)
+	}
+	defer conn.Close()
+
+	if _, err := svc.UpsertAccountType(ctx, model.AccountTypeInput{Name: "Savings", Color: "#00ff00"}); err != nil {
+		t.Fatalf("create account type on a second connection: %v", err)
+	}
 }
 
 // ---- Account Type CRUD ----
@@ -3492,7 +3509,7 @@ func newTestServiceWithCurrencyServer(t *testing.T, handler http.Handler) *model
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	svc, err := model.Open(t.Context(), pefigo.StaticEmbeddedFS, "static/migrations", ":memory:", model.WithCurrencyOptions(currency.WithBaseURL(srv.URL)))
+	svc, err := model.Open(t.Context(), pefigo.StaticEmbeddedFS, "static/migrations", memdb.TestDB(t), model.WithCurrencyOptions(currency.WithBaseURL(srv.URL)))
 	if err != nil {
 		t.Fatalf("failed to create test db: %v", err)
 	}
