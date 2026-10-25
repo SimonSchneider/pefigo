@@ -12,7 +12,7 @@ import (
 )
 
 // recordedBalance is the balance of an account recorded on one day: a snapshot, or the value of a
-// Startup Share account without snapshots on the day of an investment round or share change.
+// Startup Share account without snapshots on a day any other account's snapshot was recorded.
 type recordedBalance struct {
 	accountID string
 	typeID    string // "" for Uncategorized
@@ -59,7 +59,8 @@ func (s *Service) balanceHistory(ctx context.Context, today date.Date) (map[stri
 }
 
 // recordedBalances are the balances of every account recorded on or before today, by day. A
-// Startup Share account counts at its derived value only when it has no snapshots.
+// Startup Share account without snapshots counts at its derived value on every day a snapshot was
+// recorded, so that day's total includes it.
 func (s *Service) recordedBalances(ctx context.Context, today date.Date) ([]recordedBalance, error) {
 	rows, err := s.q.ListSnapshotHistoryWithType(ctx)
 	if err != nil {
@@ -67,11 +68,13 @@ func (s *Service) recordedBalances(ctx context.Context, today date.Date) ([]reco
 	}
 	recorded := make([]recordedBalance, 0, len(rows))
 	withSnapshots := make(map[string]struct{})
+	var snapshotDays []date.Date
 	for _, r := range rows {
 		withSnapshots[r.AccountID] = struct{}{}
 		if date.Date(r.Date).After(today) {
 			continue
 		}
+		snapshotDays = append(snapshotDays, date.Date(r.Date))
 		var v uncertain.Value
 		if err := v.Decode(r.Balance); err != nil {
 			return nil, fmt.Errorf("decoding balance: %w", err)
@@ -83,10 +86,12 @@ func (s *Service) recordedBalances(ctx context.Context, today date.Date) ([]reco
 	if err != nil {
 		return nil, err
 	}
+	slices.Sort(snapshotDays)
+	snapshotDays = slices.Compact(snapshotDays)
 	ucfg := uncertain.NewConfig(0, 1)
 	for _, accountID := range slices.Sorted(maps.Keys(startupAccounts)) {
 		sa := startupAccounts[accountID]
-		for _, day := range sa.recordedDays(today) {
+		for _, day := range snapshotDays {
 			if balance, ok := sa.balanceOn(ucfg, day); ok {
 				recorded = append(recorded, recordedBalance{accountID: accountID, typeID: sa.typeID, day: day, balance: balance})
 			}

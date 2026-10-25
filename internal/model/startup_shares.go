@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/SimonSchneider/goslu/date"
@@ -504,20 +503,4 @@ func (h *startupShareHistory) balanceOn(ucfg *uncertain.Config, day date.Date) (
 		postMoneyShares,
 		best.ValuationDiscountFactor,
 	).Mean(), true
-}
-
-// recordedDays are the days of the account's investment rounds and share changes up to today, in
-// order.
-func (h *startupShareHistory) recordedDays(today date.Date) []date.Date {
-	days := make([]date.Date, 0, len(h.rounds)+len(h.shareChanges))
-	for _, r := range h.rounds {
-		days = append(days, date.Date(r.Date))
-	}
-	for _, sc := range h.shareChanges {
-		days = append(days, sc.Date)
-	}
-	slices.Sort(days)
-	days = slices.Compact(days)
-	end, _ := slices.BinarySearch(days, today+1)
-	return days[:end]
 }

@@ -184,11 +184,15 @@ func TestDashboardForecastHistoryEndsToday(t *testing.T) {
 	expectHistory(t, seriesByID(data)[savings.ID], points(mustParseDate("2025-01-01"), 1000.0, today, 2000.0))
 }
 
-func TestDashboardForecastHistoryDerivesAStartupShareAccountFromItsFirstInvestmentRound(t *testing.T) {
+func TestDashboardForecastHistoryValuesAStartupShareAccountOnEverySnapshotDay(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()
 	equity := mustAccountType(t, svc, "Equity", "#ff00ff")
 	acc := mustTypedAccount(t, svc, "Startup", equity.ID)
+	savings := mustTypedAccount(t, svc, "Savings", mustAccountType(t, svc, "Savings", "#00ff00").ID)
+	for _, d := range []date.Date{mustParseDate("2025-01-15"), mustParseDate("2025-02-15"), mustParseDate("2025-03-01"), mustParseDate("2025-04-15"), date.Today().Add(10 * date.Day)} {
+		mustSnapshot(t, svc, savings.ID, d, 1000)
+	}
 	if _, err := svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: acc.ID, TaxRate: 0, ValuationDiscountFactor: 1}); err != nil {
 		t.Fatalf("create startup share account: %v", err)
 	}
@@ -214,12 +218,13 @@ func TestDashboardForecastHistoryDerivesAStartupShareAccountFromItsFirstInvestme
 
 	data := dashboardForecastHistory(t, svc, nil)
 
-	// 10 of 1000 shares at a valuation of 1M, then 2M, then 20 shares at 2M. The share change before
-	// the first investment round has no value, and the round after today isn't history.
+	// On each snapshot day, so that day's total includes it: 10 of 1000 shares at a valuation of 1M,
+	// then 2M, then 20 shares at 2M. It has no value before its first investment round, and the
+	// snapshot and round after today aren't history.
 	expectHistory(t, seriesByID(data)[equity.ID], points(
-		mustParseDate("2025-02-01"), 10000.0,
+		mustParseDate("2025-02-15"), 10000.0,
 		mustParseDate("2025-03-01"), 20000.0,
-		mustParseDate("2025-04-01"), 40000.0,
+		mustParseDate("2025-04-15"), 40000.0,
 	))
 }
 
