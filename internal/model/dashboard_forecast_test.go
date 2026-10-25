@@ -259,7 +259,7 @@ func expectSameRows(t *testing.T, got, want []model.ForecastCacheRow) {
 func emitSnapshot(h model.PredictionEventHandler, typeID string, i int) error {
 	return h.Snapshot(model.PredictionBalanceSnapshot{
 		ID:         typeID,
-		Day:        int64(i+1) * 86_400_000,
+		Day:        date.Today().Add(date.Duration(i+1) * date.Day),
 		Balance:    float64(1000 * (i + 1)),
 		LowerBound: float64(900 * (i + 1)),
 		UpperBound: float64(1100 * (i + 1)),
@@ -345,8 +345,8 @@ func TestDashboardForecastRunWithTheServiceStoresTheForecast(t *testing.T) {
 	}
 	streamed := snapshotRows(got)
 	for _, row := range streamed {
-		if row.AccountTypeID == at.ID && row.Median <= 0 {
-			t.Fatalf("expected a positive median for %s, got %f", at.ID, row.Median)
+		if row.AccountTypeID == at.ID && row.Balance <= 0 {
+			t.Fatalf("expected a positive balance for %s, got %f", at.ID, row.Balance)
 		}
 	}
 	if !slices.ContainsFunc(streamed, func(row model.ForecastCacheRow) bool { return row.AccountTypeID == at.ID }) {
@@ -368,9 +368,6 @@ func TestDashboardForecastRunPredictsUntilTheLastSpecialDate(t *testing.T) {
 			t.Fatalf("create special date: %v", err)
 		}
 	}
-	if err := svc.SetForecastConfidence(ctx, 0.9); err != nil {
-		t.Fatalf("set forecast confidence: %v", err)
-	}
 	if err := svc.SetForecastSamples(ctx, 123); err != nil {
 		t.Fatalf("set forecast samples: %v", err)
 	}
@@ -383,7 +380,6 @@ func TestDashboardForecastRunPredictsUntilTheLastSpecialDate(t *testing.T) {
 	want := model.PredictionParams{
 		Duration:         last.Sub(date.Today()),
 		Samples:          123,
-		Quantile:         0.9,
 		SnapshotInterval: date.Cron("*-*-15"),
 		GroupBy:          model.GroupByType,
 	}
@@ -838,5 +834,42 @@ func TestDashboardForecastDisconnectsASubscriberThatFallsBehind(t *testing.T) {
 	slow.Unsubscribe()
 	if status := subscribe(t, svc).Status; status.State != model.ForecastStateDone {
 		t.Fatalf("expected the Forecast Run to complete, got %+v", status)
+	}
+}
+
+func TestMigratingTheDashboardForecastToDaysClearsItAndTheConfidenceSetting(t *testing.T) {
+	ctx := t.Context()
+	conn := memdb.TestDB(t)
+	old, err := model.Open(ctx, migrationsBefore(t, "0030"), "static/migrations", conn)
+	if err != nil {
+		t.Fatalf("open database before the Dashboard Forecast is stored in days: %v", err)
+	}
+	if _, err := old.DB().ExecContext(ctx, `INSERT INTO forecast_cache (date, account_type_id, median, lower_bound, upper_bound) VALUES (?, 'savings', 1000, 900, 1100)`,
+		date.Today().Add(date.Day).ToStdTime().UnixMilli()); err != nil {
+		t.Fatalf("store a Dashboard Forecast row in milliseconds: %v", err)
+	}
+	if _, err := old.DB().ExecContext(ctx, `INSERT INTO app_setting (key, value) VALUES ('forecast_confidence', '0.9')`); err != nil {
+		t.Fatalf("store the forecast confidence: %v", err)
+	}
+	if err := old.SetForecastSamples(ctx, 500); err != nil {
+		t.Fatalf("set forecast samples: %v", err)
+	}
+	old.DB().Close()
+
+	svc, err := model.Open(ctx, pefigo.StaticEmbeddedFS, "static/migrations", conn)
+	if err != nil {
+		t.Fatalf("migrate the Dashboard Forecast to days: %v", err)
+	}
+	t.Cleanup(func() { svc.DB().Close() })
+
+	if rows := subscribe(t, svc).Rows; len(rows) != 0 {
+		t.Fatalf("expected the Dashboard Forecast to be cleared, got %v", rows)
+	}
+	var confidence int
+	if err := svc.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM app_setting WHERE key = 'forecast_confidence'`).Scan(&confidence); err != nil || confidence != 0 {
+		t.Fatalf("expected the forecast confidence setting to be deleted, got %d (%v)", confidence, err)
+	}
+	if samples, err := svc.GetForecastSamples(ctx); err != nil || samples != 500 {
+		t.Fatalf("expected the other forecast settings to be kept, got %d samples (%v)", samples, err)
 	}
 }

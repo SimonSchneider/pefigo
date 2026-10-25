@@ -86,9 +86,7 @@ type FaviconCache struct {
 type ForecastCache struct {
 	Date          int64
 	AccountTypeID string
-	Median        float64
-	LowerBound    float64
-	UpperBound    float64
+	Balance       float64
 }
 
 type FullParentalLeave struct {

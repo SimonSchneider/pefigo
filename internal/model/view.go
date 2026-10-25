@@ -210,7 +210,6 @@ type SettingsPageView struct {
 	SweYearlyParams          []SweYearlyParams
 	CurrentCurrency          string
 	Currencies               []currency.Currency
-	ForecastConfidence       float64
 	ForecastSamples          int64
 	ForecastSnapshotInterval string
 }
@@ -236,10 +235,6 @@ func (s *Service) GetSettingsPageData(ctx context.Context) (*SettingsPageView, e
 	if err != nil {
 		return nil, fmt.Errorf("getting default currency: %w", err)
 	}
-	forecastConfidence, err := s.GetForecastConfidence(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("getting forecast confidence: %w", err)
-	}
 	forecastSamples, err := s.GetForecastSamples(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("getting forecast samples: %w", err)
@@ -255,7 +250,6 @@ func (s *Service) GetSettingsPageData(ctx context.Context) (*SettingsPageView, e
 		SweYearlyParams:          ibbs,
 		CurrentCurrency:          cur,
 		Currencies:               currency.SupportedCurrencies(),
-		ForecastConfidence:       forecastConfidence,
 		ForecastSamples:          forecastSamples,
 		ForecastSnapshotInterval: forecastSnapshotInterval,
 	}, nil

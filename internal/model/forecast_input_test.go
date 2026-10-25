@@ -135,9 +135,6 @@ func forecastInputMutations() []forecastInputMutation {
 		{"SetDefaultCurrency", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.SetDefaultCurrency(ctx, "EUR")
 		}},
-		{"SetForecastConfidence", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return svc.SetForecastConfidence(ctx, 0.9)
-		}},
 		{"SetForecastSamples", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.SetForecastSamples(ctx, 500)
 		}},

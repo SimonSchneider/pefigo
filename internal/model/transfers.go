@@ -313,11 +313,7 @@ func (s *Service) GetTransferChartData(ctx context.Context, groupBy TransferChar
 	if groupBy == GroupByAccountType {
 		for _, a := range accounts {
 			if a.TypeID == "" {
-				accountTypesById[""] = AccountType{
-					ID:    "",
-					Name:  "unknown",
-					Color: "",
-				}
+				accountTypesById[""] = uncategorized
 				break
 			}
 		}
@@ -333,7 +329,7 @@ func (s *Service) GetTransferChartData(ctx context.Context, groupBy TransferChar
 			if at, exists := accountTypesById[typeID]; exists {
 				accountTypeSet[typeID] = at
 			} else {
-				accountTypeSet[""] = AccountType{ID: "", Name: "unknown", Color: ""}
+				accountTypeSet[""] = uncategorized
 			}
 		}
 
@@ -352,7 +348,7 @@ func (s *Service) GetTransferChartData(ctx context.Context, groupBy TransferChar
 			if at, exists := accountTypesById[typeID]; exists {
 				accountToNodeName[a.ID] = at.Name
 			} else {
-				accountToNodeName[a.ID] = "unknown"
+				accountToNodeName[a.ID] = uncategorized.Name
 			}
 		}
 	} else {
@@ -361,7 +357,7 @@ func (s *Service) GetTransferChartData(ctx context.Context, groupBy TransferChar
 			typeID := a.TypeID
 			at, exists := accountTypesById[typeID]
 			if !exists {
-				at = AccountType{ID: "", Name: "unknown", Color: ""}
+				at = uncategorized
 			}
 			chartData = append(chartData, TransferChartDataNode{
 				Name:      a.Name,

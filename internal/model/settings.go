@@ -13,7 +13,6 @@ import (
 
 const (
 	settingDefaultCurrency          = "default_currency"
-	settingForecastConfidence       = "forecast_confidence"
 	settingForecastSamples          = "forecast_samples"
 	settingForecastSnapshotInterval = "forecast_snapshot_interval"
 )
@@ -35,34 +34,6 @@ func (s *Service) SetDefaultCurrency(ctx context.Context, code string) error {
 		Value: code,
 	}); err != nil {
 		return fmt.Errorf("setting default currency: %w", err)
-	}
-	return nil
-}
-
-func (s *Service) GetForecastConfidence(ctx context.Context) (float64, error) {
-	val, err := s.q.GetSetting(ctx, settingForecastConfidence)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0.80, nil
-	}
-	if err != nil {
-		return 0, fmt.Errorf("getting forecast confidence: %w", err)
-	}
-	f, err := strconv.ParseFloat(val, 64)
-	if err != nil {
-		return 0, fmt.Errorf("parsing forecast confidence: %w", err)
-	}
-	return f, nil
-}
-
-func (s *Service) SetForecastConfidence(ctx context.Context, confidence float64) error {
-	if confidence <= 0 || confidence >= 1 {
-		return fmt.Errorf("confidence must be between 0 and 1 (exclusive), got %f", confidence)
-	}
-	if err := s.q.UpsertSetting(ctx, pdb.UpsertSettingParams{
-		Key:   settingForecastConfidence,
-		Value: strconv.FormatFloat(confidence, 'f', -1, 64),
-	}); err != nil {
-		return err
 	}
 	return nil
 }

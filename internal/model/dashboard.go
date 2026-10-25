@@ -7,7 +7,6 @@ import (
 	"sort"
 
 	"github.com/SimonSchneider/goslu/date"
-	"github.com/SimonSchneider/pefigo/internal/pdb"
 	"github.com/SimonSchneider/pefigo/pkg/uncertain"
 )
 
@@ -32,8 +31,6 @@ type SnapshotHistorySeries struct {
 	Name  string    `json:"name"`
 	Color string    `json:"color"`
 	Data  []float64 `json:"data"`
-
-	typeID string // the Account Type, or "" for accounts without one
 }
 
 type SnapshotHistoryChartData struct {
@@ -141,59 +138,15 @@ func (s *Service) buildSnapshotHistoryChart(ctx context.Context, accountTypes []
 	const snapshotHistoryMaxBars = 24
 	dates = downsampleDates(dates, snapshotHistoryMaxBars)
 
-	startupRows, err := q.ListStartupShareSnapshotHistory(ctx)
+	startupAccounts, err := s.listStartupShareHistories(ctx, accountsWithSnapshots)
 	if err != nil {
-		return SnapshotHistoryChartData{}, fmt.Errorf("listing startup share snapshot history: %w", err)
+		return SnapshotHistoryChartData{}, err
 	}
-	if len(startupRows) > 0 {
-		type startupAccount struct {
-			TypeID       string
-			Rounds       []pdb.ListStartupShareSnapshotHistoryRow
-			ShareChanges []ShareChange
-		}
-		startupAccounts := make(map[string]*startupAccount)
-		for _, r := range startupRows {
-			if _, has := accountsWithSnapshots[r.AccountID]; has {
-				continue
-			}
-			sa, ok := startupAccounts[r.AccountID]
-			if !ok {
-				sa = &startupAccount{TypeID: r.TypeID}
-				startupAccounts[r.AccountID] = sa
-			}
-			sa.Rounds = append(sa.Rounds, r)
-		}
-		for accountID, sa := range startupAccounts {
-			changes, err := s.ListShareChanges(ctx, accountID)
-			if err != nil {
-				return SnapshotHistoryChartData{}, fmt.Errorf("listing share changes for %s: %w", accountID, err)
-			}
-			sa.ShareChanges = changes
-		}
-		ucfg := uncertain.NewConfig(0, 1)
-		for _, sa := range startupAccounts {
-			for _, chartDate := range dates {
-				var best *pdb.ListStartupShareSnapshotHistoryRow
-				for i := range sa.Rounds {
-					if sa.Rounds[i].Date <= chartDate {
-						best = &sa.Rounds[i]
-					}
-				}
-				if best == nil {
-					continue
-				}
-				postMoneyValuation, postMoneyShares := PostMoneyValuationAndShares(best.Valuation, best.PreMoneyShares, best.Investment)
-				sharesOwned, avgPurchasePrice := DeriveShareState(sa.ShareChanges, date.Date(chartDate))
-				balance := CalculateStartupShareBalance(
-					ucfg,
-					uncertain.NewFixed(postMoneyValuation),
-					sharesOwned,
-					avgPurchasePrice,
-					best.TaxRate,
-					postMoneyShares,
-					best.ValuationDiscountFactor,
-				)
-				sumByDateAndType[typeKey(chartDate, sa.TypeID)] += balance.Mean()
+	ucfg := uncertain.NewConfig(0, 1)
+	for _, sa := range startupAccounts {
+		for _, chartDate := range dates {
+			if balance, ok := sa.balanceOn(ucfg, date.Date(chartDate)); ok {
+				sumByDateAndType[typeKey(chartDate, sa.typeID)] += balance
 			}
 		}
 	}
@@ -205,7 +158,7 @@ func (s *Service) buildSnapshotHistoryChart(ctx context.Context, accountTypes []
 	for _, d := range dates {
 		if sumByDateAndType[typeKey(d, "")] != 0 {
 			if _, ok := typeByName[""]; !ok {
-				typeByName[""] = AccountType{ID: "", Name: "Uncategorized", Color: "#999999"}
+				typeByName[""] = uncategorized
 			}
 			break
 		}
@@ -239,10 +192,9 @@ func (s *Service) buildSnapshotHistoryChart(ctx context.Context, accountTypes []
 		}
 		if hasAny {
 			series = append(series, SnapshotHistorySeries{
-				Name:   at.Name,
-				Color:  color,
-				Data:   data,
-				typeID: typeID,
+				Name:  at.Name,
+				Color: color,
+				Data:  data,
 			})
 		}
 	}

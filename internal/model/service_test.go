@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/SimonSchneider/goslu/date"
@@ -585,6 +586,34 @@ func TestGetTransferChartData_NodeColorsFromAccountTypes(t *testing.T) {
 			t.Errorf("expected Expenses color #D32F2F, got %q", nodeColors["Expenses"])
 		}
 	})
+}
+
+func TestGetTransferChartData_NamesAccountsWithoutATypeUncategorized(t *testing.T) {
+	svc := newTestService(t)
+	ctx := t.Context()
+	acc := mustAccount(t, svc, "No type")
+	if _, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
+		Name: "Salary", ToAccountID: acc.ID, AmountType: "fixed", AmountFixed: newFixedValue(5000),
+		Recurrence: "*-*-25", StartDate: mustParseDate("2020-01-01"), Enabled: true,
+	}); err != nil {
+		t.Fatalf("create transfer template: %v", err)
+	}
+
+	data, err := svc.GetTransferChartData(ctx, model.GroupByAccountType)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var names []string
+	for _, node := range data.Data {
+		names = append(names, node.Name)
+	}
+	if !slices.Contains(names, "Uncategorized") || slices.Contains(names, "unknown") {
+		t.Fatalf("expected an Uncategorized node, got %v", names)
+	}
+	if len(data.Links) != 1 || data.Links[0].Target != "Uncategorized" {
+		t.Fatalf("expected the salary to go to Uncategorized, got %+v", data.Links)
+	}
 }
 
 // ---- Transfer Simplification ----
@@ -3679,14 +3708,6 @@ func TestForecastSettings(t *testing.T) {
 	ctx := t.Context()
 
 	// Default values
-	confidence, err := svc.GetForecastConfidence(ctx)
-	if err != nil {
-		t.Fatalf("get default confidence: %v", err)
-	}
-	if confidence != 0.80 {
-		t.Fatalf("expected default confidence 0.80, got %f", confidence)
-	}
-
 	samples, err := svc.GetForecastSamples(ctx)
 	if err != nil {
 		t.Fatalf("get default samples: %v", err)
@@ -3696,17 +3717,6 @@ func TestForecastSettings(t *testing.T) {
 	}
 
 	// Set custom values
-	if err := svc.SetForecastConfidence(ctx, 0.90); err != nil {
-		t.Fatalf("set confidence: %v", err)
-	}
-	confidence, err = svc.GetForecastConfidence(ctx)
-	if err != nil {
-		t.Fatalf("get confidence after set: %v", err)
-	}
-	if confidence != 0.90 {
-		t.Fatalf("expected confidence 0.90, got %f", confidence)
-	}
-
 	if err := svc.SetForecastSamples(ctx, 5000); err != nil {
 		t.Fatalf("set samples: %v", err)
 	}

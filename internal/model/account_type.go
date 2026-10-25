@@ -15,6 +15,9 @@ type AccountType struct {
 	Color string
 }
 
+// uncategorized is the Account Type that accounts without one are grouped under.
+var uncategorized = AccountType{ID: "", Name: "Uncategorized", Color: "#999999"}
+
 type AccountTypeInput struct {
 	ID    string
 	Name  string

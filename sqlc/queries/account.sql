@@ -168,6 +168,22 @@ FROM account_snapshot s
 ORDER BY s.date,
   a.type_id,
   s.account_id;
+-- name: ListProjectedAccountTypeIDs :many
+-- Returns the type_id of every account a prediction projects: one with a snapshot, or a Startup
+-- Share account. Accounts without a type have ''.
+SELECT DISTINCT COALESCE(a.type_id, '') AS type_id
+FROM account a
+WHERE EXISTS (
+    SELECT 1
+    FROM account_snapshot s
+    WHERE s.account_id = a.id
+  )
+  OR EXISTS (
+    SELECT 1
+    FROM startup_share_account ssa
+    WHERE ssa.account_id = a.id
+  )
+ORDER BY type_id;
 -- name: ListStartupShareSnapshotHistory :many
 -- Returns investment rounds joined with startup share config and account type for balance history.
 -- valuation = pre_money_valuation; post_money = valuation + investment; post_money_shares derived in app.

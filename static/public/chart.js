@@ -261,7 +261,7 @@ evtSource.addEventListener('setup', (event) => {
                 symbol: ['none', 'none'],
                 data: [
                     {
-                        xAxis: new Date(m.date),
+                        xAxis: m.date,
                         lineStyle: {
                             color: m.color || themeText,
                             type: 'dashed',
