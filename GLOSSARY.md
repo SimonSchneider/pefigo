@@ -7,8 +7,18 @@ Personal finance: tracking account balances and projecting how wealth develops o
 ### Forecasting
 
 **Dashboard Forecast**:
-The projection of balances per Account Type, from the day it was computed to the last Special Date, kept up to date in the background using the Forecast Settings.
+The projection of balances per Account Type, from the day it was computed to the last Special Date, kept up to date in the background using the Forecast Settings. It is empty when no Special Date is after today.
 _Avoid_: forecast cache, cached forecast
+
+**Forecast Run**:
+One computation of the Dashboard Forecast from the current Forecast Inputs. It ends Done or Failed, unless the Dashboard Forecast becomes Stale while it runs: then it is abandoned without an outcome and a newer Forecast Run follows.
+_Avoid_: forecast job, recompute
+
+**Done**:
+The outcome of a Forecast Run that computed the whole Dashboard Forecast.
+
+**Failed**:
+The outcome of a Forecast Run that stopped on an error, leaving the Dashboard Forecast partly computed.
 
 **Forecast Input**:
 Any stored data or setting the Dashboard Forecast is computed from.
