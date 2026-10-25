@@ -4,6 +4,16 @@ Personal finance: tracking account balances and projecting how wealth develops o
 
 ## Language
 
+### Dates
+
+**Start Date**:
+The first day a dated entry, such as a Transfer Template or a Bill Amount, applies.
+_Avoid_: effective from, valid from
+
+**End Date**:
+The first day a dated entry no longer applies: it applies up to, but not on, its End Date. Without an End Date it applies indefinitely.
+_Avoid_: effective to, until, last day
+
 ### Forecasting
 
 **Dashboard Forecast**:
