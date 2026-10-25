@@ -330,3 +330,37 @@ func TestTransferScheduleChargesADaysSamePriorityTransfersTogetherAsTheForecastD
 		t.Errorf("expected charges %v on the 25th, got %v", want, charged)
 	}
 }
+
+func TestTransferScheduleChargesADaysTransfersInPriorityOrderAcrossRecurrences(t *testing.T) {
+	svc := newTestService(t)
+	checking := mustAccount(t, svc, "Checking")
+	savings := mustAccount(t, svc, "Savings")
+	start := mustParseDate("2025-01-01")
+	mustTransferTemplate(t, svc, model.TransferTemplate{
+		Name: "Income", ToAccountID: checking.ID, AmountType: "fixed", AmountFixed: newFixedValue(4000),
+		Priority: 1, Recurrence: "*-*-*", StartDate: start, Enabled: true,
+	})
+	mustTransferTemplate(t, svc, model.TransferTemplate{
+		Name: "Groceries", FromAccountID: checking.ID, AmountType: "fixed", AmountFixed: newFixedValue(1000),
+		Priority: 2, Recurrence: "*-*-*", StartDate: start, Enabled: true,
+	})
+	mustTransferTemplate(t, svc, model.TransferTemplate{
+		Name: "Saving", FromAccountID: checking.ID, ToAccountID: savings.ID, AmountType: "percent", AmountFixed: newFixedValue(0), AmountPercent: 0.5,
+		Priority: 1, Recurrence: "*-*-25", StartDate: start, Enabled: true,
+	})
+
+	var names []string
+	charged := make(map[string]float64)
+	for _, tt := range mustTransferSchedule(t, svc).On(mustParseDate("2025-06-25")).Charged() {
+		names = append(names, tt.Name)
+		charged[tt.Name] = tt.Amount
+	}
+
+	// Saving has Income's priority, so it runs with Income and before Groceries, on an empty Checking.
+	if want := []string{"Income", "Saving", "Groceries"}; !slices.Equal(names, want) {
+		t.Errorf("expected the charges in priority order %v, got %v", want, names)
+	}
+	if want := map[string]float64{"Income": 4000, "Saving": 0, "Groceries": 1000}; !maps.Equal(charged, want) {
+		t.Errorf("expected charges %v on the 25th, got %v", want, charged)
+	}
+}

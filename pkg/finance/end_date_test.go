@@ -74,3 +74,29 @@ func TestGrowthModelsApplyTheLatestStartingModelThatAppliesOnTheDay(t *testing.T
 		}
 	}
 }
+
+func TestRunPredictionAppliesADaysTransfersInPriorityOrder(t *testing.T) {
+	salary := newAccount("Salary", withBalance(firstDate, uncertain.NewFixed(0)))
+	savings := newAccount("Savings", withBalance(firstDate, uncertain.NewFixed(0)))
+	// Given out of priority order: the income (priority 2) comes before the saving (priority 1).
+	income := newTransfer("", salary.ID, 2, "*-*-25", withFixed(uncertain.NewFixed(4000)))
+	saving := newTransfer(salary.ID, savings.ID, 1, "*-*-25", withPercent(0.5))
+
+	saved := map[string]float64{}
+	recorder := finance2.TransferRecorderFunc(func(from, to string, day date.Date, amount uncertain.Value) error {
+		if to == savings.ID {
+			saved[day.String()] = amount.Mean()
+		}
+		return nil
+	})
+	err := finance2.RunPrediction(t.Context(), uncertain.NewConfig(1, 1), startDate, Must(date.ParseDate("2000-02-01")), "*-*-28",
+		mks(*salary, *savings), mks(income, saving), finance2.CompositeRecorder{TransferRecorder: recorder})
+	if err != nil {
+		t.Fatalf("run prediction: %v", err)
+	}
+
+	// The saving runs before the income, while Salary is still empty.
+	if got := saved["2000-01-25"]; got != 0 {
+		t.Errorf("expected the priority 1 saving to move 0 before the priority 2 income, got %f", got)
+	}
+}

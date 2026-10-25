@@ -1,9 +1,11 @@
 package model
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/SimonSchneider/goslu/date"
@@ -189,7 +191,8 @@ func (d *TransferScheduleDay) Transfers() []ScheduledTransfer {
 }
 
 // Charged returns the Transfer Templates that move money on the day: the Active ones whose recurrence
-// matches it, evaluated on their own in priority groups, as the forecast charges them.
+// matches it, in priority order and evaluated on their own in priority groups, as the forecast charges
+// them.
 func (d *TransferScheduleDay) Charged() []ScheduledTransfer {
 	var charged []ScheduledTransfer
 	for _, t := range d.transfers {
@@ -197,6 +200,7 @@ func (d *TransferScheduleDay) Charged() []ScheduledTransfer {
 			charged = append(charged, t)
 		}
 	}
+	slices.SortStableFunc(charged, func(a, b ScheduledTransfer) int { return cmp.Compare(a.Priority, b.Priority) })
 	evaluate(charged, dayGroup)
 	return charged
 }
