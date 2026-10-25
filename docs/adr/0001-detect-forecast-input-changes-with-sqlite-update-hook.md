@@ -10,7 +10,7 @@ The Dashboard Forecast must become Stale whenever a Forecast Input changes. Prev
 ## Consequences
 
 - Every table counts except a short deny-list: `forecast_cache`, `api_cache`, `favicon_cache` and `user`. New tables count by default; an edit to a table that isn't really a Forecast Input costs one unnecessary forecast run, which is cheaper than a missed one. The forecast run and exchange-rate refreshes write to the cache tables, so counting those would loop.
-- Only writes make the Dashboard Forecast Stale. A day passing does not, and neither does an exchange rate expiring: rebuilding just because the date moved would mostly drop Transfers that have probably already happened, until the next Snapshot is recorded.
+- Only writes make the Dashboard Forecast Stale. A day passing does not, and neither does an exchange rate expiring: rebuilding just because the date moved would mostly drop Transfers that have probably already happened, until the next Snapshot is recorded. Since [ADR 0004](0004-forecasts-start-on-the-latest-snapshot.md) a Forecast starts on the latest Snapshot, so the date no longer changes it at all.
 - The hook doesn't see `WITHOUT ROWID` tables or a `DELETE` with no `WHERE` (SQLite's truncate optimisation). Don't use either on Forecast Input tables.
 - The hook fires before commit, so a rolled-back transaction costs at most one unnecessary forecast run.
 - The hook runs inside SQLite and must never touch the database itself.
