@@ -14,6 +14,16 @@ _Avoid_: effective from, valid from
 The first day a dated entry no longer applies: it applies up to, but not on, its End Date. Without an End Date it applies indefinitely.
 _Avoid_: effective to, until, last day
 
+### Accounts
+
+**Uncategorized**:
+The Account Type that accounts without one are grouped under.
+_Avoid_: unknown, no type
+
+**Balance History**:
+The balance per Account Type on each day, up to today, that an account's balance was recorded, with every account counting at its latest recorded balance.
+_Avoid_: snapshot history, historic snapshots
+
 ### Forecasting
 
 **Dashboard Forecast**:
