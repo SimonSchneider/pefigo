@@ -45,18 +45,22 @@
     // series maps an Account Type ID to its history points, which arrive once
     // in the initial payload, and its forecast points, which every Forecast
     // Run clears and refills. seriesOrder keeps the order the series arrived in.
+    // Every point is [date, balance], with the date as "YYYY-MM-DD": the history
+    // ends today and the forecast starts after it, so they join in date order.
     var series = {};
     var seriesOrder = [];
     var allMarklines = [];
     var setupDone = false;
     var renderPending = false;
 
+    // getMaxDate is the last date to show, as "YYYY-MM-DD" so it compares with
+    // the points' dates.
     function getMaxDate() {
         var years = parseInt(durationSelect ? durationSelect.value : '10', 10);
         if (years === 0) return null; // max = no limit
         var d = new Date();
         d.setFullYear(d.getFullYear() + years);
-        return d.getTime();
+        return d.toISOString().slice(0, 10);
     }
 
     function showLoading() {
@@ -89,21 +93,26 @@
         hideFailure();
     }
 
+    function toPoint(p) {
+        return [p.date, p.balance];
+    }
+
     function addEntity(e) {
         var id = e.id;
         if (!series[id]) seriesOrder.push(id);
         series[id] = {
             name: e.name,
             color: e.color || '#666',
-            history: (e.snapshots || []).map(function(s) { return [s.day, s.balance]; }),
+            history: (e.history || []).map(toPoint),
             forecast: []
         };
     }
 
-    function addForecastPoint(s) {
-        var entry = series[s.AccountTypeID];
+    // Forecast points of an Account Type that no longer exists have no series.
+    function addForecastPoint(p) {
+        var entry = series[p.id];
         if (!entry) return;
-        entry.forecast.push([s.Date, s.Median]);
+        entry.forecast.push(toPoint(p));
     }
 
     function clearForecasts() {
@@ -139,7 +148,7 @@
                 markLine: {
                     symbol: ['none', 'none'],
                     data: [{
-                        xAxis: new Date(m.date),
+                        xAxis: m.date,
                         lineStyle: { color: color, type: 'dashed' },
                         label: {
                             offset: [0, idx % 2 !== 0 ? 0 : -15],
@@ -172,8 +181,7 @@
                     });
                     if (items.length === 0) return '';
                     items.sort(function(a, b) { return b.value[1] - a.value[1]; });
-                    var date = new Date(items[0].value[0]);
-                    var header = date.getFullYear() + '-' + String(date.getMonth()+1).padStart(2,'0') + '-' + String(date.getDate()).padStart(2,'0');
+                    var header = items[0].value[0];
                     var total = items.reduce(function(sum, p) { return sum + p.value[1]; }, 0);
                     var lines = items.map(function(p) {
                         return '<div style="display:flex;justify-content:space-between;gap:16px">' +

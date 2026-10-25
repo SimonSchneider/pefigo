@@ -12,14 +12,18 @@ import (
 	"github.com/SimonSchneider/pefigo/internal/pdb"
 )
 
+// BalancePoint is the balance of a dashboard forecast series on one day: a Balance History point,
+// or a point of the Dashboard Forecast. Balance is the mean of the uncertain balance.
+type BalancePoint struct {
+	Date    date.Date `json:"date"`
+	Balance float64   `json:"balance"`
+}
+
 // ForecastCacheRow is one stored point of the Dashboard Forecast: the projected balance of one
-// Account Type on one day.
+// Account Type, or of Uncategorized when AccountTypeID is "", on one day.
 type ForecastCacheRow struct {
-	Date          int64
-	AccountTypeID string
-	Median        float64
-	LowerBound    float64
-	UpperBound    float64
+	AccountTypeID string `json:"id"`
+	BalancePoint
 }
 
 // ForecastState is where the Dashboard Forecast is in its Forecast Runs.
@@ -331,11 +335,9 @@ func (f *DashboardForecast) store(ctx context.Context, row ForecastCacheRow) err
 		return err
 	}
 	if err := f.svc.q.InsertForecastCache(ctx, pdb.InsertForecastCacheParams{
-		Date:          row.Date,
+		Date:          int64(row.Date),
 		AccountTypeID: row.AccountTypeID,
-		Median:        row.Median,
-		LowerBound:    row.LowerBound,
-		UpperBound:    row.UpperBound,
+		Balance:       row.Balance,
 	}); err != nil {
 		return fmt.Errorf("storing Dashboard Forecast row: %w", err)
 	}
@@ -372,11 +374,8 @@ func (h *dashboardForecastHandler) Setup(PredictionSetupEvent) error {
 
 func (h *dashboardForecastHandler) Snapshot(snap PredictionBalanceSnapshot) error {
 	return h.f.store(h.ctx, ForecastCacheRow{
-		Date:          snap.Day,
 		AccountTypeID: snap.ID,
-		Median:        snap.Balance,
-		LowerBound:    snap.LowerBound,
-		UpperBound:    snap.UpperBound,
+		BalancePoint:  BalancePoint{Date: snap.Day, Balance: snap.Balance},
 	})
 }
 
@@ -385,8 +384,8 @@ func (h *dashboardForecastHandler) Close() error {
 }
 
 // dashboardForecastParams builds the prediction of a Forecast Run from the Forecast Settings: it
-// ends at the last Special Date, grouped by Account Type. ok is false when no Special Date is
-// after today, which leaves the Dashboard Forecast empty.
+// ends at the last Special Date, grouped by Account Type, without lower and upper bounds. ok is
+// false when no Special Date is after today, which leaves the Dashboard Forecast empty.
 func (s *Service) dashboardForecastParams(ctx context.Context) (params PredictionParams, ok bool, err error) {
 	specialDates, err := s.ListSpecialDates(ctx)
 	if err != nil {
@@ -404,10 +403,6 @@ func (s *Service) dashboardForecastParams(ctx context.Context) (params Predictio
 		return params, false, nil
 	}
 
-	confidence, err := s.GetForecastConfidence(ctx)
-	if err != nil {
-		return params, false, fmt.Errorf("getting forecast confidence: %w", err)
-	}
 	samples, err := s.GetForecastSamples(ctx)
 	if err != nil {
 		return params, false, fmt.Errorf("getting forecast samples: %w", err)
@@ -419,7 +414,6 @@ func (s *Service) dashboardForecastParams(ctx context.Context) (params Predictio
 	return PredictionParams{
 		Duration:         endDate.Sub(today),
 		Samples:          samples,
-		Quantile:         confidence,
 		SnapshotInterval: date.Cron(snapshotInterval),
 		GroupBy:          GroupByType,
 	}, true, nil
@@ -433,99 +427,66 @@ func (s *Service) listDashboardForecastRows(ctx context.Context) ([]ForecastCach
 	result := make([]ForecastCacheRow, len(rows))
 	for i, r := range rows {
 		result[i] = ForecastCacheRow{
-			Date:          r.Date,
 			AccountTypeID: r.AccountTypeID,
-			Median:        r.Median,
-			LowerBound:    r.LowerBound,
-			UpperBound:    r.UpperBound,
+			BalancePoint:  BalancePoint{Date: date.Date(r.Date), Balance: r.Balance},
 		}
 	}
 	return result, nil
 }
 
-// ForecastDashboardData is what the dashboard chart starts from: one entity per Account Type and the
-// marklines of today and the Special Dates.
-type ForecastDashboardData struct {
-	Entities  []PredictionFinancialEntity `json:"entities"`
-	Marklines []Markline                  `json:"marklines"`
+// DashboardForecastSeries is one line of the dashboard forecast chart: an Account Type, or
+// Uncategorized when ID is "", with its Balance History. Its forecast points are the
+// ForecastCacheRows with its ID.
+type DashboardForecastSeries struct {
+	ID      string         `json:"id"`
+	Name    string         `json:"name"`
+	Color   string         `json:"color"`
+	History []BalancePoint `json:"history"`
 }
 
-// GetDashboardForecastHistory returns one entity per Account Type that has history points or appears
-// in rows, identified by the Account Type ID and holding the history points only: the forecast
-// points are rows. A history series of accounts without an Account Type has the ID "".
+// ForecastDashboardData is what the dashboard chart starts from: one series per Account Type and
+// the date lines of today and the Special Dates.
+type ForecastDashboardData struct {
+	Series    []DashboardForecastSeries `json:"series"`
+	Marklines []Markline                `json:"marklines"`
+}
+
+// GetDashboardForecastHistory returns a series for Uncategorized and every Account Type that has
+// Balance History or appears in rows, in the order of the Account Types with Uncategorized last.
+// A series holds its Balance History only: its forecast points are rows.
 func (s *Service) GetDashboardForecastHistory(ctx context.Context, rows []ForecastCacheRow) (*ForecastDashboardData, error) {
 	accountTypes, err := s.ListAccountTypes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing account types: %w", err)
 	}
-	history, err := s.buildSnapshotHistoryChart(ctx, accountTypes)
+	today := date.Today()
+	history, err := s.balanceHistory(ctx, today)
 	if err != nil {
-		return nil, fmt.Errorf("building snapshot history: %w", err)
+		return nil, fmt.Errorf("building balance history: %w", err)
+	}
+	forecast := make(map[string]bool)
+	for _, row := range rows {
+		forecast[row.AccountTypeID] = true
 	}
 
-	byTypeID := make(map[string]*PredictionFinancialEntity)
-	for _, series := range history.Series {
-		entity := &PredictionFinancialEntity{
-			ID:        series.typeID,
-			Name:      series.Name,
-			Color:     series.Color,
-			Snapshots: make([]PredictionBalanceSnapshot, 0, len(history.Dates)),
-		}
-		for i, dateStr := range history.Dates {
-			d, err := date.ParseDate(dateStr)
-			if err != nil {
-				continue
-			}
-			entity.Snapshots = append(entity.Snapshots, PredictionBalanceSnapshot{
-				Day:     d.ToStdTime().UnixMilli(),
-				Balance: series.Data[i],
-			})
-		}
-		byTypeID[series.typeID] = entity
-	}
-	typesByID := KeyBy(accountTypes, func(at AccountType) string { return at.ID })
-	for _, row := range rows {
-		at, exists := typesByID[row.AccountTypeID]
-		if _, has := byTypeID[row.AccountTypeID]; has || !exists {
+	series := make([]DashboardForecastSeries, 0, len(accountTypes)+1)
+	for _, at := range append(accountTypes, uncategorized) {
+		points, recorded := history[at.ID]
+		if !recorded && !forecast[at.ID] {
 			continue
 		}
-		byTypeID[at.ID] = &PredictionFinancialEntity{
-			ID:        at.ID,
-			Name:      at.Name,
-			Color:     at.Color,
-			Snapshots: []PredictionBalanceSnapshot{},
+		if points == nil {
+			points = []BalancePoint{}
 		}
-	}
-
-	entities := make([]PredictionFinancialEntity, 0, len(byTypeID))
-	for _, at := range accountTypes {
-		if entity, ok := byTypeID[at.ID]; ok {
-			entities = append(entities, *entity)
-		}
-	}
-	if entity, ok := byTypeID[""]; ok {
-		entities = append(entities, *entity)
+		series = append(series, DashboardForecastSeries{ID: at.ID, Name: at.Name, Color: at.Color, History: points})
 	}
 
 	specialDates, err := s.ListSpecialDates(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing special dates: %w", err)
 	}
-	marklines := make([]Markline, 0, len(specialDates)+1)
-	marklines = append(marklines, Markline{
-		Date: date.Today().ToStdTime().UnixMilli(),
-		Name: "Today",
-	})
-	for _, sd := range specialDates {
-		marklines = append(marklines, Markline{
-			Date:  sd.Date.ToStdTime().UnixMilli(),
-			Color: sd.Color,
-			Name:  sd.Name,
-		})
-	}
-
 	return &ForecastDashboardData{
-		Entities:  entities,
-		Marklines: marklines,
+		Series:    series,
+		Marklines: dateLines(specialDates, today),
 	}, nil
 }

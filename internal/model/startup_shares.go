@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/SimonSchneider/goslu/date"
@@ -437,4 +438,86 @@ func CalculateStartupShareBalance(cfg *uncertain.Config, valuation uncertain.Val
 	capitalGains := grossValue.Sub(cfg, uncertain.NewFixed(purchasePrice))
 	tax := capitalGains.Mul(cfg, uncertain.NewFixed(taxRate))
 	return grossValue.Sub(cfg, tax)
+}
+
+// startupShareHistory is a Startup Share account without regular snapshots: its balance is derived
+// from its investment rounds and share changes.
+type startupShareHistory struct {
+	typeID       string // "" for Uncategorized
+	rounds       []pdb.ListStartupShareSnapshotHistoryRow
+	shareChanges []ShareChange
+}
+
+// listStartupShareHistories returns the Startup Share accounts with investment rounds that aren't
+// in withSnapshots, keyed by account ID.
+func (s *Service) listStartupShareHistories(ctx context.Context, withSnapshots map[string]struct{}) (map[string]*startupShareHistory, error) {
+	rows, err := s.q.ListStartupShareSnapshotHistory(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing startup share snapshot history: %w", err)
+	}
+	histories := make(map[string]*startupShareHistory)
+	for _, r := range rows {
+		if _, has := withSnapshots[r.AccountID]; has {
+			continue
+		}
+		h, ok := histories[r.AccountID]
+		if !ok {
+			h = &startupShareHistory{typeID: r.TypeID}
+			histories[r.AccountID] = h
+		}
+		h.rounds = append(h.rounds, r)
+	}
+	for accountID, h := range histories {
+		changes, err := s.ListShareChanges(ctx, accountID)
+		if err != nil {
+			return nil, fmt.Errorf("listing share changes for %s: %w", accountID, err)
+		}
+		h.shareChanges = changes
+	}
+	return histories, nil
+}
+
+// balanceOn is the account's balance on day, the mean of the value derived from its latest
+// investment round and its share changes on or before day. ok is false when there is no such
+// investment round, or it has no shares.
+func (h *startupShareHistory) balanceOn(ucfg *uncertain.Config, day date.Date) (balance float64, ok bool) {
+	var best *pdb.ListStartupShareSnapshotHistoryRow
+	for i := range h.rounds {
+		if date.Date(h.rounds[i].Date) <= day {
+			best = &h.rounds[i]
+		}
+	}
+	if best == nil {
+		return 0, false
+	}
+	postMoneyValuation, postMoneyShares := PostMoneyValuationAndShares(best.Valuation, best.PreMoneyShares, best.Investment)
+	if postMoneyShares <= 0 {
+		return 0, false
+	}
+	sharesOwned, avgPurchasePrice := DeriveShareState(h.shareChanges, day)
+	return CalculateStartupShareBalance(
+		ucfg,
+		uncertain.NewFixed(postMoneyValuation),
+		sharesOwned,
+		avgPurchasePrice,
+		best.TaxRate,
+		postMoneyShares,
+		best.ValuationDiscountFactor,
+	).Mean(), true
+}
+
+// recordedDays are the days of the account's investment rounds and share changes up to today, in
+// order.
+func (h *startupShareHistory) recordedDays(today date.Date) []date.Date {
+	days := make([]date.Date, 0, len(h.rounds)+len(h.shareChanges))
+	for _, r := range h.rounds {
+		days = append(days, date.Date(r.Date))
+	}
+	for _, sc := range h.shareChanges {
+		days = append(days, sc.Date)
+	}
+	slices.Sort(days)
+	days = slices.Compact(days)
+	end, _ := slices.BinarySearch(days, today+1)
+	return days[:end]
 }

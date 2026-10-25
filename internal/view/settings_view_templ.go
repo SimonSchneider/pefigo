@@ -784,63 +784,33 @@ func settingsTabForecast(view *SettingsPageView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "\" method=\"post\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><h3 class=\"text-sm font-semibold uppercase tracking-wide text-base-content/60 mb-3\">Forecast Settings</h3><p class=\"text-sm text-base-content/70 mb-4\">Configure the Monte Carlo forecast that runs in the background and appears on the dashboard.</p><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text font-medium\">Confidence Interval</span></label> <select name=\"confidence\" class=\"select select-bordered w-full\"><option value=\"0.80\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if view.ForecastConfidence == 0.80 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, " selected")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, ">80%</option> <option value=\"0.90\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if view.ForecastConfidence == 0.90 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, " selected")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, ">90%</option> <option value=\"0.95\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if view.ForecastConfidence == 0.95 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, " selected")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, ">95%</option></select></div><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text font-medium\">Sample Count</span></label> <input type=\"number\" name=\"samples\" class=\"input input-bordered w-full\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "\" method=\"post\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><h3 class=\"text-sm font-semibold uppercase tracking-wide text-base-content/60 mb-3\">Forecast Settings</h3><p class=\"text-sm text-base-content/70 mb-4\">Configure the Monte Carlo forecast that runs in the background and appears on the dashboard.</p><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text font-medium\">Sample Count</span></label> <input type=\"number\" name=\"samples\" class=\"input input-bordered w-full\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var28 string
 		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", view.ForecastSamples))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 343, Col: 125}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 335, Col: 125}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "\" min=\"100\" max=\"100000\" step=\"100\"> <label class=\"label\"><span class=\"label-text-alt text-base-content/60\">Higher values give more accurate results but take longer to compute</span></label></div><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text font-medium\">Snapshot Frequency</span></label> <input type=\"text\" name=\"snapshot_interval\" class=\"input input-bordered w-full\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "\" min=\"100\" max=\"100000\" step=\"100\"> <label class=\"label\"><span class=\"label-text-alt text-base-content/60\">Higher values give more accurate results but take longer to compute</span></label></div><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text font-medium\">Snapshot Frequency</span></label> <input type=\"text\" name=\"snapshot_interval\" class=\"input input-bordered w-full\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var29 string
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(view.ForecastSnapshotInterval)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 348, Col: 123}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 340, Col: 123}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "\" placeholder=\"*-01-01\"> <label class=\"label\"><span class=\"label-text-alt text-base-content/60\">Date pattern: *-01-01 (yearly), *-*/6-01 (6 months), *-*-01 (monthly)</span></label></div><div class=\"mt-4\"><button type=\"submit\" class=\"btn btn-primary w-full\">Save</button></div></div></div></form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "\" placeholder=\"*-01-01\"> <label class=\"label\"><span class=\"label-text-alt text-base-content/60\">Date pattern: *-01-01 (yearly), *-*/6-01 (6 months), *-*-01 (monthly)</span></label></div><div class=\"mt-4\"><button type=\"submit\" class=\"btn btn-primary w-full\">Save</button></div></div></div></form></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -16,8 +17,10 @@ import (
 )
 
 type PredictionParams struct {
-	Duration         date.Duration
-	Samples          int64
+	Duration date.Duration
+	Samples  int64
+	// Quantile is the share of outcomes between each point's lower and upper bound. Without it, no
+	// bounds are calculated.
 	Quantile         float64
 	SnapshotInterval date.Cron
 	GroupBy          GroupBy
@@ -45,11 +48,11 @@ func ParseGroupBy(val string) (GroupBy, error) {
 }
 
 type PredictionBalanceSnapshot struct {
-	ID         string  `json:"id"`
-	Day        int64   `json:"day"`
-	Balance    float64 `json:"balance"`
-	LowerBound float64 `json:"lowerBound"`
-	UpperBound float64 `json:"upperBound"`
+	ID         string    `json:"id"`
+	Day        date.Date `json:"day"`
+	Balance    float64   `json:"balance"`
+	LowerBound float64   `json:"lowerBound"`
+	UpperBound float64   `json:"upperBound"`
 }
 
 type PredictionFinancialEntity struct {
@@ -59,14 +62,26 @@ type PredictionFinancialEntity struct {
 	Snapshots []PredictionBalanceSnapshot `json:"snapshots"`
 }
 
+// Markline is a date line on a forecast chart.
 type Markline struct {
-	Date  int64  `json:"date"`
-	Color string `json:"color"`
-	Name  string `json:"name"`
+	Date  date.Date `json:"date"`
+	Color string    `json:"color"`
+	Name  string    `json:"name"`
+}
+
+// dateLines are the date lines of a forecast chart: today and every Special Date, by date.
+func dateLines(specialDates []SpecialDate, today date.Date) []Markline {
+	lines := make([]Markline, 0, len(specialDates)+1)
+	lines = append(lines, Markline{Date: today, Name: "Today"})
+	for _, sd := range specialDates {
+		lines = append(lines, Markline{Date: sd.Date, Color: sd.Color, Name: sd.Name})
+	}
+	slices.SortStableFunc(lines, func(a, b Markline) int { return cmp.Compare(a.Date, b.Date) })
+	return lines
 }
 
 type PredictionSetupEvent struct {
-	Max       int64                       `json:"max"`
+	Max       date.Date                   `json:"max"`
 	Entities  []PredictionFinancialEntity `json:"entities"`
 	Marklines []Markline                  `json:"marklines"`
 }
@@ -102,14 +117,6 @@ func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEven
 	if err != nil {
 		return fmt.Errorf("listing swe yearly params for Prediction: %w", err)
 	}
-	specialDates = append(specialDates, SpecialDate{
-		ID:   "today",
-		Name: "Today",
-		Date: date.Today(),
-	})
-	sort.Slice(specialDates, func(i, j int) bool {
-		return specialDates[i].Date.Before(specialDates[j].Date)
-	})
 	accountTypesById := KeyBy(accountTypes, func(at pdb.AccountType) string { return at.ID })
 	accsById := make(map[string]pdb.Account, len(accs))
 	startDate := date.Today()
@@ -185,6 +192,7 @@ func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEven
 			entities = append(entities, entity)
 		}
 	}
+	startDay := startDate
 	startDate += 1
 	endDate := startDate.Add(params.Duration)
 
@@ -194,11 +202,13 @@ func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEven
 		accsById:         accsById,
 		accountTypesById: accountTypesById,
 		groupBy:          params.GroupBy,
+		startDay:         startDay,
+		bounds:           params.Quantile != 0,
 		q1:               q1,
 		q2:               q2,
 	}
 
-	if err := h.setup(entities, endDate, specialDates); err != nil {
+	if err := h.setup(entities, endDate, dateLines(specialDates, date.Today())); err != nil {
 		return fmt.Errorf("setting up grouping event handler: %w", err)
 	}
 
@@ -351,20 +361,23 @@ type groupingEventHandler struct {
 	accsById         map[string]pdb.Account
 	accountTypesById map[string]pdb.AccountType
 	groupBy          GroupBy
-	q1               float64
-	q2               float64
+	// startDay is the day the prediction starts: today, or the latest snapshot's day if that is
+	// later. Until then a stale account's estimated growth is predicted while the other accounts
+	// are not, so a grouped point would leave them out.
+	startDay date.Date
+	bounds   bool // whether to calculate the lower and upper bound between q1 and q2
+	q1       float64
+	q2       float64
 
 	currentDate date.Date
 	currentAccs map[string]uncertain.Value
 }
 
-func (h *groupingEventHandler) setup(entities []finance2.Entity, endDate date.Date, specialDates []SpecialDate) error {
+func (h *groupingEventHandler) setup(entities []finance2.Entity, endDate date.Date, marklines []Markline) error {
 	for _, e := range h.accsById {
 		if e.TypeID == nil {
-			h.accountTypesById[""] = pdb.AccountType{
-				ID:   "",
-				Name: "unknown",
-			}
+			color := uncategorized.Color
+			h.accountTypesById[""] = pdb.AccountType{ID: uncategorized.ID, Name: uncategorized.Name, Color: &color}
 		}
 	}
 
@@ -425,32 +438,17 @@ func (h *groupingEventHandler) setup(entities []finance2.Entity, endDate date.Da
 			Snapshots: make([]PredictionBalanceSnapshot, 0, len(e.dates)),
 		}
 		for day, amount := range e.dates {
-			q := amount.Quantiles()
-			ent.Snapshots = append(ent.Snapshots, PredictionBalanceSnapshot{
-				ID:         id,
-				Day:        day.ToStdTime().UnixMilli(),
-				Balance:    amount.Mean(),
-				LowerBound: q(h.q1),
-				UpperBound: q(h.q2),
-			})
+			ent.Snapshots = append(ent.Snapshots, h.balanceSnapshot(id, day, amount))
 		}
 		sort.Slice(ent.Snapshots, func(i, j int) bool {
 			return ent.Snapshots[i].Day < ent.Snapshots[j].Day
 		})
 		sssEntities = append(sssEntities, ent)
 	}
-	marklines := make([]Markline, 0, len(specialDates))
-	for _, sd := range specialDates {
-		marklines = append(marklines, Markline{
-			Date:  sd.Date.ToStdTime().UnixMilli(),
-			Color: sd.Color,
-			Name:  sd.Name,
-		})
-	}
 	h.currentDate = endDate
 	h.currentAccs = make(map[string]uncertain.Value, len(h.accsById))
 	return h.eventHandler.Setup(PredictionSetupEvent{
-		Max:       endDate.ToStdTime().UnixMilli(),
+		Max:       endDate,
 		Entities:  sssEntities,
 		Marklines: marklines,
 	})
@@ -470,6 +468,9 @@ func (h *groupingEventHandler) getKey(id string) string {
 }
 
 func (h *groupingEventHandler) snapshot(id string, day date.Date, balance uncertain.Value) error {
+	if h.groupBy != GroupByNone && !day.After(h.startDay) {
+		return nil
+	}
 	if h.currentDate != day {
 		if err := h.flush(); err != nil {
 			return err
@@ -489,20 +490,21 @@ func (h *groupingEventHandler) snapshot(id string, day date.Date, balance uncert
 
 func (h *groupingEventHandler) flush() error {
 	for id, balance := range h.currentAccs {
-		q := balance.Quantiles()
-		err := h.eventHandler.Snapshot(PredictionBalanceSnapshot{
-			ID:         id,
-			Day:        h.currentDate.ToStdTime().UnixMilli(),
-			Balance:    balance.Mean(),
-			LowerBound: q(h.q1),
-			UpperBound: q(h.q2),
-		})
-		if err != nil {
+		if err := h.eventHandler.Snapshot(h.balanceSnapshot(id, h.currentDate, balance)); err != nil {
 			return err
 		}
 	}
 	clear(h.currentAccs)
 	return nil
+}
+
+func (h *groupingEventHandler) balanceSnapshot(id string, day date.Date, balance uncertain.Value) PredictionBalanceSnapshot {
+	snap := PredictionBalanceSnapshot{ID: id, Day: day, Balance: balance.Mean()}
+	if h.bounds {
+		q := balance.Quantiles()
+		snap.LowerBound, snap.UpperBound = q(h.q1), q(h.q2)
+	}
+	return snap
 }
 
 func (h *groupingEventHandler) close() error {

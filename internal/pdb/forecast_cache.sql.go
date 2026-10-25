@@ -19,31 +19,23 @@ func (q *Queries) DeleteAllForecastCache(ctx context.Context) error {
 }
 
 const insertForecastCache = `-- name: InsertForecastCache :exec
-INSERT INTO forecast_cache (date, account_type_id, median, lower_bound, upper_bound)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO forecast_cache (date, account_type_id, balance)
+VALUES (?, ?, ?)
 `
 
 type InsertForecastCacheParams struct {
 	Date          int64
 	AccountTypeID string
-	Median        float64
-	LowerBound    float64
-	UpperBound    float64
+	Balance       float64
 }
 
 func (q *Queries) InsertForecastCache(ctx context.Context, arg InsertForecastCacheParams) error {
-	_, err := q.db.ExecContext(ctx, insertForecastCache,
-		arg.Date,
-		arg.AccountTypeID,
-		arg.Median,
-		arg.LowerBound,
-		arg.UpperBound,
-	)
+	_, err := q.db.ExecContext(ctx, insertForecastCache, arg.Date, arg.AccountTypeID, arg.Balance)
 	return err
 }
 
 const listForecastCache = `-- name: ListForecastCache :many
-SELECT date, account_type_id, median, lower_bound, upper_bound
+SELECT date, account_type_id, balance
 FROM forecast_cache
 ORDER BY date, account_type_id
 `
@@ -57,13 +49,7 @@ func (q *Queries) ListForecastCache(ctx context.Context) ([]ForecastCache, error
 	var items []ForecastCache
 	for rows.Next() {
 		var i ForecastCache
-		if err := rows.Scan(
-			&i.Date,
-			&i.AccountTypeID,
-			&i.Median,
-			&i.LowerBound,
-			&i.UpperBound,
-		); err != nil {
+		if err := rows.Scan(&i.Date, &i.AccountTypeID, &i.Balance); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

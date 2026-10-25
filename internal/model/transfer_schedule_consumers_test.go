@@ -139,7 +139,7 @@ func (r recordedForecast) Snapshot(s model.PredictionBalanceSnapshot) error {
 	if r[s.ID] == nil {
 		r[s.ID] = make(map[date.Date]float64)
 	}
-	r[s.ID][date.FromTime(time.UnixMilli(s.Day))] = s.Balance
+	r[s.ID][s.Day] = s.Balance
 	return nil
 }
 

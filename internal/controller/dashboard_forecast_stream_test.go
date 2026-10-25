@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -105,15 +106,11 @@ func (f computeFunc) RunPrediction(ctx context.Context, h model.PredictionEventH
 
 // forecastRows is n forecast points of the Account Type typeID, one per day from tomorrow.
 func forecastRows(typeID string, n int) []model.ForecastCacheRow {
-	today := date.Today().ToStdTime().UnixMilli()
 	rows := make([]model.ForecastCacheRow, n)
 	for i := range rows {
 		rows[i] = model.ForecastCacheRow{
-			Date:          today + int64(i+1)*86_400_000,
 			AccountTypeID: typeID,
-			Median:        float64(1000 * (i + 1)),
-			LowerBound:    float64(900 * (i + 1)),
-			UpperBound:    float64(1100 * (i + 1)),
+			BalancePoint:  model.BalancePoint{Date: date.Today().Add(date.Duration(i+1) * date.Day), Balance: float64(1000 * (i + 1))},
 		}
 	}
 	return rows
@@ -123,9 +120,9 @@ func emitRow(h model.PredictionEventHandler, row model.ForecastCacheRow) error {
 	return h.Snapshot(model.PredictionBalanceSnapshot{
 		ID:         row.AccountTypeID,
 		Day:        row.Date,
-		Balance:    row.Median,
-		LowerBound: row.LowerBound,
-		UpperBound: row.UpperBound,
+		Balance:    row.Balance,
+		LowerBound: row.Balance * 0.9,
+		UpperBound: row.Balance * 1.1,
 	})
 }
 
@@ -216,18 +213,18 @@ func historyDate(t *testing.T) date.Date {
 }
 
 // savingsEntity is Savings with its history point.
-func (fx *streamFixture) savingsEntity(t *testing.T) model.PredictionFinancialEntity {
-	return model.PredictionFinancialEntity{
-		ID:        fx.savings.ID,
-		Name:      "Savings",
-		Color:     "#00ff00",
-		Snapshots: []model.PredictionBalanceSnapshot{{Day: historyDate(t).ToStdTime().UnixMilli(), Balance: 10000}},
+func (fx *streamFixture) savingsEntity(t *testing.T) model.DashboardForecastSeries {
+	return model.DashboardForecastSeries{
+		ID:      fx.savings.ID,
+		Name:    "Savings",
+		Color:   "#00ff00",
+		History: []model.BalancePoint{{Date: historyDate(t), Balance: 10000}},
 	}
 }
 
 // pensionEntity is Pension, which has no history points.
-func (fx *streamFixture) pensionEntity() model.PredictionFinancialEntity {
-	return model.PredictionFinancialEntity{ID: fx.pension.ID, Name: "Pension", Color: "#0000ff"}
+func (fx *streamFixture) pensionEntity() model.DashboardForecastSeries {
+	return model.DashboardForecastSeries{ID: fx.pension.ID, Name: "Pension", Color: "#0000ff", History: []model.BalancePoint{}}
 }
 
 func (fx *streamFixture) connect(t *testing.T) *sseStream {
@@ -240,21 +237,21 @@ func (fx *streamFixture) stop() {
 }
 
 // expectHistory expects the entities, the marklines of today and the Special Date, and setup-done.
-func (fx *streamFixture) expectHistory(s *sseStream, entities ...model.PredictionFinancialEntity) {
+func (fx *streamFixture) expectHistory(s *sseStream, entities ...model.DashboardForecastSeries) {
 	s.t.Helper()
 	for _, want := range entities {
 		evt := s.expect("entity")
-		var got model.PredictionFinancialEntity
+		var got model.DashboardForecastSeries
 		decode(s.t, evt, &got)
-		if got.ID != want.ID || got.Name != want.Name || got.Color != want.Color || !slices.Equal(got.Snapshots, want.Snapshots) {
+		if got.ID != want.ID || got.Name != want.Name || got.Color != want.Color || got.History == nil || !slices.Equal(got.History, want.History) {
 			s.t.Fatalf("expected entity %+v, got %+v", want, got)
 		}
 	}
 	var marklines []model.Markline
 	decode(s.t, s.expect("marklines"), &marklines)
 	wantMarklines := []model.Markline{
-		{Date: date.Today().ToStdTime().UnixMilli(), Name: "Today"},
-		{Date: fx.special.Date.ToStdTime().UnixMilli(), Color: "#ff0000", Name: "Retirement"},
+		{Date: date.Today(), Name: "Today"},
+		{Date: fx.special.Date, Color: "#ff0000", Name: "Retirement"},
 	}
 	if !slices.Equal(marklines, wantMarklines) {
 		s.t.Fatalf("expected marklines %+v, got %+v", wantMarklines, marklines)
@@ -334,15 +331,15 @@ func (s *sseStream) next() (evt sseEvent, ok bool) {
 	}
 }
 
-// expect reads the next event and fails unless it is called name.
-func (s *sseStream) expect(name string) sseEvent {
+// expect reads the next event and fails unless it is called one of names.
+func (s *sseStream) expect(names ...string) sseEvent {
 	s.t.Helper()
 	evt, ok := s.next()
 	if !ok {
-		s.t.Fatalf("expected %q after %v, but the stream ended", name, s.read)
+		s.t.Fatalf("expected %q after %v, but the stream ended", names, s.read)
 	}
-	if evt.Name != name {
-		s.t.Fatalf("expected %q after %v, got %q", name, s.read[:len(s.read)-1], evt.Name)
+	if !slices.Contains(names, evt.Name) {
+		s.t.Fatalf("expected %q after %v, got %q", names, s.read[:len(s.read)-1], evt.Name)
 	}
 	return evt
 }
@@ -508,4 +505,81 @@ func TestDashboardForecastStreamReturnsWhenTheClientGoesAway(t *testing.T) {
 	case <-guard.Done():
 		t.Fatal("expected the stream handler to return once the client went away")
 	}
+}
+
+// expectFields fails unless the JSON object raw has exactly the fields, and returns them.
+func expectFields(t *testing.T, raw json.RawMessage, fields ...string) map[string]json.RawMessage {
+	t.Helper()
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatalf("decode %s: %v", raw, err)
+	}
+	got := slices.Sorted(maps.Keys(obj))
+	if want := slices.Sorted(slices.Values(fields)); !slices.Equal(got, want) {
+		t.Fatalf("expected the fields %v in %s, got %v", want, raw, got)
+	}
+	return obj
+}
+
+// expectDay fails unless raw is a JSON string of the form YYYY-MM-DD.
+func expectDay(t *testing.T, raw json.RawMessage) {
+	t.Helper()
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatalf("expected a date string, got %s", raw)
+	}
+	if _, err := time.Parse(time.DateOnly, s); err != nil {
+		t.Fatalf("expected a YYYY-MM-DD date, got %q", s)
+	}
+}
+
+func TestDashboardForecastStreamSendsEveryPointAsADateAndABalance(t *testing.T) {
+	fx := newStreamFixture(t)
+	acc, err := fx.svc.UpsertAccount(t.Context(), model.AccountInput{Name: "No type"})
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	if _, err := fx.svc.UpsertAccountSnapshot(t.Context(), acc.ID, model.AccountSnapshotInput{Date: historyDate(t), Balance: uncertain.NewFixed(500)}); err != nil {
+		t.Fatalf("create snapshot: %v", err)
+	}
+	fx.compute = emitting(append(forecastRows(fx.savings.ID, 2), forecastRows("", 2)...), nil)
+	fx.timers.fire()
+	stream := fx.connect(t)
+	fx.stop()
+
+	var entities []string
+	for {
+		evt := stream.expect("entity", "marklines")
+		if evt.Name == "marklines" {
+			var marklines []json.RawMessage
+			decode(t, evt, &marklines)
+			for _, m := range marklines {
+				expectDay(t, expectFields(t, m, "date", "color", "name")["date"])
+			}
+			break
+		}
+		entity := expectFields(t, json.RawMessage(evt.Data), "id", "name", "color", "history")
+		entities = append(entities, string(entity["name"]))
+		var history []json.RawMessage
+		if err := json.Unmarshal(entity["history"], &history); err != nil || len(history) == 0 {
+			t.Fatalf("expected history points in %s (%v)", evt.Data, err)
+		}
+		for _, p := range history {
+			expectDay(t, expectFields(t, p, "date", "balance")["date"])
+		}
+	}
+	if want := []string{`"Savings"`, `"Uncategorized"`}; !slices.Equal(entities, want) {
+		t.Fatalf("expected the entities %v, got %v", want, entities)
+	}
+	stream.expect("setup-done")
+	var ids []string
+	for range 4 {
+		snapshot := expectFields(t, json.RawMessage(stream.expect("snapshot").Data), "id", "date", "balance")
+		expectDay(t, snapshot["date"])
+		ids = append(ids, string(snapshot["id"]))
+	}
+	if !slices.Contains(ids, `""`) {
+		t.Fatalf("expected Uncategorized snapshots with the id \"\", got the ids %v", ids)
+	}
+	stream.expectEnd()
 }

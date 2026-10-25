@@ -331,14 +331,6 @@ templ settingsTabForecast(view *SettingsPageView) {
 						Configure the Monte Carlo forecast that runs in the background and appears on the dashboard.
 					</p>
 					<div class="form-control mb-4">
-						<label class="label"><span class="label-text font-medium">Confidence Interval</span></label>
-						<select name="confidence" class="select select-bordered w-full">
-							<option value="0.80" if view.ForecastConfidence == 0.80 { selected }>80%</option>
-							<option value="0.90" if view.ForecastConfidence == 0.90 { selected }>90%</option>
-							<option value="0.95" if view.ForecastConfidence == 0.95 { selected }>95%</option>
-						</select>
-					</div>
-					<div class="form-control mb-4">
 						<label class="label"><span class="label-text font-medium">Sample Count</span></label>
 						<input type="number" name="samples" class="input input-bordered w-full" value={ fmt.Sprintf("%d", view.ForecastSamples) } min="100" max="100000" step="100"/>
 						<label class="label"><span class="label-text-alt text-base-content/60">Higher values give more accurate results but take longer to compute</span></label>

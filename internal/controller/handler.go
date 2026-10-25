@@ -1034,16 +1034,6 @@ func (h *Handler) forecastSettingsSave() http.Handler {
 		if err := r.ParseForm(); err != nil {
 			return fmt.Errorf("parsing form: %w", err)
 		}
-		confidenceStr := r.FormValue("confidence")
-		if confidenceStr != "" {
-			confidence, err := strconv.ParseFloat(confidenceStr, 64)
-			if err != nil {
-				return fmt.Errorf("parsing confidence: %w", err)
-			}
-			if err := h.svc.SetForecastConfidence(ctx, confidence); err != nil {
-				return fmt.Errorf("setting forecast confidence: %w", err)
-			}
-		}
 		samplesStr := r.FormValue("samples")
 		if samplesStr != "" {
 			samples, err := strconv.ParseInt(samplesStr, 10, 64)
@@ -1080,8 +1070,8 @@ func (h *Handler) dashboardForecastStream() http.Handler {
 		}
 
 		sse := srvu.SSEResponse(w)
-		for _, entity := range history.Entities {
-			if err := sse.SendNamedJson("entity", entity); err != nil {
+		for _, series := range history.Series {
+			if err := sse.SendNamedJson("entity", series); err != nil {
 				return err
 			}
 		}
