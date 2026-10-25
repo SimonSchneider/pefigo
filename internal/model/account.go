@@ -194,13 +194,9 @@ func (s *Service) ListBudgetAccounts(ctx context.Context, today date.Date) ([]Ac
 	for _, snapshot := range snapshots {
 		snapshotsMap[snapshot.AccountID] = snapshot
 	}
-	growthModels, err := s.q.ListActiveGrowthModels(ctx, ptr(int64(today)))
+	growthModelsMap, err := s.growthModelsAppliedOn(ctx, today)
 	if err != nil {
 		return nil, err
-	}
-	growthModelsMap := make(map[string]pdb.GrowthModel)
-	for _, growthModel := range growthModels {
-		growthModelsMap[growthModel.AccountID] = growthModel
 	}
 	return accountsListFromDBDetailed(budgetAccs, snapshotsMap, growthModelsMap, nil), nil
 }
@@ -218,13 +214,9 @@ func (s *Service) ListAccountsDetailed(ctx context.Context, today date.Date) ([]
 	for _, snapshot := range snapshots {
 		snapshotsMap[snapshot.AccountID] = snapshot
 	}
-	growthModels, err := s.q.ListActiveGrowthModels(ctx, ptr(int64(today)))
+	growthModelsMap, err := s.growthModelsAppliedOn(ctx, today)
 	if err != nil {
 		return nil, err
-	}
-	growthModelsMap := make(map[string]pdb.GrowthModel)
-	for _, growthModel := range growthModels {
-		growthModelsMap[growthModel.AccountID] = growthModel
 	}
 	startupShareAccountsMap := make(map[string]pdb.StartupShareAccount)
 	ucfg := uncertain.NewConfig(time.Now().UnixMilli(), 1)

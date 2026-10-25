@@ -81,15 +81,14 @@ func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEven
 	q := s.q
 	q1, q2 := (1-params.Quantile)/2, (1+params.Quantile)/2
 
-	transfers := make([]finance2.TransferTemplate, 0)
 	entities := make([]finance2.Entity, 0)
 	accs, err := q.ListAccounts(ctx)
 	if err != nil {
 		return fmt.Errorf("listing accounts for Prediction: %w", err)
 	}
-	trans, err := s.ListAllTransferTemplates(ctx)
+	schedule, err := s.TransferSchedule(ctx)
 	if err != nil {
-		return fmt.Errorf("listing transfers for Prediction: %w", err)
+		return fmt.Errorf("loading transfer schedule for Prediction: %w", err)
 	}
 	accountTypes, err := q.ListAccountTypes(ctx)
 	if err != nil {
@@ -186,10 +185,6 @@ func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEven
 			entities = append(entities, entity)
 		}
 	}
-	for _, t := range trans {
-		transfers = append(transfers, t.ToFinanceTransferTemplate())
-	}
-
 	startDate += 1
 	endDate := startDate.Add(params.Duration)
 
@@ -210,7 +205,7 @@ func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEven
 	snapshotRecorder := finance2.SnapshotRecorderFunc(func(accountID string, day date.Date, balance uncertain.Value) error {
 		return h.snapshot(accountID, day, balance)
 	})
-	if err := finance2.RunPrediction(ctx, ucfg, startDate, endDate, params.SnapshotInterval, entities, transfers, finance2.CompositeRecorder{SnapshotRecorder: snapshotRecorder}); err != nil {
+	if err := finance2.RunPrediction(ctx, ucfg, startDate, endDate, params.SnapshotInterval, entities, schedule.ForecastTransfers(), finance2.CompositeRecorder{SnapshotRecorder: snapshotRecorder}); err != nil {
 		return fmt.Errorf("running prediction for SSE: %w", err)
 	}
 	return h.close()

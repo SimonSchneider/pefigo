@@ -350,7 +350,7 @@ templ BillEditContent(view *BillEditView) {
 							<h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Amounts</h3>
 						<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr auto auto auto auto">
 							<div class="text-xs text-base-content/50">Start Date</div>
-							<div class="text-xs text-base-content/50">End Date</div>
+							@EndDateColumnHeader()
 							<div class="text-xs text-base-content/50">Amount</div>
 							<div class="text-xs text-base-content/50">Period</div>
 							<div class="text-xs text-base-content/50">Currency</div>

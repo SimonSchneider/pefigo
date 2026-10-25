@@ -728,18 +728,18 @@ func TestGetTransferTemplatesPageData_GroupAmountsComputed(t *testing.T) {
 		t.Fatalf("GetTransferTemplatesPageData: %v", err)
 	}
 
-	if len(view.TransferTemplates) != 1 {
-		t.Fatalf("expected 1 group row, got %d", len(view.TransferTemplates))
+	if len(view.Rows) != 1 {
+		t.Fatalf("expected 1 group row, got %d", len(view.Rows))
 	}
 
-	groupRow := view.TransferTemplates[0]
+	groupRow := view.Rows[0]
 	if !groupRow.IsGroup() {
 		t.Fatal("expected group row to be a group")
 	}
 
 	// Group row is virtual — ID is not one of the real member IDs
 	memberIDs := map[string]bool{}
-	for _, m := range groupRow.GroupMembers {
+	for _, m := range groupRow.Members {
 		memberIDs[m.ID] = true
 	}
 	if memberIDs[groupRow.ID] {
@@ -747,20 +747,19 @@ func TestGetTransferTemplatesPageData_GroupAmountsComputed(t *testing.T) {
 	}
 
 	// All real members are in GroupMembers
-	if len(groupRow.GroupMembers) != 2 {
-		t.Fatalf("expected 2 group members, got %d", len(groupRow.GroupMembers))
+	if len(groupRow.Members) != 2 {
+		t.Fatalf("expected 2 group members, got %d", len(groupRow.Members))
 	}
 
 	// GroupTotal = sum of active members only (inactive contributes 0)
-	if groupRow.GroupTotal != 2000 {
-		t.Errorf("expected GroupTotal 2000, got %f", groupRow.GroupTotal)
+	if groupRow.Amount != 2000 {
+		t.Errorf("expected group amount 2000, got %f", groupRow.Amount)
 	}
 
 	// Both members have their own amounts computed
 	amounts := map[float64]bool{}
-	for _, m := range groupRow.GroupMembers {
-		mwa := view.GetMemberWithAmount(m)
-		amounts[mwa.Amount] = true
+	for _, m := range groupRow.Members {
+		amounts[m.Amount] = true
 	}
 	if !amounts[0] {
 		t.Error("expected inactive member with amount 0")
@@ -931,10 +930,10 @@ func TestGetTransferTemplatesPageData_PercentTemplateAfterGroupedSalary(t *testi
 	}
 
 	// Find the Gem bidrag standalone row
-	var gemBidrag *model.TransferTemplateWithAmount
-	for i := range view.TransferTemplates {
-		if view.TransferTemplates[i].Name == "Gem bidrag" {
-			gemBidrag = &view.TransferTemplates[i]
+	var gemBidrag *model.TransferScheduleRow
+	for i := range view.Rows {
+		if view.Rows[i].Name == "Gem bidrag" {
+			gemBidrag = &view.Rows[i]
 			break
 		}
 	}
@@ -1139,19 +1138,19 @@ func TestAutoGrouping_SameKeyGroupsTogether(t *testing.T) {
 		t.Fatalf("GetTransferTemplatesPageData: %v", err)
 	}
 
-	if len(view.TransferTemplates) != 1 {
-		t.Fatalf("expected 1 group row, got %d", len(view.TransferTemplates))
+	if len(view.Rows) != 1 {
+		t.Fatalf("expected 1 group row, got %d", len(view.Rows))
 	}
-	if !view.TransferTemplates[0].IsGroup() {
+	if !view.Rows[0].IsGroup() {
 		t.Error("expected the row to be a group")
 	}
-	if len(view.TransferTemplates[0].GroupMembers) != 2 {
-		t.Errorf("expected 2 group members (all real members), got %d", len(view.TransferTemplates[0].GroupMembers))
+	if len(view.Rows[0].Members) != 2 {
+		t.Errorf("expected 2 group members (all real members), got %d", len(view.Rows[0].Members))
 	}
 	// Group row ID must not be one of the real member IDs
-	group := view.TransferTemplates[0]
+	group := view.Rows[0]
 	memberIDs := map[string]bool{}
-	for _, m := range group.GroupMembers {
+	for _, m := range group.Members {
 		memberIDs[m.ID] = true
 	}
 	if memberIDs[group.ID] {
@@ -1183,10 +1182,10 @@ func TestAutoGrouping_DifferentNameDoesNotGroup(t *testing.T) {
 		t.Fatalf("GetTransferTemplatesPageData: %v", err)
 	}
 
-	if len(view.TransferTemplates) != 2 {
-		t.Fatalf("expected 2 separate rows, got %d", len(view.TransferTemplates))
+	if len(view.Rows) != 2 {
+		t.Fatalf("expected 2 separate rows, got %d", len(view.Rows))
 	}
-	for _, row := range view.TransferTemplates {
+	for _, row := range view.Rows {
 		if row.IsGroup() {
 			t.Errorf("row %q should not be a group", row.Name)
 		}
@@ -1229,13 +1228,13 @@ func TestAutoGrouping_GroupAmountIsSumOfActiveMembers(t *testing.T) {
 		t.Fatalf("GetTransferTemplatesPageData: %v", err)
 	}
 
-	if len(view.TransferTemplates) != 1 {
-		t.Fatalf("expected 1 group row, got %d", len(view.TransferTemplates))
+	if len(view.Rows) != 1 {
+		t.Fatalf("expected 1 group row, got %d", len(view.Rows))
 	}
-	groupRow := view.TransferTemplates[0]
+	groupRow := view.Rows[0]
 	// GroupTotal should be sum of active members only: 2000 (inactive member contributes 0)
-	if groupRow.GroupTotal != 2000 {
-		t.Errorf("expected GroupTotal 2000, got %f", groupRow.GroupTotal)
+	if groupRow.Amount != 2000 {
+		t.Errorf("expected group amount 2000, got %f", groupRow.Amount)
 	}
 }
 
@@ -1569,7 +1568,7 @@ func TestSalaryGenerateTransferTemplates_GrossMultipleAmountsAndIBB(t *testing.T
 	}
 }
 
-// ---- Net Segment Splitting (integration via ListAllTransferTemplates) ----
+// ---- Net Segment Splitting (integration via the Transfer Schedule) ----
 
 // seedTaxCache pre-populates the SQLite cache with tax rate and table data
 // so the swe client doesn't hit the network.
@@ -1611,17 +1610,23 @@ func createGrossSalary(t *testing.T, svc *model.Service, name, kommun, forsamlin
 
 func salaryTTsFromAll(t *testing.T, svc *model.Service, salaryID string) []model.TransferTemplate {
 	t.Helper()
-	all, err := svc.ListAllTransferTemplates(t.Context())
-	if err != nil {
-		t.Fatalf("ListAllTransferTemplates: %v", err)
-	}
 	var result []model.TransferTemplate
-	for _, tt := range all {
+	for _, tt := range allTransferTemplates(t, svc) {
 		if tt.Source.EntityID == salaryID && tt.Source.Type == "salary" {
 			result = append(result, tt)
 		}
 	}
 	return result
+}
+
+// allTransferTemplates returns every Transfer Template in the Transfer Schedule, applied or not.
+func allTransferTemplates(t *testing.T, svc *model.Service) []model.TransferTemplate {
+	t.Helper()
+	var all []model.TransferTemplate
+	for _, tt := range mustTransferSchedule(t, svc).On(date.Today()).Transfers() {
+		all = append(all, tt.TransferTemplate)
+	}
+	return all
 }
 
 func TestNetSegments_SplitsAtAdjustmentChange(t *testing.T) {
@@ -2226,9 +2231,9 @@ func TestSalaryGenerateTransferTemplates_NoAmounts(t *testing.T) {
 	}
 }
 
-// ---- ListAllTransferTemplates integration ----
+// ---- Transfer Schedule integration ----
 
-func TestListAllTransferTemplates_MergesDBAndSalary(t *testing.T) {
+func TestTransferSchedule_MergesDBAndSalary(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()
 
@@ -2257,10 +2262,7 @@ func TestListAllTransferTemplates_MergesDBAndSalary(t *testing.T) {
 		StartDate: mustParseDate("2025-01-01"),
 	})
 
-	all, err := svc.ListAllTransferTemplates(ctx)
-	if err != nil {
-		t.Fatalf("ListAllTransferTemplates: %v", err)
-	}
+	all := allTransferTemplates(t, svc)
 	if len(all) != 2 {
 		t.Fatalf("expected 2 templates (1 DB + 1 salary), got %d", len(all))
 	}
@@ -2281,7 +2283,7 @@ func TestListAllTransferTemplates_MergesDBAndSalary(t *testing.T) {
 	}
 }
 
-func TestListAllTransferTemplatesWithChildren_IncludesSalaryTemplates(t *testing.T) {
+func TestTransferScheduleRows_IncludeSalaryTemplates(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()
 
@@ -2295,10 +2297,7 @@ func TestListAllTransferTemplatesWithChildren_IncludesSalaryTemplates(t *testing
 		StartDate: mustParseDate("2025-01-01"),
 	})
 
-	all, err := svc.ListAllTransferTemplatesWithChildren(ctx)
-	if err != nil {
-		t.Fatalf("ListAllTransferTemplatesWithChildren: %v", err)
-	}
+	all := mustTransferSchedule(t, svc).On(date.Today()).Rows()
 	if len(all) != 1 {
 		t.Fatalf("expected 1 template, got %d", len(all))
 	}
@@ -3324,9 +3323,9 @@ func TestBillGenerateTransferTemplates_NoAmounts(t *testing.T) {
 	}
 }
 
-// ---- ListAllTransferTemplates with Bills ----
+// ---- Transfer Schedule with Bills ----
 
-func TestListAllTransferTemplates_MergesDBSalaryAndBills(t *testing.T) {
+func TestTransferSchedule_MergesDBSalaryAndBills(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()
 
@@ -3376,10 +3375,7 @@ func TestListAllTransferTemplates_MergesDBSalaryAndBills(t *testing.T) {
 		StartDate: mustParseDate("2025-01-01"),
 	})
 
-	all, err := svc.ListAllTransferTemplates(ctx)
-	if err != nil {
-		t.Fatalf("ListAllTransferTemplates: %v", err)
-	}
+	all := allTransferTemplates(t, svc)
 
 	var dbCount, salaryCount, billCount int
 	for _, tt := range all {

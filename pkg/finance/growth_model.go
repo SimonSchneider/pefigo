@@ -25,14 +25,7 @@ func (i *TimeFrameGrowth) StartsOn() date.Date {
 }
 
 func (i *TimeFrameGrowth) IsActiveOn(day date.Date) bool {
-	// Check if the interest model applies to the given day
-	if i.StartDate.After(day) {
-		return false
-	}
-	if i.EndDate != nil && i.EndDate.Before(day) {
-		return false
-	}
-	return true
+	return appliesOn(i.StartDate, i.EndDate, day)
 }
 
 type GrowthCombined struct {
@@ -40,8 +33,8 @@ type GrowthCombined struct {
 }
 
 func NewGrowthCombined(growths ...GrowthModel) *GrowthCombined {
-	// Sort growths by start date
-	sort.Slice(growths, func(i, j int) bool {
+	// Sort growths by start date, keeping the given order for equal start dates
+	sort.SliceStable(growths, func(i, j int) bool {
 		return growths[i].StartsOn().Before(growths[j].StartsOn())
 	})
 	return &GrowthCombined{Growths: growths}
@@ -63,22 +56,15 @@ func (g *GrowthCombined) IsActiveOn(day date.Date) bool {
 	return false
 }
 
+// Apply applies the latest-starting growth model that applies on day. With equal start dates, the one
+// given last wins.
 func (g *GrowthCombined) Apply(ucfg *uncertain.Config, day date.Date, entities map[string]*ModeledEntity, totalBalance uncertain.Value) uncertain.Value {
-	// find the first growth that is active on the given day
-	i, found := sort.Find(len(g.Growths), func(i int) int {
-		if g.Growths[i].StartsOn().After(day) {
-			return 1 // This growth starts after the day, so we skip it
-		}
+	for i := len(g.Growths) - 1; i >= 0; i-- {
 		if g.Growths[i].IsActiveOn(day) {
-			return 0 // This growth is active on the day
+			return g.Growths[i].Apply(ucfg, day, entities, totalBalance)
 		}
-		return -1 // This growth is not active on the day
-	})
-	if !found {
-		return uncertain.NewFixed(0.0) // No growth applicable
 	}
-	gr := g.Growths[i].Apply(ucfg, day, entities, totalBalance)
-	return gr
+	return uncertain.NewFixed(0.0)
 }
 
 var _ GrowthModel = &GrowthCombined{}

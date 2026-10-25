@@ -1,8 +1,10 @@
 package finance
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/SimonSchneider/goslu/date"
@@ -100,6 +102,9 @@ func (fe *ModeledEntity) ApplyAppreciation(ucfg *uncertain.Config, entities map[
 }
 
 func RunPrediction(ctx context.Context, ucfg *uncertain.Config, from, to date.Date, snapshotCron date.Cron, financialEntities []Entity, transfers []TransferTemplate, recorder Recorder) error {
+	// A day's transfers run in priority order, and those of one priority together.
+	transfers = slices.Clone(transfers)
+	slices.SortStableFunc(transfers, func(a, b TransferTemplate) int { return cmp.Compare(a.Priority, b.Priority) })
 	dailyTransfers := make([]TransferTemplate, 0)
 	fes := make(map[string]*ModeledEntity)
 	earliestDate := from
@@ -119,8 +124,8 @@ func RunPrediction(ctx context.Context, ucfg *uncertain.Config, from, to date.Da
 		}
 		if from <= day {
 			for _, transfer := range transfers {
-				if transfer.EffectiveFrom.After(day) || (transfer.EffectiveTo != nil && transfer.EffectiveTo.Before(day)) || !transfer.Enabled || !transfer.Recurrence.Matches(day) {
-					continue // Skip transfers not effective on this day
+				if !transfer.ChargedOn(day) {
+					continue
 				}
 				dailyTransfers = append(dailyTransfers, transfer)
 			}

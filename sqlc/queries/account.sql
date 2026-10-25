@@ -66,7 +66,8 @@ WHERE account_id = ?
 -- name: GetGrowthModelsByAccount :many
 SELECT *
 FROM growth_model
-WHERE account_id = ?;
+WHERE account_id = ?
+ORDER BY start_date, id;
 -- name: GetGrowthModel :one
 SELECT *
 FROM growth_model
@@ -184,11 +185,10 @@ FROM investment_round ir
 ORDER BY ir.date,
   a.type_id,
   ir.account_id;
--- name: ListActiveGrowthModels :many
+-- name: ListGrowthModels :many
 SELECT *
 FROM growth_model
-WHERE (end_date IS NULL OR end_date > @param1)
-  AND start_date <= @param1;
+ORDER BY start_date, id;
 -- name: UpdateSnapshotDate :many
 UPDATE account_snapshot
 SET date = ?

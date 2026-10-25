@@ -309,6 +309,7 @@ const getGrowthModelsByAccount = `-- name: GetGrowthModelsByAccount :many
 SELECT id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at
 FROM growth_model
 WHERE account_id = ?
+ORDER BY start_date, id
 `
 
 func (q *Queries) GetGrowthModelsByAccount(ctx context.Context, accountID string) ([]GrowthModel, error) {
@@ -766,15 +767,14 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]Account, error) {
 	return items, nil
 }
 
-const listActiveGrowthModels = `-- name: ListActiveGrowthModels :many
+const listGrowthModels = `-- name: ListGrowthModels :many
 SELECT id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at
 FROM growth_model
-WHERE (end_date IS NULL OR end_date > ?1)
-  AND start_date <= ?1
+ORDER BY start_date, id
 `
 
-func (q *Queries) ListActiveGrowthModels(ctx context.Context, param1 *int64) ([]GrowthModel, error) {
-	rows, err := q.db.QueryContext(ctx, listActiveGrowthModels, param1)
+func (q *Queries) ListGrowthModels(ctx context.Context) ([]GrowthModel, error) {
+	rows, err := q.db.QueryContext(ctx, listGrowthModels)
 	if err != nil {
 		return nil, err
 	}

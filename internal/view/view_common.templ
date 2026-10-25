@@ -82,3 +82,12 @@ templ ItemsTooltipRow(name string, value string) {
 templ NoDataImg() {
 	<img src="/static/public/empty.png" class="w-12 h-12 text-base-content/30" />
 }
+
+// EndDateColumnHeader labels an End Date column. The End Date is the first day an entry no longer
+// applies, so the hint says it isn't included. See ADR 0003.
+templ EndDateColumnHeader() {
+	<div class="text-xs text-base-content/50 leading-tight">
+		End Date
+		<span class="block text-[10px] text-base-content/40">first day not included</span>
+	</div>
+}

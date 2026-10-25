@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strings"
 
 	"github.com/SimonSchneider/goslu/date"
 )
@@ -43,11 +42,10 @@ type BudgetView struct {
 func (s *Service) GetBudgetData(ctx context.Context) (*BudgetView, error) {
 	today := date.Today()
 
-	allTemplates, err := s.ListAllTransferTemplates(ctx)
+	schedule, err := s.TransferSchedule(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("listing transfer templates: %w", err)
+		return nil, fmt.Errorf("loading transfer schedule: %w", err)
 	}
-	templatesWithAmount := MakeTransferTemplatesWithAmount(allTemplates, today)
 
 	budgetAccounts, err := s.ListBudgetAccounts(ctx, today)
 	if err != nil {
@@ -65,11 +63,8 @@ func (s *Service) GetBudgetData(ctx context.Context) (*BudgetView, error) {
 
 	groupMap := make(map[string]*BudgetCategoryGroup)
 
-	for _, t := range templatesWithAmount {
-		if !t.Enabled || t.BudgetCategoryID == nil {
-			continue
-		}
-		if !strings.Contains(string(t.Recurrence), "*") {
+	for _, t := range schedule.On(today).Monthly() {
+		if t.BudgetCategoryID == nil {
 			continue
 		}
 		amount := math.Abs(t.Amount)

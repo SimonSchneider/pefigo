@@ -395,6 +395,9 @@ func (s *Service) DeleteBill(ctx context.Context, id string) error {
 }
 
 func (s *Service) UpsertBillAmount(ctx context.Context, inp BillAmount) (BillAmount, error) {
+	if err := checkEndDate(inp.StartDate, inp.EndDate); err != nil {
+		return BillAmount{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}

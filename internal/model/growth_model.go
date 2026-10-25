@@ -29,6 +29,11 @@ func (gm GrowthModel) GetEndDateString() string {
 	return gm.EndDate.String()
 }
 
+// AppliesOn reports whether the growth model applies on day, by the rule the forecast uses.
+func (gm GrowthModel) AppliesOn(day date.Date) bool {
+	return (&finance.TimeFrameGrowth{StartDate: gm.StartDate, EndDate: gm.EndDate}).IsActiveOn(day)
+}
+
 type AccountGrowthModelInput struct {
 	ID               string
 	AccountID        string
@@ -92,6 +97,9 @@ func growthModelFromDB(g pdb.GrowthModel) (GrowthModel, error) {
 }
 
 func (s *Service) UpsertAccountGrowthModel(ctx context.Context, inp AccountGrowthModelInput) (GrowthModel, error) {
+	if err := checkEndDate(inp.StartDate, inp.EndDate); err != nil {
+		return GrowthModel{}, err
+	}
 	var endDate *int64
 	if inp.EndDate != nil {
 		endDate = ptr(int64(*inp.EndDate))
@@ -138,6 +146,26 @@ func (s *Service) ListAccountGrowthModels(ctx context.Context, accountID string)
 		gmList[i] = gm
 	}
 	return gmList, nil
+}
+
+// growthModelsAppliedOn returns, per Account, the growth model the forecast applies on day: the
+// latest-starting one that applies, as finance.GrowthCombined picks it.
+func (s *Service) growthModelsAppliedOn(ctx context.Context, day date.Date) (map[string]pdb.GrowthModel, error) {
+	gms, err := s.q.ListGrowthModels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing growth models: %w", err)
+	}
+	applied := make(map[string]pdb.GrowthModel)
+	for _, g := range gms {
+		gm, err := growthModelFromDB(g)
+		if err != nil {
+			return nil, fmt.Errorf("converting growth model from db: %w", err)
+		}
+		if gm.AppliesOn(day) {
+			applied[g.AccountID] = g
+		}
+	}
+	return applied, nil
 }
 
 func (s *Service) DeleteAccountGrowthModel(ctx context.Context, id string) error {

@@ -137,6 +137,7 @@ templ TransferTemplateForm(view *TransferTemplateEditView) {
 									{{ endDate = view.TransferTemplate.EndDate.String() }}
 								}
 								<input type="text" class="input input-bordered w-full" name="end_date" value={ endDate } placeholder="Optional"/>
+								<div class="text-sm text-base-content/60 mt-1">First day not included</div>
 							</div>
 						</div>
 					</div>
@@ -197,13 +198,13 @@ templ TransferTemplateForm(view *TransferTemplateEditView) {
 templ TransferTemplatesStatCardRow(view *TransferTemplatesView2) {
 	<div class="flex flex-row flex-wrap gap-4">
 		@StatCard("Net Income", ui.FormatWithThousands(view.MonthlyIncome+view.MonthlyExpenses), "Net income of all accounts", IconTrendingUp("w-10 h-10 text-green-600"))
-		@StatCard("Total Templates", strconv.Itoa(len(view.TransferTemplates)), "number of templates", IconCashBanknote("w-10 h-10"))
+		@StatCard("Total Templates", strconv.Itoa(len(view.Rows)), "number of templates", IconCashBanknote("w-10 h-10"))
 		@StatCard("Total Income", ui.FormatWithThousands(view.MonthlyIncome), "Total income of all accounts", IconTrendingUp("w-10 h-10 text-green-600"))
 		@StatCard("Total Expenses", ui.FormatWithThousands(view.MonthlyExpenses), "Total expenses of all accounts", IconTrendingDown("w-10 h-10 text-red-600"))
 	</div>
 }
 
-templ TransferTemplateTableRow(view *TransferTemplatesView2, t *TransferTemplateWithAmount) {
+templ TransferTemplateTableRow(view *TransferTemplatesView2, t *TransferScheduleRow) {
 	{{ isGroup := t.IsGroup() }}
 	<tr
 		class={
@@ -283,11 +284,12 @@ templ TransferTemplateTableRow(view *TransferTemplatesView2, t *TransferTemplate
 		<!-- Recurrence -->
 		<td>
 			<div class="flex flex-col gap-0.5">
+				if !t.Recurring() {
+					<span class="badge badge-secondary badge-sm">one-time</span>
+				}
 				if t.Recurrence != "" {
 					<span>{ t.Recurrence }</span>
 					<span class="text-xs text-base-content/50">{ t.Priority }</span>
-				} else {
-					<span class="badge badge-secondary badge-sm">one-time</span>
 				}
 			</div>
 		</td>
@@ -309,7 +311,7 @@ templ TransferTemplateTableRow(view *TransferTemplatesView2, t *TransferTemplate
 					{{ class = "text-green-600" }}
 				}
 				if isGroup {
-					@BalanceBadge(t.GroupTotal, false, class)
+					@BalanceBadge(t.Amount, false, class)
 				} else {
 					@BalanceBadge(t.Amount, false, class)
 					if t.AmountType == "percent" {
@@ -344,7 +346,7 @@ templ TransferTemplateTableRow(view *TransferTemplatesView2, t *TransferTemplate
 	</tr>
 }
 
-templ TransferTemplateMemberRow(view *TransferTemplatesView2, parentID string, t *TransferTemplateWithAmount) {
+templ TransferTemplateMemberRow(view *TransferTemplatesView2, parentID string, t *ScheduledTransfer) {
 	<tr
 		class="hover:bg-base-200/50 transition-colors bg-base-100/50 hidden"
 		data-parent-id={ parentID }
@@ -404,11 +406,12 @@ templ TransferTemplateMemberRow(view *TransferTemplatesView2, parentID string, t
 		</td>
 		<td>
 			<div class="flex flex-col gap-0.5">
+				if !t.Recurring() {
+					<span class="badge badge-secondary badge-sm">one-time</span>
+				}
 				if t.Recurrence != "" {
 					<span>{ t.Recurrence }</span>
 					<span class="text-xs text-base-content/50">{ t.Priority }</span>
-				} else {
-					<span class="badge badge-secondary badge-sm">one-time</span>
 				}
 			</div>
 		</td>
@@ -491,7 +494,7 @@ templ TransferTemplatesContent(view *TransferTemplatesView2) {
 									</tr>
 								</thead>
 								<tbody>
-									if len(view.TransferTemplates) == 0 {
+									if len(view.Rows) == 0 {
 										<tr>
 											<td colspan="6" class="text-center py-8 text-base-content/70">
 												<div class="flex flex-col items-center gap-2">
@@ -502,13 +505,10 @@ templ TransferTemplatesContent(view *TransferTemplatesView2) {
 											</td>
 										</tr>
 									} else {
-										for _, tpl := range view.TransferTemplates {
-											@TransferTemplateTableRow(view, &tpl)
-											if tpl.IsGroup() {
-												for _, member := range tpl.GroupMembers {
-													{{ mwa := view.GetMemberWithAmount(member) }}
-													@TransferTemplateMemberRow(view, tpl.ID, &mwa)
-												}
+										for _, row := range view.Rows {
+											@TransferTemplateTableRow(view, &row)
+											for _, member := range row.Members {
+												@TransferTemplateMemberRow(view, row.ID, &member)
 											}
 										}
 									}
