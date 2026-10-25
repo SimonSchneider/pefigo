@@ -37,11 +37,19 @@
     if (!dom) return;
 
     var chart = echarts.init(dom);
-    var series = {};
-    var legendData = [];
-    var allMarklines = [];
     var statusEl = document.getElementById('forecast-status');
+    var failedEl = document.getElementById('forecast-failed');
     var durationSelect = document.getElementById('forecast-duration');
+
+    // Client state, rebuilt from scratch on every EventSource (re)connect.
+    // series maps an Account Type ID to its history points, which arrive once
+    // in the initial payload, and its forecast points, which every Forecast
+    // Run clears and refills. seriesOrder keeps the order the series arrived in.
+    var series = {};
+    var seriesOrder = [];
+    var allMarklines = [];
+    var setupDone = false;
+    var renderPending = false;
 
     function getMaxDate() {
         var years = parseInt(durationSelect ? durationSelect.value : '10', 10);
@@ -49,12 +57,6 @@
         var d = new Date();
         d.setFullYear(d.getFullYear() + years);
         return d.getTime();
-    }
-
-    function filterData(data) {
-        var maxDate = getMaxDate();
-        if (!maxDate) return data;
-        return data.filter(function(point) { return point[0] <= maxDate; });
     }
 
     function showLoading() {
@@ -65,55 +67,98 @@
         if (statusEl) statusEl.classList.add('hidden');
     }
 
+    // The failure badge's tooltip (DaisyUI, via data-tip) carries the message.
+    function showFailure(message) {
+        if (!failedEl) return;
+        failedEl.setAttribute('data-tip', message || 'The forecast failed');
+        failedEl.classList.remove('hidden');
+    }
+
+    function hideFailure() {
+        if (!failedEl) return;
+        failedEl.classList.add('hidden');
+        failedEl.setAttribute('data-tip', '');
+    }
+
+    function resetState() {
+        series = {};
+        seriesOrder = [];
+        allMarklines = [];
+        setupDone = false;
+        hideLoading();
+        hideFailure();
+    }
+
     function addEntity(e) {
-        var color = e.color || '#666';
-        series[e.id] = {
-            id: e.id,
+        var id = e.id;
+        if (!series[id]) seriesOrder.push(id);
+        series[id] = {
             name: e.name,
-            type: 'line',
-            data: [],
-            showSymbol: false,
-            smooth: false,
-            group: e.name,
-            lineStyle: { color: color },
-            itemStyle: { color: color }
+            color: e.color || '#666',
+            history: (e.snapshots || []).map(function(s) { return [s.day, s.balance]; }),
+            forecast: []
         };
-        legendData.push({ name: e.name });
     }
 
-    function addSnapshotFromEntity(s, entityId) {
-        if (!series[entityId]) return;
-        series[entityId].data.push([s.day, s.balance]);
+    function addForecastPoint(s) {
+        var entry = series[s.AccountTypeID];
+        if (!entry) return;
+        entry.forecast.push([s.Date, s.Median]);
     }
 
-    function addSnapshotFromSSE(s) {
-        var id = s.AccountTypeID;
-        if (!series[id]) return;
-        series[id].data.push([s.Date, s.Median]);
+    function clearForecasts() {
+        seriesOrder.forEach(function(id) {
+            series[id].forecast = [];
+        });
     }
 
-    function buildFilteredSeries() {
+    function buildFilteredSeries(theme) {
         var maxDate = getMaxDate();
-        var filtered = Object.keys(series).map(function(key) {
-            var s = series[key];
-            var copy = {};
-            for (var k in s) { copy[k] = s[k]; }
-            copy.data = maxDate ? s.data.filter(function(p) { return p[0] <= maxDate; }) : s.data;
-            return copy;
+        function inRange(day) { return !maxDate || day <= maxDate; }
+        var lines = seriesOrder.map(function(id) {
+            var s = series[id];
+            return {
+                id: 'series:' + id,
+                name: s.name,
+                type: 'line',
+                data: s.history.concat(s.forecast).filter(function(p) { return inRange(p[0]); }),
+                showSymbol: false,
+                smooth: false,
+                lineStyle: { color: s.color },
+                itemStyle: { color: s.color }
+            };
         });
-        var filteredMarklines = allMarklines.filter(function(m) {
-            if (!maxDate) return true;
-            return m._date <= maxDate;
-        }).map(function(m) {
-            var copy = {};
-            for (var k in m) { if (k !== '_date') copy[k] = m[k]; }
-            return copy;
+        var marklines = [];
+        allMarklines.forEach(function(m, idx) {
+            if (!inRange(m.date)) return;
+            var color = m.color || theme.baseContent;
+            marklines.push({
+                id: 'markline:' + idx,
+                name: m.name,
+                type: 'line',
+                markLine: {
+                    symbol: ['none', 'none'],
+                    data: [{
+                        xAxis: new Date(m.date),
+                        lineStyle: { color: color, type: 'dashed' },
+                        label: {
+                            offset: [0, idx % 2 !== 0 ? 0 : -15],
+                            formatter: m.name,
+                            color: color,
+                            textBorderWidth: 0
+                        }
+                    }]
+                }
+            });
         });
-        return filtered.concat(filteredMarklines);
+        return lines.concat(marklines);
     }
 
     function updateChart() {
         var theme = getThemeOpts();
+        // replaceMerge drops series that are no longer in the option, so a
+        // reconnect or a shorter duration never leaves stale lines behind.
+        // The legend's data array is replaced wholesale on every call.
         chart.setOption({
             backgroundColor: theme.baseBg,
             tooltip: {
@@ -141,7 +186,7 @@
                 }
             },
             legend: {
-                data: legendData,
+                data: seriesOrder.map(function(id) { return { name: series[id].name }; }),
                 type: 'scroll',
                 bottom: 0,
                 textStyle: theme.textStyle
@@ -161,89 +206,80 @@
                 type: 'value',
                 axisLabel: theme.axisLabel
             },
-            series: buildFilteredSeries()
+            series: buildFilteredSeries(theme)
+        }, { replaceMerge: ['series'] });
+    }
+
+    // Live snapshots arrive one at a time, so renders are coalesced to at most
+    // one per frame. Nothing renders until the initial payload's setup-done, so
+    // a reconnect keeps showing the previous chart until the new one is ready.
+    function scheduleRender() {
+        if (!setupDone || renderPending) return;
+        renderPending = true;
+        requestAnimationFrame(function() {
+            renderPending = false;
+            if (setupDone) updateChart();
         });
     }
 
     var evtSource = new EventSource('/dashboard/forecast/stream');
 
+    evtSource.addEventListener('open', function() {
+        resetState();
+    });
+
     evtSource.addEventListener('entity', function(event) {
-        var e = JSON.parse(event.data);
-        addEntity(e);
-        (e.snapshots || []).forEach(function(s) {
-            addSnapshotFromEntity(s, e.id);
-        });
+        addEntity(JSON.parse(event.data));
     });
 
     evtSource.addEventListener('marklines', function(event) {
-        var data = JSON.parse(event.data);
-        var themeText = getThemeColor('--color-base-content', '#333');
-        allMarklines = (data || []).map(function(m, idx) {
-            return {
-                _date: m.date,
-                name: m.name,
-                type: 'line',
-                markLine: {
-                    symbol: ['none', 'none'],
-                    data: [{
-                        xAxis: new Date(m.date),
-                        lineStyle: { color: m.color || themeText, type: 'dashed' },
-                        label: {
-                            offset: [0, idx % 2 !== 0 ? 0 : -15],
-                            formatter: m.name,
-                            color: m.color || themeText,
-                            textBorderWidth: 0
-                        }
-                    }]
-                }
-            };
-        });
+        allMarklines = JSON.parse(event.data) || [];
     });
 
     evtSource.addEventListener('setup-done', function() {
-        updateChart();
+        setupDone = true;
+        scheduleRender();
     });
 
-    evtSource.addEventListener('reset', function() {
-        Object.keys(series).forEach(function(key) {
-            series[key].data = [];
-        });
-        updateChart();
+    evtSource.addEventListener('started', function() {
+        clearForecasts();
+        showLoading();
+        hideFailure();
+        scheduleRender();
     });
 
     evtSource.addEventListener('snapshot', function(event) {
-        var s = JSON.parse(event.data);
-        addSnapshotFromSSE(s);
-        updateChart();
+        addForecastPoint(JSON.parse(event.data));
+        scheduleRender();
     });
 
-    evtSource.addEventListener('status', function(event) {
-        var data = JSON.parse(event.data);
-        if (data.status === 'running') {
-            showLoading();
-        } else {
-            hideLoading();
-        }
-    });
-
-    evtSource.addEventListener('close', function() {
-        evtSource.close();
+    evtSource.addEventListener('done', function() {
         hideLoading();
     });
 
+    evtSource.addEventListener('failed', function(event) {
+        var message = '';
+        try {
+            message = (JSON.parse(event.data) || {}).message || '';
+        } catch (_) {}
+        hideLoading();
+        showFailure(message);
+    });
+
     chart.on('legendselectchanged', function(params) {
-        Object.values(series).forEach(function(v) {
+        seriesOrder.forEach(function(id) {
+            var name = series[id].name;
             chart.dispatchAction({
-                type: params.selected[v.group] ? 'legendSelect' : 'legendUnSelect',
-                name: v.name
+                type: params.selected[name] ? 'legendSelect' : 'legendUnSelect',
+                name: name
             });
         });
     });
 
     if (durationSelect) {
-        durationSelect.addEventListener('change', function() { updateChart(); });
+        durationSelect.addEventListener('change', function() { scheduleRender(); });
     }
 
     window.addEventListener('resize', function() { chart.resize(); });
-    window.addEventListener('themechange', function() { updateChart(); chart.resize(); });
+    window.addEventListener('themechange', function() { scheduleRender(); chart.resize(); });
 })();
