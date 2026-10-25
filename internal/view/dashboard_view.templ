@@ -66,6 +66,9 @@ templ DashboardMainContent(view *DashboardView) {
 								<h2 class="card-title">
 									Forecast
 									<span id="forecast-status" class="loading loading-spinner loading-sm hidden"></span>
+									<span id="forecast-failed" class="tooltip tooltip-bottom sm:tooltip-right tooltip-error font-normal hidden" data-tip="">
+										<span class="badge badge-error badge-sm" tabindex="0">Failed</span>
+									</span>
 								</h2>
 								<select id="forecast-duration" class="select select-bordered select-sm">
 									<option value="10" selected>10 years</option>
