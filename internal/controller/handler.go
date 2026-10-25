@@ -1065,77 +1065,79 @@ func (h *Handler) forecastSettingsSave() http.Handler {
 	})
 }
 
+// dashboardForecastStream streams the Dashboard Forecast: the history and marklines, then the
+// stored forecast as the events that would have built it, then every change as it happens.
 func (h *Handler) dashboardForecastStream() http.Handler {
 	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		sse := srvu.SSEResponse(w)
-		runner := h.svc.ForecastRunner()
-
-		// Subscribe to live updates
-		var ch chan model.ForecastEvent
-		if runner != nil {
-			ch = runner.Subscribe()
-			defer runner.Unsubscribe(ch)
-		}
-
-		// Stream cached data as individual events
-		data, err := h.svc.GetForecastCacheForDashboard(ctx)
+		sub, err := h.svc.DashboardForecast().Subscribe(ctx)
 		if err != nil {
-			return fmt.Errorf("getting forecast cache: %w", err)
+			return fmt.Errorf("subscribing to the dashboard forecast: %w", err)
 		}
-		if data != nil {
-			for _, entity := range data.Entities {
-				if err := sse.SendNamedJson("entity", entity); err != nil {
-					return err
-				}
-			}
-			if len(data.Marklines) > 0 {
-				if err := sse.SendNamedJson("marklines", data.Marklines); err != nil {
-					return err
-				}
-			}
-			if err := sse.SendEventWithoutData("setup-done"); err != nil {
+		defer sub.Unsubscribe()
+		history, err := h.svc.GetDashboardForecastHistory(ctx, sub.Rows)
+		if err != nil {
+			return fmt.Errorf("getting the dashboard forecast history: %w", err)
+		}
+
+		sse := srvu.SSEResponse(w)
+		for _, entity := range history.Entities {
+			if err := sse.SendNamedJson("entity", entity); err != nil {
 				return err
 			}
 		}
-
-		// Send current status
-		if runner != nil && runner.IsRunning() {
-			if err := sse.SendNamedJson("status", map[string]string{"status": "running"}); err != nil {
+		if err := sse.SendNamedJson("marklines", history.Marklines); err != nil {
+			return err
+		}
+		if err := sse.SendEventWithoutData("setup-done"); err != nil {
+			return err
+		}
+		for _, evt := range forecastSubscriptionEvents(sub) {
+			if err := sendForecastEvent(sse, evt); err != nil {
 				return err
 			}
-		}
-
-		// Stream live updates
-		if ch == nil {
-			return sse.SendEventWithoutData("close")
 		}
 		for {
 			select {
 			case <-ctx.Done():
 				return nil
-			case evt, ok := <-ch:
+			case evt, ok := <-sub.Events:
 				if !ok {
 					return nil
 				}
-				switch evt.Type {
-				case model.ForecastEventSnapshot:
-					if err := sse.SendNamedJson("snapshot", evt.Snapshot); err != nil {
-						return err
-					}
-				case model.ForecastEventReset:
-					if err := sse.SendEventWithoutData("reset"); err != nil {
-						return err
-					}
-				case model.ForecastEventStatus:
-					if err := sse.SendNamedJson("status", map[string]string{"status": "running"}); err != nil {
-						return err
-					}
-				case model.ForecastEventDone:
-					if err := sse.SendNamedJson("status", map[string]string{"status": "idle"}); err != nil {
-						return err
-					}
+				if err := sendForecastEvent(sse, evt); err != nil {
+					return err
 				}
 			}
 		}
 	})
+}
+
+// forecastSubscriptionEvents turns the Dashboard Forecast as it was when subscribing into the
+// events that would have built it, so the client handles it exactly like live events.
+func forecastSubscriptionEvents(sub model.ForecastSubscription) []model.ForecastEvent {
+	events := make([]model.ForecastEvent, 0, len(sub.Rows)+1)
+	if sub.Status.State == model.ForecastStateRunning {
+		events = append(events, model.ForecastEvent{Type: model.ForecastEventStarted})
+	}
+	for i := range sub.Rows {
+		events = append(events, model.ForecastEvent{Type: model.ForecastEventSnapshot, Snapshot: &sub.Rows[i]})
+	}
+	if sub.Status.State == model.ForecastStateFailed {
+		events = append(events, model.ForecastEvent{Type: model.ForecastEventFailed, Message: sub.Status.Message})
+	}
+	return events
+}
+
+func sendForecastEvent(sse *srvu.SSESender, evt model.ForecastEvent) error {
+	switch evt.Type {
+	case model.ForecastEventStarted:
+		return sse.SendEventWithoutData("started")
+	case model.ForecastEventSnapshot:
+		return sse.SendNamedJson("snapshot", evt.Snapshot)
+	case model.ForecastEventDone:
+		return sse.SendEventWithoutData("done")
+	case model.ForecastEventFailed:
+		return sse.SendNamedJson("failed", map[string]string{"message": evt.Message})
+	}
+	return nil
 }

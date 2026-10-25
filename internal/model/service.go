@@ -15,20 +15,12 @@ import (
 )
 
 type Service struct {
-	db             *sql.DB
-	q              *pdb.Queries
-	sweClient      *swe.Client
-	currencyClient *currency.Client
-	forecastInputs *forecastInputWatcher
-}
-
-// SetForecastRunner sets the runner that recomputes the Dashboard Forecast whenever it becomes Stale.
-func (s *Service) SetForecastRunner(runner *ForecastRunner) {
-	s.forecastInputs.runner.Store(runner)
-}
-
-func (s *Service) ForecastRunner() *ForecastRunner {
-	return s.forecastInputs.runner.Load()
+	db                *sql.DB
+	q                 *pdb.Queries
+	sweClient         *swe.Client
+	currencyClient    *currency.Client
+	forecastInputs    *forecastInputWatcher
+	dashboardForecast *DashboardForecast
 }
 
 // ForecastInputGeneration advances every time a Forecast Input is written.
@@ -46,9 +38,11 @@ func WithCurrencyOptions(opts ...currency.ClientOption) ServiceOption {
 }
 
 // Open opens and migrates the SQLite database at conn, with the migrations in dir under path, and
-// returns a Service on it. Writes to Forecast Inputs are detected on every pooled connection.
+// returns a Service on it. Writes to Forecast Inputs are detected on every pooled connection and
+// mark the Dashboard Forecast Stale, which only schedules Forecast Runs once it is started.
 func Open(ctx context.Context, dir fs.FS, path string, conn string, opts ...ServiceOption) (*Service, error) {
-	forecastInputs := &forecastInputWatcher{}
+	dashboardForecast := newDashboardForecast()
+	forecastInputs := &forecastInputWatcher{dashboardForecast: dashboardForecast}
 	db, err := driver.Open(conn, forecastInputs.register)
 	if err != nil {
 		return nil, err
@@ -65,12 +59,15 @@ func Open(ctx context.Context, dir fs.FS, path string, conn string, opts ...Serv
 	cache := NewSQLiteCache(db)
 	ttlCache := NewTTLSQLiteCache(db)
 	s := &Service{
-		db:             db,
-		q:              pdb.New(db),
-		sweClient:      swe.NewClient(cache),
-		currencyClient: currency.NewClient(ttlCache),
-		forecastInputs: forecastInputs,
+		db:                db,
+		q:                 pdb.New(db),
+		sweClient:         swe.NewClient(cache),
+		currencyClient:    currency.NewClient(ttlCache),
+		forecastInputs:    forecastInputs,
+		dashboardForecast: dashboardForecast,
 	}
+	dashboardForecast.svc = s
+	dashboardForecast.compute = s
 	for _, o := range opts {
 		o(s)
 	}

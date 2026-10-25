@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"time"
 
 	"github.com/SimonSchneider/goslu/srvu"
 	"github.com/SimonSchneider/goslu/templ"
@@ -31,16 +30,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return fmt.Errorf("failed to open db: %w", err)
 	}
 
-	runner := model.NewForecastRunner(5*time.Second, func(ctx context.Context) {
-		if err := svc.RunForecastCache(ctx); err != nil {
-			logger.Printf("forecast cache error: %v", err)
-		}
-	})
-	svc.SetForecastRunner(runner)
-	defer runner.Stop()
-
-	// Trigger initial forecast on startup
-	runner.Invalidate()
+	svc.DashboardForecast().Start(logger)
+	defer svc.DashboardForecast().Stop()
 
 	public, _, err := templ.GetPublicAndTemplates(pefigo.StaticEmbeddedFS, &templ.Config{
 		Watch: cfg.Watch,

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/internal/model"
@@ -245,8 +244,7 @@ func TestForecastInputMutationsAdvanceGeneration(t *testing.T) {
 // write has no case in forecastInputMutations, so new Forecast Inputs get a case too.
 func TestForecastInputMutationsCoverEveryServiceMutation(t *testing.T) {
 	notForecastInputWrites := map[string]bool{
-		"SetForecastRunner": true, // no database write
-		"UpsertFavicon":     true, // favicon_cache, see TestFaviconCacheWriteLeavesForecastInputGenerationUnchanged
+		"UpsertFavicon": true, // favicon_cache, see TestFaviconCacheWriteLeavesForecastInputGenerationUnchanged
 	}
 	covered := map[string]bool{}
 	for _, m := range forecastInputMutations() {
@@ -274,49 +272,47 @@ func looksLikeWrite(method string) bool {
 	return false
 }
 
-func TestForecastInputWriteReachesForecastRunner(t *testing.T) {
-	svc := newTestService(t)
+func TestForecastInputWriteMarksDashboardForecastStale(t *testing.T) {
+	svc, timers := newForecastTestService(t, nil)
 	ctx := t.Context()
-
-	ran := make(chan struct{}, 1)
-	runner := model.NewForecastRunner(time.Millisecond, func(ctx context.Context) {
-		select {
-		case ran <- struct{}{}:
-		default:
-		}
-	})
-	svc.SetForecastRunner(runner)
-	defer runner.Stop()
-
-	if err := svc.SetDefaultCurrency(ctx, "EUR"); err != nil {
-		t.Fatalf("set default currency: %v", err)
+	seedForecastableData(t, svc)
+	startForecast(svc)
+	timers.fire()
+	if n := timers.pending(); n != 0 {
+		t.Fatalf("expected no Forecast Run scheduled after the first one, got %d", n)
 	}
 
-	select {
-	case <-ran:
-	case <-time.After(5 * time.Second):
-		t.Fatal("forecast runner did not run after a Forecast Input write")
+	if err := svc.SetForecastSamples(ctx, 100); err != nil {
+		t.Fatalf("set forecast samples: %v", err)
+	}
+	if n := timers.pending(); n != 1 {
+		t.Fatalf("expected a Forecast Input write to schedule one Forecast Run, got %d", n)
+	}
+
+	sub := subscribe(t, svc)
+	timers.fire()
+	got := received(sub.Events)
+	if len(got) < 3 || got[0].Type != model.ForecastEventStarted || got[len(got)-1].Type != model.ForecastEventDone {
+		t.Fatalf("expected the scheduled Forecast Run to recompute the Dashboard Forecast, got %v", eventTypes(got))
 	}
 }
 
 func TestForecastRunLeavesForecastInputGenerationUnchanged(t *testing.T) {
-	svc := newTestService(t)
-	ctx := t.Context()
+	svc, timers := newForecastTestService(t, nil)
 	seedForecastableData(t, svc)
+	startForecast(svc)
 
 	before := svc.ForecastInputGeneration()
-	if err := svc.RunForecastCache(ctx); err != nil {
-		t.Fatalf("run forecast cache: %v", err)
-	}
-	rows, err := svc.ListForecastCache(ctx)
-	if err != nil {
-		t.Fatalf("list forecast cache: %v", err)
-	}
-	if len(rows) == 0 {
-		t.Fatal("expected the forecast run to write forecast rows")
+	sub := subscribe(t, svc)
+	timers.fire()
+	if rows := snapshotRows(received(sub.Events)); len(rows) == 0 {
+		t.Fatal("expected the Forecast Run to store forecast rows")
 	}
 	if after := svc.ForecastInputGeneration(); after != before {
-		t.Fatalf("forecast run changed the Forecast Input generation from %d to %d", before, after)
+		t.Fatalf("Forecast Run changed the Forecast Input generation from %d to %d", before, after)
+	}
+	if n := timers.pending(); n != 0 {
+		t.Fatalf("expected the Forecast Run to schedule nothing, got %d", n)
 	}
 }
 

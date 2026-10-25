@@ -32,6 +32,8 @@ type SnapshotHistorySeries struct {
 	Name  string    `json:"name"`
 	Color string    `json:"color"`
 	Data  []float64 `json:"data"`
+
+	typeID string // the Account Type, or "" for accounts without one
 }
 
 type SnapshotHistoryChartData struct {
@@ -237,9 +239,10 @@ func (s *Service) buildSnapshotHistoryChart(ctx context.Context, accountTypes []
 		}
 		if hasAny {
 			series = append(series, SnapshotHistorySeries{
-				Name:  at.Name,
-				Color: color,
-				Data:  data,
+				Name:   at.Name,
+				Color:  color,
+				Data:   data,
+				typeID: typeID,
 			})
 		}
 	}

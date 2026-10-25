@@ -19,8 +19,8 @@ var notForecastInputs = map[string]bool{
 // forecastInputWatcher learns about every row written to a Forecast Input table from SQLite's update
 // hook, so Service mutations never need to know the Dashboard Forecast exists.
 type forecastInputWatcher struct {
-	generation atomic.Uint64
-	runner     atomic.Pointer[ForecastRunner]
+	generation        atomic.Uint64
+	dashboardForecast *DashboardForecast
 }
 
 // register is the per-connection init that installs the update hook on a new pooled connection.
@@ -35,7 +35,5 @@ func (w *forecastInputWatcher) rowChanged(_ sqlite3.AuthorizerActionCode, _, tab
 		return
 	}
 	w.generation.Add(1)
-	if runner := w.runner.Load(); runner != nil {
-		runner.Invalidate()
-	}
+	w.dashboardForecast.MarkStale()
 }
