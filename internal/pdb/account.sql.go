@@ -309,6 +309,7 @@ const getGrowthModelsByAccount = `-- name: GetGrowthModelsByAccount :many
 SELECT id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at
 FROM growth_model
 WHERE account_id = ?
+ORDER BY start_date, id
 `
 
 func (q *Queries) GetGrowthModelsByAccount(ctx context.Context, accountID string) ([]GrowthModel, error) {

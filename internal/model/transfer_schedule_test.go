@@ -270,3 +270,38 @@ func TestTransferScheduleRowsGroupTransferTemplatesAfterEvaluatingThem(t *testin
 		t.Errorf("expected grouping to keep the total %f, got %f", transfersTotal, rowsTotal)
 	}
 }
+
+func TestTransferScheduleChargesPercentAmountsFromTheDaysTransfersOnly(t *testing.T) {
+	svc := newTestService(t)
+	checking := mustAccount(t, svc, "Checking")
+	savings := mustAccount(t, svc, "Savings")
+	start := mustParseDate("2025-01-01")
+	mustTransferTemplate(t, svc, model.TransferTemplate{
+		Name: "Side income", ToAccountID: checking.ID, AmountType: "fixed", AmountFixed: newFixedValue(1000),
+		Priority: 0, Recurrence: "*-*-01", StartDate: start, Enabled: true,
+	})
+	mustTransferTemplate(t, svc, model.TransferTemplate{
+		Name: "Salary", ToAccountID: checking.ID, AmountType: "fixed", AmountFixed: newFixedValue(4000),
+		Priority: 1, Recurrence: "*-*-25", StartDate: start, Enabled: true,
+	})
+	mustTransferTemplate(t, svc, model.TransferTemplate{
+		Name: "Saving", FromAccountID: checking.ID, ToAccountID: savings.ID, AmountType: "percent", AmountFixed: newFixedValue(0), AmountPercent: 0.5,
+		Priority: 2, Recurrence: "*-*-25", StartDate: start, Enabled: true,
+	})
+	day := mustTransferSchedule(t, svc).On(mustParseDate("2025-06-25"))
+
+	charged := make(map[string]float64)
+	for _, tt := range day.Charged() {
+		charged[tt.Name] = tt.Amount
+	}
+	if want := map[string]float64{"Salary": 4000, "Saving": 2000}; !maps.Equal(charged, want) {
+		t.Errorf("expected charges %v on the 25th, got %v", want, charged)
+	}
+	monthly := make(map[string]float64)
+	for _, tt := range day.Monthly() {
+		monthly[tt.Name] = tt.Amount
+	}
+	if monthly["Saving"] != 2500 {
+		t.Errorf("expected a month of saving to be half of all income, 2500, got %f", monthly["Saving"])
+	}
+}

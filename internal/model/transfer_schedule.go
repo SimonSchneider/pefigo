@@ -88,10 +88,9 @@ const (
 // ScheduledTransfer is a Transfer Template evaluated on a day.
 type ScheduledTransfer struct {
 	TransferTemplate
-	// Amount is what the Transfer Template moves when it is Active on the day, and 0 otherwise. The
-	// Active Transfer Templates are evaluated in groups of one recurrence and priority, in schedule
-	// order, starting from empty Accounts: a percent amount is taken from the balance its source
-	// Account has before its group.
+	// Amount is what the Transfer Template moves when it is Active on the day, and 0 otherwise. In
+	// Transfers, Monthly and Rows every Active Transfer Template is evaluated, as one month of
+	// transfers; in Charged only those charged on the day are. See evaluate.
 	Amount float64
 	state  TransferState
 }
@@ -112,6 +111,18 @@ type TransferScheduleDay struct {
 }
 
 func (ts *TransferSchedule) On(day date.Date) *TransferScheduleDay {
+	d := &TransferScheduleDay{Day: day, transfers: make([]ScheduledTransfer, len(ts.templates))}
+	for i, t := range ts.templates {
+		d.transfers[i] = ScheduledTransfer{TransferTemplate: t, state: transferStateOn(t, day)}
+	}
+	evaluate(d.transfers)
+	return d
+}
+
+// evaluate sets the Amount of the Active transfers in groups of one recurrence and priority, in
+// order, starting from empty Accounts: a percent amount is taken from the balance its source Account
+// has before its group.
+func evaluate(transfers []ScheduledTransfer) {
 	type balance struct {
 		beforeGroup float64
 		current     float64
@@ -122,11 +133,10 @@ func (ts *TransferSchedule) On(day date.Date) *TransferScheduleDay {
 	}
 	balances := make(map[string]balance)
 	var group *groupKey
-	d := &TransferScheduleDay{Day: day, transfers: make([]ScheduledTransfer, len(ts.templates))}
-	for i, t := range ts.templates {
-		st := ScheduledTransfer{TransferTemplate: t, state: transferStateOn(t, day)}
-		d.transfers[i] = st
-		if st.state != TransferActive {
+	for i := range transfers {
+		t := &transfers[i]
+		t.Amount = 0
+		if t.state != TransferActive {
 			continue
 		}
 		if k := (groupKey{t.Recurrence, t.Priority}); group == nil || *group != k {
@@ -138,19 +148,17 @@ func (ts *TransferSchedule) On(day date.Date) *TransferScheduleDay {
 		}
 		switch t.AmountType {
 		case "fixed":
-			st.Amount = t.AmountFixed.Mean()
+			t.Amount = t.AmountFixed.Mean()
 		case "percent":
-			st.Amount = t.AmountPercent * balances[t.FromAccountID].beforeGroup
+			t.Amount = t.AmountPercent * balances[t.FromAccountID].beforeGroup
 		}
 		from := balances[t.FromAccountID]
-		from.current -= st.Amount
+		from.current -= t.Amount
 		balances[t.FromAccountID] = from
 		to := balances[t.ToAccountID]
-		to.current += st.Amount
+		to.current += t.Amount
 		balances[t.ToAccountID] = to
-		d.transfers[i] = st
 	}
-	return d
 }
 
 func transferStateOn(t TransferTemplate, day date.Date) TransferState {
@@ -169,7 +177,7 @@ func (d *TransferScheduleDay) Transfers() []ScheduledTransfer {
 }
 
 // Charged returns the Transfer Templates that move money on the day: the Active ones whose recurrence
-// matches it.
+// matches it, evaluated on their own.
 func (d *TransferScheduleDay) Charged() []ScheduledTransfer {
 	var charged []ScheduledTransfer
 	for _, t := range d.transfers {
@@ -177,6 +185,7 @@ func (d *TransferScheduleDay) Charged() []ScheduledTransfer {
 			charged = append(charged, t)
 		}
 	}
+	evaluate(charged)
 	return charged
 }
 

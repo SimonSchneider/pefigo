@@ -66,7 +66,8 @@ WHERE account_id = ?
 -- name: GetGrowthModelsByAccount :many
 SELECT *
 FROM growth_model
-WHERE account_id = ?;
+WHERE account_id = ?
+ORDER BY start_date, id;
 -- name: GetGrowthModel :one
 SELECT *
 FROM growth_model

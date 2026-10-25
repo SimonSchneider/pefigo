@@ -148,7 +148,8 @@ func (s *Service) ListAccountGrowthModels(ctx context.Context, accountID string)
 	return gmList, nil
 }
 
-// growthModelsAppliedOn returns, per Account, the latest-starting growth model that applies on day.
+// growthModelsAppliedOn returns, per Account, the growth model the forecast applies on day: the
+// latest-starting one that applies, as finance.GrowthCombined picks it.
 func (s *Service) growthModelsAppliedOn(ctx context.Context, day date.Date) (map[string]pdb.GrowthModel, error) {
 	gms, err := s.q.ListGrowthModels(ctx)
 	if err != nil {

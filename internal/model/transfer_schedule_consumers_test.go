@@ -203,3 +203,44 @@ func TestAccountsDetailedLeaveOutAGrowthModelOnItsEndDate(t *testing.T) {
 		}
 	}
 }
+
+func TestForecastAndAccountsApplyTheLatestStartingGrowthModel(t *testing.T) {
+	ended := mustParseDate("2025-06-01")
+	for name, earlierEnd := range map[string]*date.Date{"after an ended model": &ended, "over an earlier model": nil} {
+		t.Run(name, func(t *testing.T) {
+			svc := newTestService(t)
+			ctx := t.Context()
+			savings := mustAccount(t, svc, "Savings")
+			today := date.Today()
+			if _, err := svc.UpsertAccountSnapshot(ctx, savings.ID, model.AccountSnapshotInput{Date: today, Balance: newFixedValue(100_000)}); err != nil {
+				t.Fatalf("create snapshot: %v", err)
+			}
+			for _, gm := range []model.AccountGrowthModelInput{
+				{Type: "fixed", AnnualRate: newFixedValue(0), StartDate: mustParseDate("2025-01-01"), EndDate: earlierEnd},
+				{Type: "fixed", AnnualRate: newFixedValue(0.10), StartDate: mustParseDate("2025-06-01")},
+			} {
+				gm.AccountID, gm.AnnualVolatility = savings.ID, newFixedValue(0)
+				if _, err := svc.UpsertAccountGrowthModel(ctx, gm); err != nil {
+					t.Fatalf("create growth model: %v", err)
+				}
+			}
+
+			accounts, err := svc.ListAccountsDetailed(ctx, today)
+			if err != nil {
+				t.Fatalf("ListAccountsDetailed: %v", err)
+			}
+			if gm := accounts[0].GrowthModel; gm == nil || gm.AnnualRate.Mean() != 0.10 {
+				t.Errorf("expected the account to show the 10%% growth model, got %+v", gm)
+			}
+			forecast := recordedForecast{}
+			if err := svc.RunPrediction(ctx, forecast, model.PredictionParams{
+				Duration: 30 * date.Day, Samples: 1, Quantile: 0.8, SnapshotInterval: "*-*-*", GroupBy: model.GroupByNone,
+			}); err != nil {
+				t.Fatalf("RunPrediction: %v", err)
+			}
+			if got := forecast[savings.ID][today.Add(29*date.Day)]; got <= 100_000 {
+				t.Errorf("expected the forecast to grow at 10%%, got a balance of %f after 4 weeks", got)
+			}
+		})
+	}
+}

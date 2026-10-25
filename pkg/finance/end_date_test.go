@@ -50,3 +50,27 @@ func TestGrowthModelAppliesFromItsStartDateUpToButNotOnItsEndDate(t *testing.T) 
 		}
 	}
 }
+
+func TestGrowthModelsApplyTheLatestStartingModelThatAppliesOnTheDay(t *testing.T) {
+	ucfg := uncertain.NewConfig(1, 1)
+	feb := Must(date.ParseDate("2000-02-01"))
+	day := Must(date.ParseDate("2000-06-01"))
+	fixed := func(start string, end *date.Date, rate float64) *finance2.FixedGrowth {
+		return &finance2.FixedGrowth{
+			TimeFrameGrowth: finance2.TimeFrameGrowth{StartDate: Must(date.ParseDate(start)), EndDate: end},
+			AnnualRate:      uncertain.NewFixed(rate),
+		}
+	}
+	balance := uncertain.NewFixed(1_000_000)
+	want := finance2.NewGrowthCombined(fixed("2000-02-01", nil, 0.10)).Apply(ucfg, day, nil, balance).Mean()
+
+	for name, growth := range map[string]*finance2.GrowthCombined{
+		"after an ended model":   finance2.NewGrowthCombined(fixed("2000-01-01", &feb, 0.03), fixed("2000-02-01", nil, 0.10)),
+		"over an earlier model":  finance2.NewGrowthCombined(fixed("2000-01-01", nil, 0.03), fixed("2000-02-01", nil, 0.10)),
+		"given in reverse order": finance2.NewGrowthCombined(fixed("2000-02-01", nil, 0.10), fixed("2000-01-01", nil, 0.03)),
+	} {
+		if got := growth.Apply(ucfg, day, nil, balance).Mean(); got != want {
+			t.Errorf("%s: expected the 10%% model's growth %f, got %f", name, want, got)
+		}
+	}
+}
