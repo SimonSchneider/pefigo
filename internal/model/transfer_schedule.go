@@ -115,31 +115,43 @@ func (ts *TransferSchedule) On(day date.Date) *TransferScheduleDay {
 	for i, t := range ts.templates {
 		d.transfers[i] = ScheduledTransfer{TransferTemplate: t, state: transferStateOn(t, day)}
 	}
-	evaluate(d.transfers)
+	evaluate(d.transfers, monthGroup)
 	return d
 }
 
-// evaluate sets the Amount of the Active transfers in groups of one recurrence and priority, in
-// order, starting from empty Accounts: a percent amount is taken from the balance its source Account
-// has before its group.
-func evaluate(transfers []ScheduledTransfer) {
+type evaluationGroup struct {
+	recurrence date.Cron
+	priority   int64
+}
+
+// monthGroup groups a month of transfers by recurrence and priority, since different recurrences
+// happen on different days.
+func monthGroup(t ScheduledTransfer) evaluationGroup {
+	return evaluationGroup{recurrence: t.Recurrence, priority: t.Priority}
+}
+
+// dayGroup groups one day's transfers by priority, as the forecast engine applies them.
+func dayGroup(t ScheduledTransfer) evaluationGroup {
+	return evaluationGroup{priority: t.Priority}
+}
+
+// evaluate sets the Amount of the Active transfers in order, starting from empty Accounts. A run of
+// transfers in the same group happens at the same time: a percent amount is taken from the balance
+// its source Account has before its group.
+func evaluate(transfers []ScheduledTransfer, groupOf func(ScheduledTransfer) evaluationGroup) {
 	type balance struct {
 		beforeGroup float64
 		current     float64
 	}
-	type groupKey struct {
-		recurrence date.Cron
-		priority   int64
-	}
 	balances := make(map[string]balance)
-	var group *groupKey
+	var group *evaluationGroup
 	for i := range transfers {
 		t := &transfers[i]
 		t.Amount = 0
 		if t.state != TransferActive {
 			continue
 		}
-		if k := (groupKey{t.Recurrence, t.Priority}); group == nil || *group != k {
+		if k := groupOf(*t); group == nil || *group != k {
 			group = &k
 			for id, b := range balances {
 				b.beforeGroup = b.current
@@ -177,7 +189,7 @@ func (d *TransferScheduleDay) Transfers() []ScheduledTransfer {
 }
 
 // Charged returns the Transfer Templates that move money on the day: the Active ones whose recurrence
-// matches it, evaluated on their own.
+// matches it, evaluated on their own in priority groups, as the forecast charges them.
 func (d *TransferScheduleDay) Charged() []ScheduledTransfer {
 	var charged []ScheduledTransfer
 	for _, t := range d.transfers {
@@ -185,7 +197,7 @@ func (d *TransferScheduleDay) Charged() []ScheduledTransfer {
 			charged = append(charged, t)
 		}
 	}
-	evaluate(charged)
+	evaluate(charged, dayGroup)
 	return charged
 }
 
