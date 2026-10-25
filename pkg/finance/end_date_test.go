@@ -10,7 +10,7 @@ import (
 	"github.com/SimonSchneider/pefigo/pkg/uncertain"
 )
 
-func TestRunPredictionChargesATransferFromItsStartDateUpToButNotOnItsEndDate(t *testing.T) {
+func TestRunForecastChargesATransferFromItsStartDateUpToButNotOnItsEndDate(t *testing.T) {
 	acc := newAccount("Checking", withBalance(firstDate, uncertain.NewFixed(0)))
 	endDate := Must(date.ParseDate("2000-04-01"))
 	transfer := newTransfer("", acc.ID, 1, "*-*-01", withFixed(uncertain.NewFixed(100)), func(tt *finance2.TransferTemplate) {
@@ -23,10 +23,10 @@ func TestRunPredictionChargesATransferFromItsStartDateUpToButNotOnItsEndDate(t *
 		charged = append(charged, day.String())
 		return nil
 	})
-	err := finance2.RunPrediction(t.Context(), uncertain.NewConfig(time.Now().UnixMilli(), 1), startDate, Must(date.ParseDate("2000-06-01")), "*-*-02",
+	err := finance2.RunForecast(t.Context(), uncertain.NewConfig(time.Now().UnixMilli(), 1), startDate, Must(date.ParseDate("2000-06-01")), "*-*-02",
 		mks(*acc), mks(transfer), finance2.CompositeRecorder{TransferRecorder: recorder})
 	if err != nil {
-		t.Fatalf("run prediction: %v", err)
+		t.Fatalf("run forecast: %v", err)
 	}
 
 	if want := []string{"2000-02-01", "2000-03-01"}; !slices.Equal(charged, want) {
@@ -75,7 +75,7 @@ func TestGrowthModelsApplyTheLatestStartingModelThatAppliesOnTheDay(t *testing.T
 	}
 }
 
-func TestRunPredictionAppliesADaysTransfersInPriorityOrder(t *testing.T) {
+func TestRunForecastAppliesADaysTransfersInPriorityOrder(t *testing.T) {
 	salary := newAccount("Salary", withBalance(firstDate, uncertain.NewFixed(0)))
 	savings := newAccount("Savings", withBalance(firstDate, uncertain.NewFixed(0)))
 	// Given out of priority order: the income (priority 2) comes before the saving (priority 1).
@@ -89,10 +89,10 @@ func TestRunPredictionAppliesADaysTransfersInPriorityOrder(t *testing.T) {
 		}
 		return nil
 	})
-	err := finance2.RunPrediction(t.Context(), uncertain.NewConfig(1, 1), startDate, Must(date.ParseDate("2000-02-01")), "*-*-28",
+	err := finance2.RunForecast(t.Context(), uncertain.NewConfig(1, 1), startDate, Must(date.ParseDate("2000-02-01")), "*-*-28",
 		mks(*salary, *savings), mks(income, saving), finance2.CompositeRecorder{TransferRecorder: recorder})
 	if err != nil {
-		t.Fatalf("run prediction: %v", err)
+		t.Fatalf("run forecast: %v", err)
 	}
 
 	// The saving runs before the income, while Salary is still empty.

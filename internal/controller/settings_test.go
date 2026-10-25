@@ -71,3 +71,30 @@ func TestSavingTheForecastSettings(t *testing.T) {
 		t.Fatalf("expected the snapshot interval *-*-01, got %q (%v)", interval, err)
 	}
 }
+
+func TestTheForecastIntervalIsLabelledForecastInterval(t *testing.T) {
+	_, srv := newSettingsServer(t)
+
+	for _, path := range []string{"/chart", "/settings?tab=forecast"} {
+		resp, err := srv.Client().Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("get %s: %v", path, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `name="snapshot_interval"`) {
+			t.Fatalf("expected %s to have the Forecast Interval setting, got %d: %s", path, resp.StatusCode, body)
+		}
+		if !strings.Contains(string(body), "Forecast interval") {
+			t.Errorf("expected %s to label the setting \"Forecast interval\"", path)
+		}
+		for _, old := range []string{"Snapshot Interval", "Snapshot Frequency"} {
+			if strings.Contains(string(body), old) {
+				t.Errorf("expected %s not to label the setting %q", path, old)
+			}
+		}
+	}
+}

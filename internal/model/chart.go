@@ -4,21 +4,22 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
 	"time"
 
 	"github.com/SimonSchneider/goslu/date"
-	"github.com/SimonSchneider/pefigo/internal/pdb"
 	finance2 "github.com/SimonSchneider/pefigo/pkg/finance"
-	"github.com/SimonSchneider/pefigo/pkg/swe"
-	"github.com/SimonSchneider/pefigo/pkg/ui"
 	"github.com/SimonSchneider/pefigo/pkg/uncertain"
 )
 
 type PredictionParams struct {
+	// Duration is how long the Forecast runs from the Forecast Start.
 	Duration date.Duration
-	Samples  int64
+	// Through, when set, is the last day of the Forecast instead of Duration. The Forecast is empty
+	// when it is on or before the Forecast Start.
+	Through date.Date
+	Samples int64
 	// Quantile is the share of outcomes between each point's lower and upper bound. Without it, no
 	// bounds are calculated.
 	Quantile         float64
@@ -80,32 +81,32 @@ func dateLines(specialDates []SpecialDate, today date.Date) []Markline {
 	return lines
 }
 
+// PredictionSetupEvent comes before the points of a Forecast, with each series and its history. Max
+// is where the chart ends: the day after the Forecast's last day, or the Forecast Start when the
+// Forecast is empty because Through is on or before it. Without a Forecast it is the last date line,
+// so every date line is on the chart.
 type PredictionSetupEvent struct {
 	Max       date.Date                   `json:"max"`
 	Entities  []PredictionFinancialEntity `json:"entities"`
 	Marklines []Markline                  `json:"marklines"`
 }
 
+// PredictionEventHandler receives a Forecast: its setup, then one point per series on every Forecast
+// Interval day, then Close.
 type PredictionEventHandler interface {
 	Setup(PredictionSetupEvent) error
 	Snapshot(PredictionBalanceSnapshot) error
 	Close() error
 }
 
+// RunPrediction runs the Forecast from the Forecast Start and sends it to eventHandler, grouped by
+// params.GroupBy. Without a Forecast Start it sends the setup and closes without points.
 func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEventHandler, params PredictionParams) error {
-	q := s.q
-	q1, q2 := (1-params.Quantile)/2, (1+params.Quantile)/2
-
-	entities := make([]finance2.Entity, 0)
-	accs, err := q.ListAccounts(ctx)
+	f, err := s.loadForecast(ctx)
 	if err != nil {
-		return fmt.Errorf("listing accounts for Prediction: %w", err)
+		return fmt.Errorf("loading the Forecast: %w", err)
 	}
-	schedule, err := s.TransferSchedule(ctx)
-	if err != nil {
-		return fmt.Errorf("loading transfer schedule for Prediction: %w", err)
-	}
-	accountTypes, err := q.ListAccountTypes(ctx)
+	accountTypes, err := s.ListAccountTypes(ctx)
 	if err != nil {
 		return fmt.Errorf("listing account types for Prediction: %w", err)
 	}
@@ -113,403 +114,149 @@ func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEven
 	if err != nil {
 		return fmt.Errorf("listing special dates for Prediction: %w", err)
 	}
-	sweParams, err := s.ListSweYearlyParams(ctx)
-	if err != nil {
-		return fmt.Errorf("listing swe yearly params for Prediction: %w", err)
-	}
-	accountTypesById := KeyBy(accountTypes, func(at pdb.AccountType) string { return at.ID })
-	accsById := make(map[string]pdb.Account, len(accs))
-	startDate := date.Today()
 	ucfg := uncertain.NewConfig(time.Now().UnixMilli(), params.Samples)
-	for _, acc := range accs {
-		accsById[acc.ID] = acc
-		snaps, err := s.ListAccountSnapshots(ctx, acc.ID)
-		if err != nil {
-			return fmt.Errorf("getting snapshots for account %s: %w", acc.ID, err)
-		}
-		gms, err := s.ListAccountGrowthModels(ctx, acc.ID)
-		if err != nil {
-			return fmt.Errorf("getting growth models for account %s: %w", acc.ID, err)
-		}
-		var balanceLimit finance2.BalanceLimit
-		if acc.BalanceUpperLimit != nil {
-			balanceLimit = finance2.BalanceLimit{
-				Upper: uncertain.NewFixed(*acc.BalanceUpperLimit),
-			}
-		}
-		entity := finance2.Entity{
-			ID:           acc.ID,
-			Name:         acc.Name,
-			BalanceLimit: balanceLimit,
-			Snapshots:    make([]finance2.BalanceSnapshot, 0, len(snaps)),
-		}
-		if acc.CashFlowFrequency != nil || acc.CashFlowDestinationID != nil {
-			entity.CashFlow = &finance2.CashFlowModel{
-				Frequency:     date.Cron(ui.OrDefault(acc.CashFlowFrequency)),
-				DestinationID: ui.OrDefault(acc.CashFlowDestinationID),
-			}
-		}
-		ssa, err := s.GetStartupShareAccount(ctx, acc.ID)
-		if err == nil && ssa.AccountID == acc.ID {
-			rounds, err := s.ListInvestmentRounds(ctx, acc.ID)
-			if err != nil {
-				return fmt.Errorf("listing investment rounds for account %s: %w", acc.ID, err)
-			}
-			shareChanges, err := s.ListShareChanges(ctx, acc.ID)
-			if err != nil {
-				return fmt.Errorf("listing share changes for account %s: %w", acc.ID, err)
-			}
-			opts, err := s.ListStartupShareOptions(ctx, acc.ID)
-			if err != nil {
-				return fmt.Errorf("listing startup share options for account %s: %w", acc.ID, err)
-			}
-			slices.Reverse(rounds)
-
-			ssResult := buildStartupShareForecastState(ucfg, rounds, shareChanges, opts, ssa, startDate)
-
-			entity.GrowthModel = ssResult.GrowthModel
-			entity.Snapshots = ssResult.Snapshots
-		} else {
-			for _, snap := range snaps {
-				entity.Snapshots = append(entity.Snapshots, snap.ToFinance())
-				if snap.Date.After(startDate) {
-					startDate = snap.Date
-				}
-			}
-			entity.GrowthModel = GrowthModels(gms).ToFinance()
-		}
-		if acc.IsIsk != 0 {
-			entity.TaxModel = &swe.ISKTax{
-				ParamsFunc: func(d date.Date) swe.ISKParams {
-					return swe.ISKParams{
-						SchablonRanta: activeSchablonRantaAt(sweParams, d),
-						Fribelopp:     activeISKFribeloppAt(sweParams, d),
-					}
-				},
-			}
-		}
-		if len(entity.Snapshots) > 0 {
-			entities = append(entities, entity)
-		}
+	fold := &forecastFold{
+		eventHandler: eventHandler,
+		ucfg:         ucfg,
+		groups:       forecastGroups(params.GroupBy, f.accounts, accountTypes),
+		bounds:       params.Quantile != 0,
+		q1:           (1 - params.Quantile) / 2,
+		q2:           (1 + params.Quantile) / 2,
 	}
-	startDay := startDate
-	startDate += 1
-	endDate := startDate.Add(params.Duration)
-
-	h := &groupingEventHandler{
-		eventHandler:     eventHandler,
-		ucfg:             ucfg,
-		accsById:         accsById,
-		accountTypesById: accountTypesById,
-		groupBy:          params.GroupBy,
-		startDay:         startDay,
-		bounds:           params.Quantile != 0,
-		q1:               q1,
-		q2:               q2,
-	}
-
-	if err := h.setup(entities, endDate, dateLines(specialDates, date.Today())); err != nil {
-		return fmt.Errorf("setting up grouping event handler: %w", err)
-	}
-
-	snapshotRecorder := finance2.SnapshotRecorderFunc(func(accountID string, day date.Date, balance uncertain.Value) error {
-		return h.snapshot(accountID, day, balance)
-	})
-	if err := finance2.RunPrediction(ctx, ucfg, startDate, endDate, params.SnapshotInterval, entities, schedule.ForecastTransfers(), finance2.CompositeRecorder{SnapshotRecorder: snapshotRecorder}); err != nil {
-		return fmt.Errorf("running prediction for SSE: %w", err)
-	}
-	return h.close()
-}
-
-type startupShareForecastState struct {
-	GrowthModel *finance2.StartupGrowth
-	Snapshots   []finance2.BalanceSnapshot
-}
-
-func buildStartupShareForecastState(
-	ucfg *uncertain.Config,
-	rounds []InvestmentRound,
-	shareChanges []ShareChange,
-	opts []StartupShareOption,
-	ssa StartupShareAccount,
-	startDate date.Date,
-) startupShareForecastState {
-	currentValuation := uncertain.NewFixed(0.0)
-	currentTotalShares := uncertain.NewFixed(0.0)
-	for _, round := range rounds {
-		if round.Date <= startDate {
-			postVal, postShares := PostMoneyValuationAndShares(round.Valuation, round.PreMoneyShares, round.Investment)
-			currentValuation = uncertain.NewFixed(postVal)
-			currentTotalShares = uncertain.NewFixed(postShares)
-		}
-	}
-	sharesOwnedAtStart, avgPurchaseAtStart := DeriveShareState(shareChanges, startDate)
-
-	investmentRounds := make(map[date.Date]finance2.StartupGrowthInvestmentRound)
-	for _, round := range rounds {
-		investmentRounds[round.Date] = finance2.StartupGrowthInvestmentRound{
-			PreMoneyValuation: uncertain.NewFixed(round.Valuation),
-			PreMoneyShares:    uncertain.NewFixed(round.PreMoneyShares),
-			Investment:        uncertain.NewFixed(round.Investment),
-		}
-	}
-
-	shareChangesMap := make(map[date.Date]finance2.StartupGrowthShareChange)
-	for _, sc := range shareChanges {
-		if sc.Date >= startDate {
-			shareChangesMap[sc.Date] = finance2.StartupGrowthShareChange{
-				DeltaShares: uncertain.NewFixed(sc.DeltaShares),
-				TotalPrice:  uncertain.NewFixed(sc.TotalPrice),
-			}
-		}
-	}
-
-	options := make(map[date.Date]finance2.StartupGrowthOption)
-	for _, opt := range opts {
-		options[opt.EndDate] = finance2.StartupGrowthOption{
-			StrikePricePerShare: uncertain.NewFixed(opt.StrikePricePerShare),
-			NumShares:           uncertain.NewFixed(opt.Shares),
-			SourceAccountID:     opt.SourceAccountID,
-		}
-	}
-
-	growthModel := &finance2.StartupGrowth{
-		TimeFrameGrowth: finance2.TimeFrameGrowth{
-			StartDate: 0,
-			EndDate:   nil,
-		},
-		TotalShares: currentTotalShares,
-		OwnedShares: uncertain.NewFixed(sharesOwnedAtStart),
-		Valuation:   currentValuation,
-
-		TaxRate:               uncertain.NewFixed(ssa.TaxRate),
-		DiscountFactor:        uncertain.NewFixed(ssa.ValuationDiscountFactor),
-		PurchasePricePerShare: uncertain.NewFixed(avgPurchaseAtStart),
-
-		InvestmentRounds: investmentRounds,
-		ShareChanges:     shareChangesMap,
-		Options:          options,
-	}
-
-	eventDates := make(map[date.Date]struct{})
-	for _, round := range rounds {
-		if round.Date < startDate {
-			eventDates[round.Date] = struct{}{}
-		}
-	}
-	for _, sc := range shareChanges {
-		if sc.Date < startDate {
-			eventDates[sc.Date] = struct{}{}
-		}
-	}
-	sortedEventDates := make([]date.Date, 0, len(eventDates))
-	for d := range eventDates {
-		sortedEventDates = append(sortedEventDates, d)
-	}
-	sort.Slice(sortedEventDates, func(i, j int) bool { return sortedEventDates[i] < sortedEventDates[j] })
-
-	snapshots := make([]finance2.BalanceSnapshot, 0, len(sortedEventDates)+1)
-	for _, eventDate := range sortedEventDates {
-		var best *InvestmentRound
-		for i := range rounds {
-			if rounds[i].Date <= eventDate {
-				best = &rounds[i]
-			}
-		}
-		if best == nil {
-			continue
-		}
-		postMoneyValuation, postMoneyShares := PostMoneyValuationAndShares(best.Valuation, best.PreMoneyShares, best.Investment)
-		if postMoneyShares <= 0 {
-			continue
-		}
-		sharesOwned, avgPrice := DeriveShareState(shareChanges, eventDate)
-		if sharesOwned == 0 {
-			continue
-		}
-		balance := CalculateStartupShareBalance(
-			ucfg,
-			uncertain.NewFixed(postMoneyValuation),
-			sharesOwned,
-			avgPrice,
-			ssa.TaxRate,
-			postMoneyShares,
-			ssa.ValuationDiscountFactor,
-		)
-		snapshots = append(snapshots, finance2.BalanceSnapshot{
-			Date:    eventDate,
-			Balance: balance,
-		})
-	}
-	snapshots = append(snapshots, finance2.BalanceSnapshot{
-		Date:    startDate,
-		Balance: growthModel.Balance(ucfg),
-	})
-	sort.Slice(snapshots, func(i, j int) bool {
-		return snapshots[i].Date < snapshots[j].Date
-	})
-
-	return startupShareForecastState{
-		GrowthModel: growthModel,
-		Snapshots:   snapshots,
-	}
-}
-
-type groupingEventHandler struct {
-	eventHandler     PredictionEventHandler
-	ucfg             *uncertain.Config
-	accsById         map[string]pdb.Account
-	accountTypesById map[string]pdb.AccountType
-	groupBy          GroupBy
-	// startDay is the day the prediction starts: today, or the latest snapshot's day if that is
-	// later. Until then a stale account's estimated growth is predicted while the other accounts
-	// are not, so a grouped point would leave them out.
-	startDay date.Date
-	bounds   bool // whether to calculate the lower and upper bound between q1 and q2
-	q1       float64
-	q2       float64
-
-	currentDate date.Date
-	currentAccs map[string]uncertain.Value
-}
-
-func (h *groupingEventHandler) setup(entities []finance2.Entity, endDate date.Date, marklines []Markline) error {
-	for _, e := range h.accsById {
-		if e.TypeID == nil {
-			color := uncategorized.Color
-			h.accountTypesById[""] = pdb.AccountType{ID: uncategorized.ID, Name: uncategorized.Name, Color: &color}
-		}
-	}
-
-	type GroupedEntities struct {
-		name  string
-		color string
-		dates map[date.Date]uncertain.Value
-	}
-
-	groupedEntities := make(map[string]GroupedEntities)
-	switch h.groupBy {
-	case GroupByTotal:
-		groupedEntities["total"] = GroupedEntities{
-			name:  "total",
-			color: "",
-			dates: make(map[date.Date]uncertain.Value),
-		}
-	case GroupByType:
-		for _, accountType := range h.accountTypesById {
-			groupedEntities[accountType.ID] = GroupedEntities{
-				name:  accountType.Name,
-				color: ui.OrDefault(accountType.Color),
-				dates: make(map[date.Date]uncertain.Value),
-			}
-		}
-	case GroupByNone:
-		for _, account := range h.accsById {
-			groupedEntities[account.ID] = GroupedEntities{
-				name:  account.Name,
-				color: "",
-				dates: make(map[date.Date]uncertain.Value),
-			}
-		}
-	}
-
-	for _, e := range entities {
-		key := h.getKey(e.ID)
-
-		ent := groupedEntities[key]
-
-		for _, s := range e.Snapshots {
-			amount := ent.dates[s.Date]
-			if amount.Zero() {
-				amount = s.Balance
-			} else {
-				amount = amount.Add(h.ucfg, s.Balance)
-			}
-			ent.dates[s.Date] = amount
-		}
-	}
-
-	sssEntities := make([]PredictionFinancialEntity, 0, len(groupedEntities))
-	for id, e := range groupedEntities {
-		ent := PredictionFinancialEntity{
-			ID:        id,
-			Name:      e.name,
-			Color:     e.color,
-			Snapshots: make([]PredictionBalanceSnapshot, 0, len(e.dates)),
-		}
-		for day, amount := range e.dates {
-			ent.Snapshots = append(ent.Snapshots, h.balanceSnapshot(id, day, amount))
-		}
-		sort.Slice(ent.Snapshots, func(i, j int) bool {
-			return ent.Snapshots[i].Day < ent.Snapshots[j].Day
-		})
-		sssEntities = append(sssEntities, ent)
-	}
-	h.currentDate = endDate
-	h.currentAccs = make(map[string]uncertain.Value, len(h.accsById))
-	return h.eventHandler.Setup(PredictionSetupEvent{
-		Max:       endDate,
-		Entities:  sssEntities,
-		Marklines: marklines,
-	})
-}
-
-func (h *groupingEventHandler) getKey(id string) string {
-	switch h.groupBy {
-	case GroupByType:
-		return h.accountTypesById[ui.OrDefault(h.accsById[id].TypeID)].ID
-	case GroupByNone:
-		return id
-	case GroupByTotal:
-		return "total"
+	// The Forecast runs from the Forecast Start up to, but not on, end.
+	var end date.Date
+	switch {
+	case !f.hasStart:
+	case params.Through.IsZero():
+		end = f.start.Add(params.Duration)
+	case params.Through.After(f.start):
+		end = params.Through.Add(date.Day)
 	default:
-		panic("invalid group by")
+		end = f.start
+	}
+	marklines := dateLines(specialDates, date.Today())
+	chartEnd := end
+	if !f.hasStart {
+		chartEnd = marklines[len(marklines)-1].Date
+	}
+	if err := eventHandler.Setup(PredictionSetupEvent{
+		Max:       chartEnd,
+		Entities:  fold.entities(f.history(ucfg)),
+		Marklines: marklines,
+	}); err != nil {
+		return fmt.Errorf("sending the setup: %w", err)
+	}
+	if f.hasStart && f.start.Before(end) {
+		if err := finance2.RunForecast(ctx, ucfg, f.start, end, params.SnapshotInterval, f.entities(ucfg, f.start), f.schedule.ForecastTransfers(), finance2.CompositeRecorder{ReportRecorder: fold}); err != nil {
+			return fmt.Errorf("running the Forecast: %w", err)
+		}
+	}
+	return eventHandler.Close()
+}
+
+// forecastGroup is a series of a grouped Forecast, adding up its accounts.
+type forecastGroup struct {
+	id, name, color string
+	accountIDs      []string
+}
+
+// forecastGroups are the series of a Forecast of accounts grouped by groupBy, in the order they are
+// sent: every Account Type with an account and Uncategorized last, every account, or their total.
+func forecastGroups(groupBy GroupBy, accounts []Account, accountTypes []AccountType) []forecastGroup {
+	switch groupBy {
+	case GroupByType:
+		known := KeyBy(accountTypes, func(at AccountType) string { return at.ID })
+		byType := make(map[string][]string)
+		for _, acc := range accounts {
+			typeID := acc.TypeID
+			if _, ok := known[typeID]; !ok {
+				typeID = uncategorized.ID
+			}
+			byType[typeID] = append(byType[typeID], acc.ID)
+		}
+		groups := make([]forecastGroup, 0, len(byType))
+		for _, at := range append(slices.Clone(accountTypes), uncategorized) {
+			if ids, ok := byType[at.ID]; ok {
+				groups = append(groups, forecastGroup{id: at.ID, name: at.Name, color: at.Color, accountIDs: ids})
+			}
+		}
+		return groups
+	case GroupByTotal:
+		total := forecastGroup{id: "total", name: "total"}
+		for _, acc := range accounts {
+			total.accountIDs = append(total.accountIDs, acc.ID)
+		}
+		return []forecastGroup{total}
+	default:
+		groups := make([]forecastGroup, 0, len(accounts))
+		for _, acc := range accounts {
+			groups = append(groups, forecastGroup{id: acc.ID, name: acc.Name, accountIDs: []string{acc.ID}})
+		}
+		return groups
 	}
 }
 
-func (h *groupingEventHandler) snapshot(id string, day date.Date, balance uncertain.Value) error {
-	if h.groupBy != GroupByNone && !day.After(h.startDay) {
-		return nil
-	}
-	if h.currentDate != day {
-		if err := h.flush(); err != nil {
+// forecastFold sends a Forecast grouped: each group's point on a reported day is the sum of its
+// accounts on that day.
+type forecastFold struct {
+	eventHandler PredictionEventHandler
+	ucfg         *uncertain.Config
+	groups       []forecastGroup
+	bounds       bool // whether to calculate the lower and upper bound between q1 and q2
+	q1           float64
+	q2           float64
+}
+
+func (f *forecastFold) OnReport(day date.Date, balances map[string]uncertain.Value) error {
+	for _, g := range f.groups {
+		values := make([]uncertain.Value, len(g.accountIDs))
+		for i, id := range g.accountIDs {
+			values[i] = balances[id]
+		}
+		if err := f.eventHandler.Snapshot(f.point(g.id, day, sumInOrder(f.ucfg, values))); err != nil {
 			return err
 		}
-		h.currentDate = day
-	}
-
-	key := h.getKey(id)
-	acc, ok := h.currentAccs[key]
-	if !ok {
-		h.currentAccs[key] = balance
-	} else {
-		h.currentAccs[key] = acc.Add(h.ucfg, balance)
 	}
 	return nil
 }
 
-func (h *groupingEventHandler) flush() error {
-	for id, balance := range h.currentAccs {
-		if err := h.eventHandler.Snapshot(h.balanceSnapshot(id, h.currentDate, balance)); err != nil {
-			return err
+// entities are the groups of the setup, each with the sum of its accounts' history on each day.
+func (f *forecastFold) entities(history map[string][]finance2.BalanceSnapshot) []PredictionFinancialEntity {
+	entities := make([]PredictionFinancialEntity, 0, len(f.groups))
+	for _, g := range f.groups {
+		byDay := make(map[date.Date][]uncertain.Value)
+		for _, id := range g.accountIDs {
+			for _, snap := range history[id] {
+				byDay[snap.Date] = append(byDay[snap.Date], snap.Balance)
+			}
 		}
+		points := make([]PredictionBalanceSnapshot, 0, len(byDay))
+		for _, day := range slices.Sorted(maps.Keys(byDay)) {
+			points = append(points, f.point(g.id, day, sumInOrder(f.ucfg, byDay[day])))
+		}
+		entities = append(entities, PredictionFinancialEntity{ID: g.id, Name: g.name, Color: g.color, Snapshots: points})
 	}
-	clear(h.currentAccs)
-	return nil
+	return entities
 }
 
-func (h *groupingEventHandler) balanceSnapshot(id string, day date.Date, balance uncertain.Value) PredictionBalanceSnapshot {
+// sumInOrder adds up values in their order, so the same values always add up the same way. The first
+// value is kept as it is: adding it to a fixed 0 would draw new samples from it.
+func sumInOrder(ucfg *uncertain.Config, values []uncertain.Value) uncertain.Value {
+	if len(values) == 0 {
+		return uncertain.NewFixed(0)
+	}
+	sum := values[0]
+	for _, v := range values[1:] {
+		sum = sum.Add(ucfg, v)
+	}
+	return sum
+}
+
+func (f *forecastFold) point(id string, day date.Date, balance uncertain.Value) PredictionBalanceSnapshot {
 	snap := PredictionBalanceSnapshot{ID: id, Day: day, Balance: balance.Mean()}
-	if h.bounds {
+	if f.bounds {
 		q := balance.Quantiles()
-		snap.LowerBound, snap.UpperBound = q(h.q1), q(h.q2)
+		snap.LowerBound, snap.UpperBound = q(f.q1), q(f.q2)
 	}
 	return snap
-}
-
-func (h *groupingEventHandler) close() error {
-	if err := h.flush(); err != nil {
-		return err
-	}
-	return h.eventHandler.Close()
 }

@@ -3,7 +3,6 @@ package model_test
 import (
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/internal/model"
@@ -143,39 +142,33 @@ func (r recordedForecast) Snapshot(s model.PredictionBalanceSnapshot) error {
 	return nil
 }
 
-func firstOfMonth(d date.Date, monthsAhead int) date.Date {
-	t := d.ToStdTime().UTC()
-	return date.FromTime(time.Date(t.Year(), t.Month()+time.Month(monthsAhead), 1, 0, 0, 0, 0, time.UTC))
-}
-
 func TestForecastChargesABillPriceChangeOnceOnItsRecurrenceDay(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()
 	checking := mustAccount(t, svc, "Checking")
-	today := date.Today()
-	if _, err := svc.UpsertAccountSnapshot(ctx, checking.ID, model.AccountSnapshotInput{Date: today, Balance: newFixedValue(0)}); err != nil {
+	start := mustParseDate("2025-01-15")
+	if _, err := svc.UpsertAccountSnapshot(ctx, checking.ID, model.AccountSnapshotInput{Date: start, Balance: newFixedValue(0)}); err != nil {
 		t.Fatalf("create snapshot: %v", err)
 	}
-	next, priceChange, after := firstOfMonth(today, 1), firstOfMonth(today, 2), firstOfMonth(today, 3)
 	mustBill(t, svc, checking.ID, "*-*-01", model.Bill{Name: "Music"},
 		model.BillAmount{Amount: newFixedValue(100), StartDate: mustParseDate("2025-01-01")},
-		model.BillAmount{Amount: newFixedValue(200), StartDate: priceChange},
+		model.BillAmount{Amount: newFixedValue(200), StartDate: mustParseDate("2025-03-01")},
 	)
 
 	forecast := recordedForecast{}
 	err := svc.RunPrediction(ctx, forecast, model.PredictionParams{
-		Duration: after.Sub(today) + 5*date.Day, Samples: 1, Quantile: 0.8, SnapshotInterval: "*-*-02", GroupBy: model.GroupByNone,
+		Duration: mustParseDate("2025-04-06").Sub(start), Samples: 1, Quantile: 0.8, SnapshotInterval: "*-*-02", GroupBy: model.GroupByNone,
 	})
 	if err != nil {
 		t.Fatalf("RunPrediction: %v", err)
 	}
 
-	for day, want := range map[date.Date]float64{
-		next.Add(date.Day):        -100,
-		priceChange.Add(date.Day): -300,
-		after.Add(date.Day):       -500,
+	for day, want := range map[string]float64{
+		"2025-02-02": -100,
+		"2025-03-02": -300,
+		"2025-04-02": -500,
 	} {
-		if got := forecast[checking.ID][day]; got != want {
+		if got := forecast[checking.ID][mustParseDate(day)]; got != want {
 			t.Errorf("on %s: expected a balance of %f, got %f", day, want, got)
 		}
 	}

@@ -797,7 +797,7 @@ func settingsTabForecast(view *SettingsPageView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "\" min=\"100\" max=\"100000\" step=\"100\"> <label class=\"label\"><span class=\"label-text-alt text-base-content/60\">Higher values give more accurate results but take longer to compute</span></label></div><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text font-medium\">Snapshot Frequency</span></label> <input type=\"text\" name=\"snapshot_interval\" class=\"input input-bordered w-full\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "\" min=\"100\" max=\"100000\" step=\"100\"> <label class=\"label\"><span class=\"label-text-alt text-base-content/60\">Higher values give more accurate results but take longer to compute</span></label></div><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text font-medium\">Forecast interval</span></label> <input type=\"text\" name=\"snapshot_interval\" class=\"input input-bordered w-full\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

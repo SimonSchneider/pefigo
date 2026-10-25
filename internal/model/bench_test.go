@@ -92,3 +92,32 @@ func BenchmarkGetDashboardData(b *testing.B) {
 		}
 	}
 }
+
+// discardedForecast drops every event of a Forecast.
+type discardedForecast struct{}
+
+func (discardedForecast) Setup(model.PredictionSetupEvent) error         { return nil }
+func (discardedForecast) Snapshot(model.PredictionBalanceSnapshot) error { return nil }
+func (discardedForecast) Close() error                                   { return nil }
+
+func BenchmarkForecast(b *testing.B) {
+	svc := newBenchService(b)
+	ctx := context.Background()
+	accounts, err := svc.ListAccounts(ctx)
+	if err != nil {
+		b.Fatal(err)
+	}
+	start, _ := date.ParseDate("2024-01-01")
+	for _, acc := range accounts {
+		if _, err := svc.UpsertAccountSnapshot(ctx, acc.ID, model.AccountSnapshotInput{Date: start, Balance: uncertain.NewFixed(100_000)}); err != nil {
+			b.Fatalf("seed snapshot: %v", err)
+		}
+	}
+	params := model.PredictionParams{Duration: date.Year, Samples: 100, Quantile: 0.8, SnapshotInterval: "*-*-28", GroupBy: model.GroupByType}
+	b.ResetTimer()
+	for b.Loop() {
+		if err := svc.RunPrediction(ctx, discardedForecast{}, params); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
