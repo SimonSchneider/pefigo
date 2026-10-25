@@ -33,6 +33,18 @@ type TransferTemplate struct {
 	Enabled       bool
 }
 
+// AppliesOn reports whether day is from the Transfer Template's Start Date up to, but not on, its End
+// Date. It says nothing about Enabled or the recurrence.
+func (t TransferTemplate) AppliesOn(day date.Date) bool {
+	return appliesOn(t.EffectiveFrom, t.EffectiveTo, day)
+}
+
+// ChargedOn reports whether the Transfer Template moves money on day: it is enabled, applies on day
+// and its recurrence matches day.
+func (t TransferTemplate) ChargedOn(day date.Date) bool {
+	return t.Enabled && t.AppliesOn(day) && t.Recurrence.Matches(day)
+}
+
 type TransferFixed struct {
 	Amount uncertain.Value
 }

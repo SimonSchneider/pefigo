@@ -386,6 +386,9 @@ func partialParentalLeaveFromDB(a pdb.PartialParentalLeave) PartialParentalLeave
 }
 
 func (s *Service) UpsertPartialParentalLeave(ctx context.Context, inp PartialParentalLeave) (PartialParentalLeave, error) {
+	if err := checkEndDate(inp.StartDate, &inp.EndDate); err != nil {
+		return PartialParentalLeave{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
@@ -437,6 +440,9 @@ func fullParentalLeaveFromDB(a pdb.FullParentalLeave) FullParentalLeave {
 }
 
 func (s *Service) UpsertFullParentalLeave(ctx context.Context, inp FullParentalLeave) (FullParentalLeave, error) {
+	if err := checkEndDate(inp.StartDate, &inp.EndDate); err != nil {
+		return FullParentalLeave{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}

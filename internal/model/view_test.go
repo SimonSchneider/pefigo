@@ -2,59 +2,7 @@ package model
 
 import (
 	"testing"
-
-	"github.com/SimonSchneider/pefigo/pkg/uncertain"
 )
-
-func TestNewTransferTemplatesView2_OneTimeTransfersExcludedFromMonthlyTotals(t *testing.T) {
-	templates := []TransferTemplate{
-		{
-			ID:          "recurring-income",
-			Name:        "Salary",
-			ToAccountID: "acc1",
-			AmountType:  "fixed",
-			AmountFixed: uncertain.NewFixed(5000),
-			Recurrence:  "*-*-25",
-			Enabled:     true,
-		},
-		{
-			ID:          "onetime-income",
-			Name:        "Bonus",
-			ToAccountID: "acc1",
-			AmountType:  "fixed",
-			AmountFixed: uncertain.NewFixed(10000),
-			Recurrence:  "2024-06-01",
-			Enabled:     true,
-		},
-		{
-			ID:            "recurring-expense",
-			Name:          "Rent",
-			FromAccountID: "acc1",
-			AmountType:    "fixed",
-			AmountFixed:   uncertain.NewFixed(1200),
-			Recurrence:    "*-*-1",
-			Enabled:       true,
-		},
-		{
-			ID:            "onetime-expense",
-			Name:          "Moving cost",
-			FromAccountID: "acc1",
-			AmountType:    "fixed",
-			AmountFixed:   uncertain.NewFixed(3000),
-			Recurrence:    "2024-06-01",
-			Enabled:       true,
-		},
-	}
-
-	view := newTransferTemplatesView2(templates, templates, nil, nil)
-
-	if view.MonthlyIncome != 5000 {
-		t.Errorf("expected MonthlyIncome 5000 (excluding one-time bonus), got %f", view.MonthlyIncome)
-	}
-	if view.MonthlyExpenses != -1200 {
-		t.Errorf("expected MonthlyExpenses -1200 (excluding one-time moving cost), got %f", view.MonthlyExpenses)
-	}
-}
 
 func TestAccountFormMode(t *testing.T) {
 	t.Run("standard when no startup share account", func(t *testing.T) {

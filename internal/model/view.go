@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math"
-	"strings"
 
 	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/pkg/currency"
@@ -23,135 +21,26 @@ func (c TransferTemplateEditView) IsEdit() bool {
 	return c.TransferTemplate.ID != ""
 }
 
-type TransferTemplateWithAmount struct {
-	TransferTemplate
-	Amount     float64
-	GroupTotal float64
-
-	SimDate date.Date
-}
-
-func (t *TransferTemplateWithAmount) IsGroup() bool {
-	return len(t.GroupMembers) > 0
-}
-
-func (c *TransferTemplateWithAmount) HasDifferentAmount() bool {
-	return math.Abs(c.Amount-c.AmountFixed.Mean()) > 1
-}
-
-func (t *TransferTemplateWithAmount) ActiveState() string {
-	if !t.Enabled {
-		return "Disabled"
-	}
-	if t.EndDate != nil && t.EndDate.Before(t.SimDate) || t.StartDate.After(t.SimDate) {
-		return "Inactive"
-	}
-	return "Active"
-}
-
-func MakeTransferTemplatesWithAmount(transfers []TransferTemplate, day date.Date) []TransferTemplateWithAmount {
-	type AccBalance struct {
-		Starting float64
-		Current  float64
-	}
-	accs := make(map[string]AccBalance)
-	ttwas := make([]TransferTemplateWithAmount, len(transfers))
-	currIter := ""
-	for i, t := range transfers {
-		ttwa := TransferTemplateWithAmount{TransferTemplate: t, SimDate: day}
-		if !t.Enabled || (t.EndDate != nil && t.EndDate.Before(day) || t.StartDate.After(day)) {
-			ttwas[i] = ttwa
-			continue
-		}
-		nextIter := fmt.Sprintf("%s%d", t.Recurrence, t.Priority)
-		if nextIter != currIter {
-			currIter = nextIter
-			for k, acc := range accs {
-				acc.Starting = acc.Current
-				accs[k] = acc
-			}
-		}
-		accs = initMap(accs, t.FromAccountID)
-		accs = initMap(accs, t.ToAccountID)
-		switch t.AmountType {
-		case "fixed":
-			ttwa.Amount = t.AmountFixed.Mean()
-		case "percent":
-			ttwa.Amount = t.AmountPercent * accs[t.FromAccountID].Starting
-		}
-		fromAcc := accs[t.FromAccountID]
-		fromAcc.Current -= ttwa.Amount
-		accs[t.FromAccountID] = fromAcc
-		toAcc := accs[t.ToAccountID]
-		toAcc.Current += ttwa.Amount
-		accs[t.ToAccountID] = toAcc
-		ttwas[i] = ttwa
-	}
-	return ttwas
-}
-
 type TransferTemplatesView2 struct {
-	TransferTemplates []TransferTemplateWithAmount
-	Accounts          map[string]Account
-	Categories        map[string]TransferTemplateCategory
-	MonthlyIncome     float64
-	MonthlyExpenses   float64
-	memberAmounts     map[string]TransferTemplateWithAmount
+	Rows            []TransferScheduleRow
+	Accounts        map[string]Account
+	Categories      map[string]TransferTemplateCategory
+	MonthlyIncome   float64
+	MonthlyExpenses float64
 }
 
-func (v *TransferTemplatesView2) GetMemberWithAmount(member TransferTemplate) TransferTemplateWithAmount {
-	if a, ok := v.memberAmounts[member.ID]; ok {
-		return a
-	}
-	return TransferTemplateWithAmount{TransferTemplate: member}
-}
-
-func newTransferTemplatesView2(flatTemplates []TransferTemplate, groupedTemplates []TransferTemplate, accounts []Account, categories []TransferTemplateCategory) *TransferTemplatesView2 {
-	day := date.Today()
+func newTransferTemplatesView2(day *TransferScheduleDay, accounts []Account, categories []TransferTemplateCategory) *TransferTemplatesView2 {
 	v := &TransferTemplatesView2{
-		Accounts:      KeyBy(accounts, func(a Account) string { return a.ID }),
-		Categories:    KeyBy(categories, func(c TransferTemplateCategory) string { return c.ID }),
-		memberAmounts: make(map[string]TransferTemplateWithAmount),
+		Rows:       day.Rows(),
+		Accounts:   KeyBy(accounts, func(a Account) string { return a.ID }),
+		Categories: KeyBy(categories, func(c TransferTemplateCategory) string { return c.ID }),
 	}
-
-	// Compute all amounts from the flat (ungrouped) list so that percent-type
-	// templates correctly chain off prior templates' account balance effects.
-	flatAmounts := make(map[string]TransferTemplateWithAmount)
-	for _, twa := range MakeTransferTemplatesWithAmount(flatTemplates, day) {
-		flatAmounts[twa.ID] = twa
-		v.memberAmounts[twa.ID] = twa
-	}
-
-	// Build the display list from grouped templates, wiring in pre-computed amounts.
-	for _, t := range groupedTemplates {
-		if len(t.GroupMembers) > 0 {
-			twa := TransferTemplateWithAmount{TransferTemplate: t, SimDate: day}
-			var total float64
-			for _, member := range t.GroupMembers {
-				total += flatAmounts[member.ID].Amount
-			}
-			twa.GroupTotal = total
-			v.TransferTemplates = append(v.TransferTemplates, twa)
-		} else {
-			if twa, ok := flatAmounts[t.ID]; ok {
-				v.TransferTemplates = append(v.TransferTemplates, twa)
-			} else {
-				v.TransferTemplates = append(v.TransferTemplates, TransferTemplateWithAmount{TransferTemplate: t, SimDate: day})
-			}
-		}
-	}
-
-	// Monthly totals computed from flat amounts — grouping is purely visual.
-	// One-time transfers (no wildcard in recurrence) are excluded since they
-	// are not part of the monthly recurring transfers.
-	for _, twa := range flatAmounts {
-		if twa.Amount == 0 || !strings.Contains(string(twa.Recurrence), "*") {
-			continue
-		}
-		if twa.FromAccountID == "" {
-			v.MonthlyIncome += twa.Amount
-		} else if twa.ToAccountID == "" {
-			v.MonthlyExpenses += -twa.Amount
+	for _, t := range day.Monthly() {
+		switch t.Kind() {
+		case TransferIncome:
+			v.MonthlyIncome += t.Amount
+		case TransferExpense:
+			v.MonthlyExpenses -= t.Amount
 		}
 	}
 	return v
@@ -524,9 +413,9 @@ func (s *Service) GetAccountEditPageData(ctx context.Context, accountID string, 
 }
 
 func (s *Service) GetTransferTemplatesPageData(ctx context.Context) (*TransferTemplatesView2, error) {
-	flat, err := s.ListAllTransferTemplates(ctx)
+	schedule, err := s.TransferSchedule(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("listing transfer templates: %w", err)
+		return nil, fmt.Errorf("loading transfer schedule: %w", err)
 	}
 	accounts, err := s.ListAccounts(ctx)
 	if err != nil {
@@ -536,7 +425,7 @@ func (s *Service) GetTransferTemplatesPageData(ctx context.Context) (*TransferTe
 	if err != nil {
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
-	return newTransferTemplatesView2(flat, autoGroupTransferTemplates(flat), accounts, categories), nil
+	return newTransferTemplatesView2(schedule.On(date.Today()), accounts, categories), nil
 }
 
 func (s *Service) GetTransferTemplateNewPageData(ctx context.Context) (*TransferTemplateEditView, error) {

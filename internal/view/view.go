@@ -68,7 +68,8 @@ type (
 	AccountTypeWithFilter            = model.AccountTypeWithFilter
 	AccountTypesWithFilter           = model.AccountTypesWithFilter
 	TransferTemplate                 = model.TransferTemplate
-	TransferTemplateWithAmount       = model.TransferTemplateWithAmount
+	ScheduledTransfer                = model.ScheduledTransfer
+	TransferScheduleRow              = model.TransferScheduleRow
 	TransferTemplateCategory         = model.TransferTemplateCategory
 	TransferTemplateCategoryInput    = model.TransferTemplateCategoryInput
 	AccountSnapshot                  = model.AccountSnapshot

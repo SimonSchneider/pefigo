@@ -40,7 +40,6 @@ type TransferTemplate struct {
 	EndDate          *date.Date
 	Enabled          bool
 	BudgetCategoryID *string
-	GroupMembers     []TransferTemplate
 
 	Source TransferTemplateSource
 }
@@ -110,6 +109,9 @@ type TransferTemplateInput struct {
 }
 
 func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTemplate) (TransferTemplate, error) {
+	if err := checkEndDate(inp.StartDate, inp.EndDate); err != nil {
+		return TransferTemplate{}, err
+	}
 	var endDate *int64
 	if inp.EndDate != nil {
 		d := int64(*inp.EndDate)
@@ -170,25 +172,6 @@ func (s *Service) ListTransferTemplates(ctx context.Context) ([]TransferTemplate
 	return parsedTemplates, nil
 }
 
-func (s *Service) ListAllTransferTemplates(ctx context.Context) ([]TransferTemplate, error) {
-	templates, err := s.ListTransferTemplates(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing DB transfer templates: %w", err)
-	}
-	salaryTemplates, err := s.generateSalaryTransferTemplates(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("generating salary transfer templates: %w", err)
-	}
-	billTemplates, err := s.generateBillTransferTemplates(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("generating bill transfer templates: %w", err)
-	}
-	all := append(templates, salaryTemplates...)
-	all = append(all, billTemplates...)
-	sortTransferTemplates(all)
-	return all, nil
-}
-
 func sortTransferTemplates(ts []TransferTemplate) {
 	sort.SliceStable(ts, func(i, j int) bool {
 		ri, rj := string(ts[i].Recurrence), string(ts[j].Recurrence)
@@ -206,92 +189,6 @@ func sortTransferTemplates(ts []TransferTemplate) {
 		}
 		return false
 	})
-}
-
-func autoGroupTransferTemplates(templates []TransferTemplate) []TransferTemplate {
-	type groupKey struct {
-		Name          string
-		Priority      int64
-		Recurrence    string
-		FromAccountID string
-		ToAccountID   string
-	}
-
-	type groupEntry struct {
-		indices []int
-	}
-
-	groups := make(map[groupKey]*groupEntry)
-	var keyOrder []groupKey
-
-	for i, t := range templates {
-		k := groupKey{
-			Name:          t.Name,
-			Priority:      t.Priority,
-			Recurrence:    string(t.Recurrence),
-			FromAccountID: t.FromAccountID,
-			ToAccountID:   t.ToAccountID,
-		}
-		if entry, ok := groups[k]; ok {
-			entry.indices = append(entry.indices, i)
-		} else {
-			groups[k] = &groupEntry{indices: []int{i}}
-			keyOrder = append(keyOrder, k)
-		}
-	}
-
-	result := make([]TransferTemplate, 0, len(keyOrder))
-	for _, k := range keyOrder {
-		indices := groups[k].indices
-		if len(indices) == 1 {
-			result = append(result, templates[indices[0]])
-		} else {
-			// Build a virtual group entry: all real members go into GroupMembers,
-			// the group row itself has no ID and spans the full date range.
-			first := templates[indices[0]]
-			minStart := first.StartDate
-			maxEnd := first.EndDate
-			members := make([]TransferTemplate, 0, len(indices))
-			for _, idx := range indices {
-				m := templates[idx]
-				members = append(members, m)
-				if m.StartDate < minStart {
-					minStart = m.StartDate
-				}
-				if maxEnd != nil {
-					if m.EndDate == nil {
-						maxEnd = nil
-					} else if *m.EndDate > *maxEnd {
-						maxEnd = m.EndDate
-					}
-				}
-			}
-			virtual := TransferTemplate{
-				ID:               "group-" + sid.MustNewString(16),
-				Name:             k.Name,
-				FromAccountID:    k.FromAccountID,
-				ToAccountID:      k.ToAccountID,
-				Priority:         k.Priority,
-				Recurrence:       date.Cron(k.Recurrence),
-				BudgetCategoryID: first.BudgetCategoryID,
-				Source:           first.Source,
-				Enabled:          true,
-				StartDate:        minStart,
-				EndDate:          maxEnd,
-				GroupMembers:     members,
-			}
-			result = append(result, virtual)
-		}
-	}
-	return result
-}
-
-func (s *Service) ListAllTransferTemplatesWithChildren(ctx context.Context) ([]TransferTemplate, error) {
-	templates, err := s.ListAllTransferTemplates(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list all templates: %w", err)
-	}
-	return autoGroupTransferTemplates(templates), nil
 }
 
 func (s *Service) GetTransferTemplate(ctx context.Context, id string) (TransferTemplate, error) {

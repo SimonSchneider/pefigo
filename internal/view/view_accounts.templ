@@ -228,7 +228,7 @@ templ AccountForm(view *AccountEditView2) {
 								<div class="text-xs text-base-content/50">Annual Rate</div>
 								<div class="text-xs text-base-content/50">Volatility</div>
 								<div class="text-xs text-base-content/50">Start Date</div>
-								<div class="text-xs text-base-content/50">End Date</div>
+								@EndDateColumnHeader()
 								<div></div>
 								<div></div>
 								for _, growthModel := range view.GrowthModels {

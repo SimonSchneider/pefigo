@@ -57,12 +57,12 @@ func seedBenchData(b *testing.B, svc *model.Service) {
 	}
 }
 
-func BenchmarkListAllTransferTemplates(b *testing.B) {
+func BenchmarkTransferSchedule(b *testing.B) {
 	svc := newBenchService(b)
 	ctx := context.Background()
 	b.ResetTimer()
 	for b.Loop() {
-		_, err := svc.ListAllTransferTemplates(ctx)
+		_, err := svc.TransferSchedule(ctx)
 		if err != nil {
 			b.Fatal(err)
 		}

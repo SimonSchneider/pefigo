@@ -25,14 +25,7 @@ func (i *TimeFrameGrowth) StartsOn() date.Date {
 }
 
 func (i *TimeFrameGrowth) IsActiveOn(day date.Date) bool {
-	// Check if the interest model applies to the given day
-	if i.StartDate.After(day) {
-		return false
-	}
-	if i.EndDate != nil && i.EndDate.Before(day) {
-		return false
-	}
-	return true
+	return appliesOn(i.StartDate, i.EndDate, day)
 }
 
 type GrowthCombined struct {

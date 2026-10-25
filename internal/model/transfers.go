@@ -15,8 +15,8 @@ import (
 type TransfersView struct {
 	Day date.Date
 
-	TransferTemplatesThatNeedAmount []TransferTemplateWithAmount
-	TransferTemplates               []TransferTemplate
+	TransferTemplatesThatNeedAmount []ScheduledTransfer // Amount is the one entered, or 0
+	TransferTemplates               []ScheduledTransfer
 
 	TransfersReady      bool
 	IncompleteTransfers bool
@@ -32,24 +32,21 @@ type Transfer struct {
 
 func (s *Service) ComputeTransfersView(ctx context.Context, day date.Date, amounts map[string]float64) (*TransfersView, error) {
 	view := &TransfersView{Day: day}
-	allTransferTemplates, err := s.ListAllTransferTemplates(ctx)
+	schedule, err := s.TransferSchedule(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("listing transfer templates: %w", err)
+		return nil, fmt.Errorf("loading transfer schedule: %w", err)
 	}
 	view.TransfersReady = false
-	for _, t := range allTransferTemplates {
-		if t.EndDate == nil || t.EndDate.After(day) {
-			if t.StartDate.Before(day) && t.Recurrence.Matches(day) {
-				if t.AmountType == "fixed" && t.AmountFixed.Distribution != uncertain.DistFixed {
-					amount, ok := amounts[t.ID]
-					if ok {
-						view.TransfersReady = true
-					}
-					view.TransferTemplatesThatNeedAmount = append(view.TransferTemplatesThatNeedAmount, TransferTemplateWithAmount{TransferTemplate: t, Amount: amount})
-				} else {
-					view.TransferTemplates = append(view.TransferTemplates, t)
-				}
+	for _, t := range schedule.On(day).Charged() {
+		if t.AmountType == "fixed" && t.AmountFixed.Distribution != uncertain.DistFixed {
+			amount, ok := amounts[t.ID]
+			if ok {
+				view.TransfersReady = true
 			}
+			t.Amount = amount
+			view.TransferTemplatesThatNeedAmount = append(view.TransferTemplatesThatNeedAmount, t)
+		} else {
+			view.TransferTemplates = append(view.TransferTemplates, t)
 		}
 	}
 	if view.TransfersReady {
@@ -297,9 +294,9 @@ type TransferChartDataEnvelope struct {
 }
 
 func (s *Service) GetTransferChartData(ctx context.Context, groupBy TransferChartGroupBy) (*TransferChartDataEnvelope, error) {
-	transfersTemplates, err := s.ListAllTransferTemplates(ctx)
+	schedule, err := s.TransferSchedule(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("listing transfer templates: %w", err)
+		return nil, fmt.Errorf("loading transfer schedule: %w", err)
 	}
 	accounts, err := s.ListAccounts(ctx)
 	if err != nil {
@@ -310,7 +307,6 @@ func (s *Service) GetTransferChartData(ctx context.Context, groupBy TransferChar
 		return nil, fmt.Errorf("listing account types: %w", err)
 	}
 	accountTypesById := KeyBy(accountTypes, func(a AccountType) string { return a.ID })
-	ttsWithAmounts := MakeTransferTemplatesWithAmount(transfersTemplates, date.Today())
 
 	accountsById := KeyBy(accounts, func(a Account) string { return a.ID })
 
@@ -392,11 +388,11 @@ func (s *Service) GetTransferChartData(ctx context.Context, groupBy TransferChar
 		Label string
 	})
 
-	for _, t := range ttsWithAmounts {
+	for _, t := range schedule.On(date.Today()).Monthly() {
 		if strings.Contains(string(t.Name), "Matkort") {
 			continue
 		}
-		if t.Amount > 0 && t.Enabled && strings.Contains(string(t.Recurrence), "*") {
+		if t.Amount > 0 {
 			var source, target string
 			if t.FromAccountID == "" {
 				source = "Income"

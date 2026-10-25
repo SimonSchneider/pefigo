@@ -306,35 +306,3 @@ func TestTaxModelWithDeposits(t *testing.T) {
 		t.Errorf("balance after tax and deposits is %f, expected around 109890", bal)
 	}
 }
-
-func TestSimulation(t *testing.T) {
-	type RecordedTransfer struct {
-		From   string
-		To     string
-		Amount uncertain.Value
-	}
-	transfers := make([]RecordedTransfer, 0)
-	salary := newTransfer("", "salAcc", 0, "*-*-25", withFixed(uncertain.NewFixed(1000)))
-	shared := newTransfer("salAcc", "sharedAcc", 1, "*-*-25", withPercent(0.46))
-	checking := newTransfer("salAcc", "checkAcc", 2, "*-*-25", withFixed(uncertain.NewFixed(1000)))
-	bills := newTransfer("salAcc", "billsAcc", 2, "*-*-25", withFixed(uncertain.NewFixed(500)))
-	savings := newTransfer("salAcc", "savingsAcc", 3, "*-*-25", withFixed(uncertain.NewFixed(1000)))
-	shortSavings := newTransfer("salAcc", "shortSavingsAcc", 3, "*-*-25", withFixed(uncertain.NewFixed(1000)))
-	extraSavings := newTransfer("salAcc", "savingsAcc", 4, "*-*-25", withPercent(1))
-	finance2.RunSimulation(
-		[]finance2.ConcreteTransfers{{ID: salary.ID, Amount: 45000}},
-		[]finance2.TransferTemplate{salary, shared, checking, bills, savings, shortSavings, extraSavings},
-		date.Today(),
-		finance2.TransferRecorderFunc(func(sourceAccountID, destinationAccountID string, day date.Date, amount uncertain.Value) error {
-			transfers = append(transfers, RecordedTransfer{
-				From:   sourceAccountID,
-				To:     destinationAccountID,
-				Amount: amount,
-			})
-			return nil
-		}),
-	)
-	for _, t := range transfers {
-		fmt.Printf("Transfer from %s to %s: %.0f\n", t.From, t.To, t.Amount.Mean())
-	}
-}

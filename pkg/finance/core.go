@@ -119,8 +119,8 @@ func RunPrediction(ctx context.Context, ucfg *uncertain.Config, from, to date.Da
 		}
 		if from <= day {
 			for _, transfer := range transfers {
-				if transfer.EffectiveFrom.After(day) || (transfer.EffectiveTo != nil && transfer.EffectiveTo.Before(day)) || !transfer.Enabled || !transfer.Recurrence.Matches(day) {
-					continue // Skip transfers not effective on this day
+				if !transfer.ChargedOn(day) {
+					continue
 				}
 				dailyTransfers = append(dailyTransfers, transfer)
 			}
