@@ -60,6 +60,9 @@ func (s *Service) GetAccountType(ctx context.Context, id string) (AccountType, e
 }
 
 func (s *Service) UpsertAccountType(ctx context.Context, inp AccountTypeInput) (AccountType, error) {
+	if err := checkRequired("name", inp.Name); err != nil {
+		return AccountType{}, err
+	}
 	id := inp.ID
 	if id == "" {
 		id = sid.MustNewString(15)

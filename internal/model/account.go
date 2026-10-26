@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -85,7 +86,7 @@ func (inp AccountInput) checkCashFlow() error {
 }
 
 func (s *Service) UpsertAccount(ctx context.Context, inp AccountInput) (Account, error) {
-	if err := inp.checkCashFlow(); err != nil {
+	if err := errors.Join(checkRequired("name", inp.Name), inp.checkCashFlow()); err != nil {
 		return Account{}, err
 	}
 	var (

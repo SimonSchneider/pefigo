@@ -51,6 +51,9 @@ func (s *Service) GetSweYearlyParams(ctx context.Context, id string) (SweYearlyP
 }
 
 func (s *Service) UpsertSweYearlyParams(ctx context.Context, inp SweYearlyParams) (SweYearlyParams, error) {
+	if err := checkRequired("valid from", inp.ValidFrom); err != nil {
+		return SweYearlyParams{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}

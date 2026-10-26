@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -207,7 +208,7 @@ func (s *Service) UpsertSalary(ctx context.Context, inp Salary) (Salary, error) 
 	if inp.Recurrence == "" {
 		inp.Recurrence = DefaultSalaryRecurrence
 	}
-	if err := checkDatePattern("salary recurrence", inp.Recurrence); err != nil {
+	if err := errors.Join(checkRequired("name", inp.Name), checkDatePattern("salary recurrence", inp.Recurrence)); err != nil {
 		return Salary{}, err
 	}
 	if inp.ID == "" {
@@ -285,10 +286,13 @@ func (s *Service) DeleteSalary(ctx context.Context, id string) error {
 }
 
 func (s *Service) UpsertSalaryAmount(ctx context.Context, inp SalaryAmount) (SalaryAmount, error) {
+	if err := errors.Join(checkRequired("salary", inp.SalaryID), checkRequired("start date", inp.StartDate)); err != nil {
+		return SalaryAmount{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
-	encoded, err := inp.Amount.Encode()
+	encoded, err := orZero(inp.Amount).Encode()
 	if err != nil {
 		return SalaryAmount{}, fmt.Errorf("encoding amount: %w", err)
 	}
@@ -343,6 +347,9 @@ func salaryAdjustmentFromDB(a pdb.SalaryAdjustment) SalaryAdjustment {
 }
 
 func (s *Service) UpsertSalaryAdjustment(ctx context.Context, inp SalaryAdjustment) (SalaryAdjustment, error) {
+	if err := errors.Join(checkRequired("salary", inp.SalaryID), checkRequired("valid from", inp.ValidFrom)); err != nil {
+		return SalaryAdjustment{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
@@ -383,6 +390,14 @@ func (s *Service) DeleteSalaryAdjustment(ctx context.Context, id string) error {
 	return nil
 }
 
+// checkParentalLeave rejects a parental leave without a salary, a Start Date or an End Date after it.
+func checkParentalLeave(salaryID string, start, end date.Date) error {
+	if err := errors.Join(checkRequired("salary", salaryID), checkRequired("start date", start), checkRequired("end date", end)); err != nil {
+		return err
+	}
+	return checkEndDate(start, &end)
+}
+
 func partialParentalLeaveFromDB(a pdb.PartialParentalLeave) PartialParentalLeave {
 	return PartialParentalLeave{
 		ID:                     a.ID,
@@ -396,7 +411,7 @@ func partialParentalLeaveFromDB(a pdb.PartialParentalLeave) PartialParentalLeave
 }
 
 func (s *Service) UpsertPartialParentalLeave(ctx context.Context, inp PartialParentalLeave) (PartialParentalLeave, error) {
-	if err := checkEndDate(inp.StartDate, &inp.EndDate); err != nil {
+	if err := checkParentalLeave(inp.SalaryID, inp.StartDate, inp.EndDate); err != nil {
 		return PartialParentalLeave{}, err
 	}
 	if inp.ID == "" {
@@ -450,7 +465,7 @@ func fullParentalLeaveFromDB(a pdb.FullParentalLeave) FullParentalLeave {
 }
 
 func (s *Service) UpsertFullParentalLeave(ctx context.Context, inp FullParentalLeave) (FullParentalLeave, error) {
-	if err := checkEndDate(inp.StartDate, &inp.EndDate); err != nil {
+	if err := checkParentalLeave(inp.SalaryID, inp.StartDate, inp.EndDate); err != nil {
 		return FullParentalLeave{}, err
 	}
 	if inp.ID == "" {

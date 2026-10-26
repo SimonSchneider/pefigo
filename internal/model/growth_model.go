@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -107,6 +108,9 @@ func growthModelFromDB(g pdb.GrowthModel) (GrowthModel, error) {
 }
 
 func (s *Service) UpsertAccountGrowthModel(ctx context.Context, inp AccountGrowthModelInput) (GrowthModel, error) {
+	if err := errors.Join(checkRequired("account", inp.AccountID), checkRequired("start date", inp.StartDate)); err != nil {
+		return GrowthModel{}, err
+	}
 	if err := checkOneOf("growth model type", inp.Type, GrowthModelFixed, GrowthModelLogNormal); err != nil {
 		return GrowthModel{}, err
 	}
@@ -120,11 +124,11 @@ func (s *Service) UpsertAccountGrowthModel(ctx context.Context, inp AccountGrowt
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
-	annualRate, err := inp.AnnualRate.Encode()
+	annualRate, err := orZero(inp.AnnualRate).Encode()
 	if err != nil {
 		return GrowthModel{}, fmt.Errorf("encoding annual rate: %w", err)
 	}
-	annualVolatility, err := inp.AnnualVolatility.Encode()
+	annualVolatility, err := orZero(inp.AnnualVolatility).Encode()
 	if err != nil {
 		return GrowthModel{}, fmt.Errorf("encoding annual volatility: %w", err)
 	}

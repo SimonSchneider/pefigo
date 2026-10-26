@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/SimonSchneider/goslu/date"
@@ -46,6 +47,9 @@ func (s *Service) GetSpecialDate(ctx context.Context, id string) (SpecialDate, e
 }
 
 func (s *Service) UpsertSpecialDate(ctx context.Context, inp SpecialDateInput) (SpecialDate, error) {
+	if err := errors.Join(checkRequired("name", inp.Name), checkRequired("date", inp.Date)); err != nil {
+		return SpecialDate{}, err
+	}
 	id := inp.ID
 	if id == "" {
 		id = sid.MustNewString(15)

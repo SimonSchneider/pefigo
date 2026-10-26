@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -257,6 +258,11 @@ func startupShareOptionFromDB(o pdb.StartupShareOption) StartupShareOption {
 }
 
 func (s *Service) UpsertStartupShareAccount(ctx context.Context, inp StartupShareAccountInput) (StartupShareAccount, error) {
+	// The account is checked here, not in startupShareAccount: UpsertAccountWithStartupShares checks
+	// the rest before the account it is for is saved.
+	if err := checkRequired("account", inp.AccountID); err != nil {
+		return StartupShareAccount{}, err
+	}
 	ssa, err := inp.startupShareAccount()
 	if err != nil {
 		return StartupShareAccount{}, err
@@ -288,6 +294,9 @@ func (s *Service) DeleteStartupShareAccount(ctx context.Context, accountID strin
 }
 
 func (s *Service) UpsertInvestmentRound(ctx context.Context, inp InvestmentRoundInput) (InvestmentRound, error) {
+	if err := errors.Join(checkRequired("account", inp.AccountID), checkRequired("date", inp.Date)); err != nil {
+		return InvestmentRound{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
@@ -349,6 +358,9 @@ func (s *Service) DeleteInvestmentRound(ctx context.Context, id string) error {
 }
 
 func (s *Service) UpsertShareChange(ctx context.Context, inp ShareChangeInput) (ShareChange, error) {
+	if err := errors.Join(checkRequired("account", inp.AccountID), checkRequired("date", inp.Date)); err != nil {
+		return ShareChange{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
@@ -426,6 +438,14 @@ func PostMoneyValuationAndShares(preMoneyValuation, preMoneyShares, investment f
 }
 
 func (s *Service) UpsertStartupShareOption(ctx context.Context, inp StartupShareOptionInput) (StartupShareOption, error) {
+	if err := errors.Join(
+		checkRequired("account", inp.AccountID),
+		checkRequired("source account", inp.SourceAccountID),
+		checkRequired("grant date", inp.GrantDate),
+		checkRequired("expiry date", inp.EndDate),
+	); err != nil {
+		return StartupShareOption{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}

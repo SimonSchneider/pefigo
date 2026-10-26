@@ -54,6 +54,9 @@ func (s *Service) GetCategory(ctx context.Context, id string) (TransferTemplateC
 }
 
 func (s *Service) UpsertCategory(ctx context.Context, inp TransferTemplateCategoryInput) (TransferTemplateCategory, error) {
+	if err := checkRequired("name", inp.Name); err != nil {
+		return TransferTemplateCategory{}, err
+	}
 	now := time.Now().Unix()
 	id := inp.ID
 	createdAt := now

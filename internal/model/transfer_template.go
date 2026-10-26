@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -128,6 +129,9 @@ type TransferTemplateInput struct {
 }
 
 func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTemplate) (TransferTemplate, error) {
+	if err := errors.Join(checkRequired("name", inp.Name), checkRequired("start date", inp.StartDate)); err != nil {
+		return TransferTemplate{}, err
+	}
 	if err := checkOneOf("transfer template amount type", inp.AmountType, TransferAmountFixed, TransferAmountPercent); err != nil {
 		return TransferTemplate{}, err
 	}
@@ -142,7 +146,7 @@ func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTempla
 		d := int64(*inp.EndDate)
 		endDate = &d
 	}
-	amountFixed, err := inp.AmountFixed.Encode()
+	amountFixed, err := orZero(inp.AmountFixed).Encode()
 	if err != nil {
 		return TransferTemplate{}, fmt.Errorf("encoding amount fixed: %w", err)
 	}

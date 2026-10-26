@@ -11,6 +11,7 @@ import (
 	"github.com/SimonSchneider/pefigo/internal/pdb"
 	"github.com/SimonSchneider/pefigo/pkg/currency"
 	"github.com/SimonSchneider/pefigo/pkg/swe"
+	"github.com/SimonSchneider/pefigo/pkg/uncertain"
 	"github.com/ncruces/go-sqlite3/driver"
 )
 
@@ -99,6 +100,15 @@ func KeyBy[T any](items []T, key func(T) string) map[string]T {
 		m[key(item)] = item
 	}
 	return m
+}
+
+// orZero is v, or a fixed 0 when v isn't given: the zero uncertain.Value an empty amount field maps to.
+// It is the default of every amount, as 0 is of every other number.
+func orZero(v uncertain.Value) uncertain.Value {
+	if v.Distribution == "" {
+		return uncertain.NewFixed(0)
+	}
+	return v
 }
 
 func ptr[T any](v T) *T {

@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -308,7 +309,7 @@ func (s *Service) UpsertBillAccount(ctx context.Context, inp BillAccount) (BillA
 	if inp.Recurrence == "" {
 		inp.Recurrence = DefaultBillAccountRecurrence
 	}
-	if err := checkDatePattern("bill account recurrence", inp.Recurrence); err != nil {
+	if err := errors.Join(checkRequired("name", inp.Name), checkDatePattern("bill account recurrence", inp.Recurrence)); err != nil {
 		return BillAccount{}, err
 	}
 	if inp.ID == "" {
@@ -359,6 +360,9 @@ func (s *Service) DeleteBillAccount(ctx context.Context, id string) error {
 }
 
 func (s *Service) UpsertBill(ctx context.Context, inp Bill) (Bill, error) {
+	if err := errors.Join(checkRequired("bill account", inp.BillAccountID), checkRequired("name", inp.Name)); err != nil {
+		return Bill{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
@@ -408,6 +412,9 @@ func (s *Service) DeleteBill(ctx context.Context, id string) error {
 }
 
 func (s *Service) UpsertBillAmount(ctx context.Context, inp BillAmount) (BillAmount, error) {
+	if err := errors.Join(checkRequired("bill", inp.BillID), checkRequired("start date", inp.StartDate)); err != nil {
+		return BillAmount{}, err
+	}
 	if inp.Period == "" {
 		inp.Period = BillPeriodMonthly
 	}
@@ -425,7 +432,7 @@ func (s *Service) UpsertBillAmount(ctx context.Context, inp BillAmount) (BillAmo
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
-	encoded, err := inp.Amount.Encode()
+	encoded, err := orZero(inp.Amount).Encode()
 	if err != nil {
 		return BillAmount{}, fmt.Errorf("encoding bill amount: %w", err)
 	}

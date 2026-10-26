@@ -15,6 +15,16 @@ import (
 // failure to save it.
 var ErrInvalidInput = errors.New("invalid input")
 
+// checkRequired rejects value, the field named field, when it isn't given: when it is the zero value an
+// empty form field maps to, such as "" for a name or a parent link and the zero date.Date for a date.
+func checkRequired[T comparable](field string, value T) error {
+	var notGiven T
+	if value == notGiven {
+		return fmt.Errorf("%w: %s is required", ErrInvalidInput, field)
+	}
+	return nil
+}
+
 // checkOneOf rejects value, the field named field, unless it is one of set.
 func checkOneOf(field, value string, set ...string) error {
 	if slices.Contains(set, value) {

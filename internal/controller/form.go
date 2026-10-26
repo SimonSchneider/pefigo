@@ -24,10 +24,7 @@ func (a *accountInputForm) FromForm(r *http.Request) error {
 	a.CashFlowFrequency = r.FormValue("cash_flow_frequency")
 	a.CashFlowDestinationID = r.FormValue("cash_flow_destination_id")
 	a.TypeID = r.FormValue("type_id")
-	budgetCategoryID := r.FormValue("budget_category_id")
-	if budgetCategoryID != "" {
-		a.BudgetCategoryID = &budgetCategoryID
-	}
+	a.BudgetCategoryID = ui.WithDefaultNull(r.FormValue("budget_category_id"))
 	a.IsISK = r.FormValue("is_isk") == "on"
 	return nil
 }
@@ -65,25 +62,17 @@ func (a *accountGrowthModelInputForm) FromForm(r *http.Request) error {
 	a.ID = r.FormValue("id")
 	a.AccountID = r.FormValue("account_id")
 	a.Type = r.FormValue("type")
-	if err := shttp.Parse(&a.AnnualRate, ui.ParseUncertainValue, r.FormValue("annual_rate"), uncertain.NewFixed(0)); err != nil {
+	if err := shttp.Parse(&a.AnnualRate, ui.ParseUncertainValue, r.FormValue("annual_rate"), uncertain.Value{}); err != nil {
 		return fmt.Errorf("parsing annual rate: %w", err)
 	}
-	if err := shttp.Parse(&a.AnnualVolatility, ui.ParseUncertainValue, r.FormValue("annual_volatility"), uncertain.NewFixed(0)); err != nil {
+	if err := shttp.Parse(&a.AnnualVolatility, ui.ParseUncertainValue, r.FormValue("annual_volatility"), uncertain.Value{}); err != nil {
 		return fmt.Errorf("parsing annual volatility: %w", err)
 	}
 	if err := shttp.Parse(&a.StartDate, date.ParseDate, r.FormValue("start_date"), date.Date(0)); err != nil {
 		return fmt.Errorf("parsing start date: %w", err)
 	}
-	if endDateStr := r.FormValue("end_date"); endDateStr != "" {
-		var endDate date.Date
-		if err := shttp.Parse(&endDate, date.ParseDate, endDateStr, date.Date(0)); err != nil {
-			return fmt.Errorf("parsing end date: %w", err)
-		}
-		if endDate.IsZero() {
-			a.EndDate = nil
-		} else {
-			a.EndDate = &endDate
-		}
+	if err := shttp.Parse(&a.EndDate, ui.ParseNullable(date.ParseDate), r.FormValue("end_date"), nil); err != nil {
+		return fmt.Errorf("parsing end date: %w", err)
 	}
 	return nil
 }
@@ -176,13 +165,11 @@ func (a *accountSnapshotInputForm) FromForm(r *http.Request) error {
 	if dateStr == "" {
 		dateStr = r.FormValue("date")
 	}
-	if err := shttp.Parse(&a.Date, date.ParseDate, dateStr, 0); err != nil {
+	if err := shttp.Parse(&a.Date, date.ParseDate, dateStr, date.Date(0)); err != nil {
 		return fmt.Errorf("parsing date: %w", err)
 	}
-	balanceStr := r.FormValue("balance")
-	if balanceStr == "" {
-		a.EmptyBalance = true
-	} else if err := shttp.Parse(&a.Balance, ui.ParseUncertainValue, balanceStr, uncertain.NewFixed(0)); err != nil {
+	a.EmptyBalance = r.FormValue("balance") == ""
+	if err := shttp.Parse(&a.Balance, ui.ParseUncertainValue, r.FormValue("balance"), uncertain.Value{}); err != nil {
 		return fmt.Errorf("parsing balance: %w", err)
 	}
 	return nil
@@ -198,7 +185,7 @@ func (t *transferTemplateForm) FromForm(r *http.Request) error {
 	t.FromAccountID = r.FormValue("from_account_id")
 	t.ToAccountID = r.FormValue("to_account_id")
 	t.AmountType = r.FormValue("amount_type")
-	if err := shttp.Parse(&t.AmountFixed, ui.ParseUncertainValue, r.FormValue("amount_fixed"), uncertain.NewFixed(0)); err != nil {
+	if err := shttp.Parse(&t.AmountFixed, ui.ParseUncertainValue, r.FormValue("amount_fixed"), uncertain.Value{}); err != nil {
 		return fmt.Errorf("parsing amount fixed: %w", err)
 	}
 	if err := shttp.Parse(&t.AmountPercent, ui.ParsePercent, r.FormValue("amount_percent"), 0); err != nil {
@@ -213,22 +200,11 @@ func (t *transferTemplateForm) FromForm(r *http.Request) error {
 	if err := shttp.Parse(&t.StartDate, date.ParseDate, r.FormValue("start_date"), date.Date(0)); err != nil {
 		return fmt.Errorf("parsing effective from: %w", err)
 	}
-	if endDateStr := r.FormValue("end_date"); endDateStr != "" {
-		var endDate date.Date
-		if err := shttp.Parse(&endDate, date.ParseDate, endDateStr, date.Date(0)); err != nil {
-			return fmt.Errorf("parsing effective to: %w", err)
-		}
-		t.EndDate = &endDate
-	} else {
-		t.EndDate = nil
+	if err := shttp.Parse(&t.EndDate, ui.ParseNullable(date.ParseDate), r.FormValue("end_date"), nil); err != nil {
+		return fmt.Errorf("parsing effective to: %w", err)
 	}
 	t.Enabled = r.FormValue("enabled") == "on"
-	budgetCategoryID := r.FormValue("budget_category_id")
-	if budgetCategoryID != "" {
-		t.BudgetCategoryID = &budgetCategoryID
-	} else {
-		t.BudgetCategoryID = nil
-	}
+	t.BudgetCategoryID = ui.WithDefaultNull(r.FormValue("budget_category_id"))
 	return nil
 }
 
@@ -239,12 +215,7 @@ type transferTemplateCategoryInputForm struct {
 func (c *transferTemplateCategoryInputForm) FromForm(r *http.Request) error {
 	c.ID = r.FormValue("id")
 	c.Name = r.FormValue("name")
-	color := r.FormValue("color")
-	if color != "" {
-		c.Color = &color
-	} else {
-		c.Color = nil
-	}
+	c.Color = ui.WithDefaultNull(r.FormValue("color"))
 	return nil
 }
 
@@ -268,12 +239,7 @@ func (s *salaryInputForm) FromForm(r *http.Request) error {
 	s.Kommun = r.FormValue("kommun")
 	s.Forsamling = r.FormValue("forsamling")
 	s.ChurchMember = r.FormValue("church_member") == "on"
-	budgetCategoryID := r.FormValue("budget_category_id")
-	if budgetCategoryID != "" {
-		s.BudgetCategoryID = &budgetCategoryID
-	} else {
-		s.BudgetCategoryID = nil
-	}
+	s.BudgetCategoryID = ui.WithDefaultNull(r.FormValue("budget_category_id"))
 	return nil
 }
 
@@ -287,7 +253,7 @@ func (a *salaryAmountInputForm) FromForm(r *http.Request) error {
 	if err := shttp.Parse(&a.StartDate, date.ParseDate, r.FormValue("start_date"), date.Date(0)); err != nil {
 		return fmt.Errorf("parsing start date: %w", err)
 	}
-	if err := shttp.Parse(&a.Amount, ui.ParseUncertainValue, r.FormValue("amount"), uncertain.NewFixed(0)); err != nil {
+	if err := shttp.Parse(&a.Amount, ui.ParseUncertainValue, r.FormValue("amount"), uncertain.Value{}); err != nil {
 		return fmt.Errorf("parsing amount: %w", err)
 	}
 	return nil
@@ -453,12 +419,7 @@ func (b *billInputForm) FromForm(r *http.Request) error {
 	b.Enabled = r.FormValue("enabled") == "on"
 	b.Notes = r.FormValue("notes")
 	b.URL = r.FormValue("url")
-	budgetCategoryID := r.FormValue("budget_category_id")
-	if budgetCategoryID != "" {
-		b.BudgetCategoryID = &budgetCategoryID
-	} else {
-		b.BudgetCategoryID = nil
-	}
+	b.BudgetCategoryID = ui.WithDefaultNull(r.FormValue("budget_category_id"))
 	return nil
 }
 
@@ -472,16 +433,10 @@ func (a *billAmountInputForm) FromForm(r *http.Request) error {
 	if err := shttp.Parse(&a.StartDate, date.ParseDate, r.FormValue("start_date"), date.Date(0)); err != nil {
 		return fmt.Errorf("parsing start date: %w", err)
 	}
-	if endDateStr := r.FormValue("end_date"); endDateStr != "" {
-		var endDate date.Date
-		if err := shttp.Parse(&endDate, date.ParseDate, endDateStr, date.Date(0)); err != nil {
-			return fmt.Errorf("parsing end date: %w", err)
-		}
-		a.EndDate = &endDate
-	} else {
-		a.EndDate = nil
+	if err := shttp.Parse(&a.EndDate, ui.ParseNullable(date.ParseDate), r.FormValue("end_date"), nil); err != nil {
+		return fmt.Errorf("parsing end date: %w", err)
 	}
-	if err := shttp.Parse(&a.Amount, ui.ParseUncertainValue, r.FormValue("amount"), uncertain.NewFixed(0)); err != nil {
+	if err := shttp.Parse(&a.Amount, ui.ParseUncertainValue, r.FormValue("amount"), uncertain.Value{}); err != nil {
 		return fmt.Errorf("parsing amount: %w", err)
 	}
 	a.Period = r.FormValue("amount_period")
