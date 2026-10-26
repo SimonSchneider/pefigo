@@ -56,7 +56,7 @@ func forecastInputMutations() []forecastInputMutation {
 			return discard(svc.UpsertAccount(ctx, model.AccountInput{Name: "Savings"}))
 		}},
 		{"UpsertAccountWithStartupShares", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return discard(svc.UpsertAccountWithStartupShares(ctx, model.AccountInput{Name: "Startup"}, &model.StartupShareAccountInput{TaxRate: 0.3, ValuationDiscountFactor: 1}))
+			return discard(svc.UpsertAccountWithStartupShares(ctx, model.AccountInput{Name: "Startup"}, &model.StartupShareAccountInput{TaxRate: ptr(0.3), ValuationDiscountFactor: ptr(1.0)}))
 		}},
 		{"DeleteAccount", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.DeleteAccount(ctx, ids.account)
@@ -169,7 +169,7 @@ func forecastInputMutations() []forecastInputMutation {
 		}},
 		// startup_shares.go
 		{"UpsertStartupShareAccount", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return discard(svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: ids.account, TaxRate: 0.25, ValuationDiscountFactor: 0.8}))
+			return discard(svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: ids.account, TaxRate: ptr(0.25), ValuationDiscountFactor: ptr(0.8)}))
 		}},
 		{"DeleteStartupShareAccount", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.DeleteStartupShareAccount(ctx, ids.account)
@@ -388,7 +388,7 @@ func seedForecastInputs(t *testing.T, svc *model.Service) forecastInputIDs {
 	must("account type", err)
 	ids.accountType = at.ID
 
-	acc, err := svc.UpsertAccountWithStartupShares(ctx, model.AccountInput{Name: "Checking", TypeID: at.ID}, &model.StartupShareAccountInput{TaxRate: 0.3, ValuationDiscountFactor: 1})
+	acc, err := svc.UpsertAccountWithStartupShares(ctx, model.AccountInput{Name: "Checking", TypeID: at.ID}, &model.StartupShareAccountInput{TaxRate: ptr(0.3), ValuationDiscountFactor: ptr(1.0)})
 	must("account", err)
 	ids.account = acc.ID
 

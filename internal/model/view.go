@@ -139,18 +139,22 @@ func (v *AccountEditView2) GetStartupSharePurchasePrice() string {
 	return fmt.Sprintf("%.10f", v.DerivedStartupShareSummary.AvgPurchasePricePerShare)
 }
 
+// GetStartupShareTaxRate is the Tax Rate as a percentage, or the default one for an account without
+// startup shares.
 func (v *AccountEditView2) GetStartupShareTaxRate() string {
 	if v.StartupShareAccount == nil {
-		return "15"
+		return ui.FormatPercent(DefaultStartupShareTaxRate)
 	}
-	return fmt.Sprintf("%.2f", v.StartupShareAccount.TaxRate*100)
+	return ui.FormatPercent(v.StartupShareAccount.TaxRate)
 }
 
+// GetStartupShareDiscountFactor is the Valuation Discount as a percentage, or the default one for an
+// account without startup shares.
 func (v *AccountEditView2) GetStartupShareDiscountFactor() string {
 	if v.StartupShareAccount == nil {
-		return "50"
+		return ui.FormatPercent(DefaultValuationDiscount)
 	}
-	return fmt.Sprintf("%.2f", v.StartupShareAccount.ValuationDiscountFactor*100)
+	return ui.FormatPercent(v.StartupShareAccount.ValuationDiscountFactor)
 }
 
 func (v *AccountEditView2) HasStartupShareAccount() bool {

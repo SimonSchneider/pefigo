@@ -109,6 +109,12 @@ func (s *Service) UpsertAccount(ctx context.Context, inp AccountInput) (Account,
 }
 
 func (s *Service) UpsertAccountWithStartupShares(ctx context.Context, inp AccountInput, startupShares *StartupShareAccountInput) (Account, error) {
+	if startupShares != nil {
+		// Reject invalid startup shares before saving the account, so nothing is saved.
+		if _, err := startupShares.startupShareAccount(); err != nil {
+			return Account{}, err
+		}
+	}
 	acc, err := s.UpsertAccount(ctx, inp)
 	if err != nil {
 		return Account{}, fmt.Errorf("upserting account: %w", err)

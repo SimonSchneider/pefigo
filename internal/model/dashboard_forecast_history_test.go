@@ -193,7 +193,7 @@ func TestDashboardForecastHistoryValuesAStartupShareAccountOnEverySnapshotDay(t 
 	for _, d := range []date.Date{mustParseDate("2025-01-15"), mustParseDate("2025-02-15"), mustParseDate("2025-03-01"), mustParseDate("2025-04-15"), date.Today().Add(10 * date.Day)} {
 		mustSnapshot(t, svc, savings.ID, d, 1000)
 	}
-	if _, err := svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: acc.ID, TaxRate: 0, ValuationDiscountFactor: 1}); err != nil {
+	if _, err := svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: acc.ID, TaxRate: ptr(0.0), ValuationDiscountFactor: ptr(1.0)}); err != nil {
 		t.Fatalf("create startup share account: %v", err)
 	}
 	for _, sc := range []model.ShareChangeInput{
@@ -265,7 +265,7 @@ func TestDashboardForecastHistorySkipsAnInvestmentRoundWithoutASharePrice(t *tes
 	ctx := t.Context()
 	equity := mustAccountType(t, svc, "Equity", "#ff00ff")
 	acc := mustTypedAccount(t, svc, "Startup", equity.ID)
-	if _, err := svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: acc.ID, TaxRate: 0, ValuationDiscountFactor: 1}); err != nil {
+	if _, err := svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: acc.ID, TaxRate: ptr(0.0), ValuationDiscountFactor: ptr(1.0)}); err != nil {
 		t.Fatalf("create startup share account: %v", err)
 	}
 	if _, err := svc.UpsertShareChange(ctx, model.ShareChangeInput{AccountID: acc.ID, Date: mustParseDate("2025-01-01"), DeltaShares: 10, TotalPrice: 100}); err != nil {
@@ -298,7 +298,7 @@ func TestDashboardForecastHistoryHasASeriesForEveryAccountTypeTheForecastProject
 	mustSnapshot(t, svc, mustTypedAccount(t, svc, "Future pension", pension.ID).ID, future, 1000)
 	equity := mustAccountType(t, svc, "Equity", "#ff00ff")
 	startup := mustTypedAccount(t, svc, "Startup", equity.ID)
-	if _, err := svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: startup.ID, TaxRate: 0, ValuationDiscountFactor: 1}); err != nil {
+	if _, err := svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: startup.ID, TaxRate: ptr(0.0), ValuationDiscountFactor: ptr(1.0)}); err != nil {
 		t.Fatalf("create startup share account: %v", err)
 	}
 	empty := mustAccountType(t, svc, "Empty", "#00ffff")
@@ -324,7 +324,7 @@ func TestDashboardForecastHistoryHasNoSeriesToProjectWithoutAForecast(t *testing
 	svc := newTestService(t)
 	equity := mustAccountType(t, svc, "Equity", "#ff00ff")
 	startup := mustTypedAccount(t, svc, "Startup", equity.ID)
-	if _, err := svc.UpsertStartupShareAccount(t.Context(), model.StartupShareAccountInput{AccountID: startup.ID, TaxRate: 0, ValuationDiscountFactor: 1}); err != nil {
+	if _, err := svc.UpsertStartupShareAccount(t.Context(), model.StartupShareAccountInput{AccountID: startup.ID, TaxRate: ptr(0.0), ValuationDiscountFactor: ptr(1.0)}); err != nil {
 		t.Fatalf("create startup share account: %v", err)
 	}
 	// A Snapshot of a Startup Share account doesn't count, so there is no Forecast.

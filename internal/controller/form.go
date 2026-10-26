@@ -97,14 +97,12 @@ type startupShareAccountInputForm struct {
 
 func (s *startupShareAccountInputForm) FromForm(r *http.Request) error {
 	s.AccountID = r.FormValue("account_id")
-	if err := shttp.Parse(&s.TaxRate, shttp.ParseFloat, r.FormValue("tax_rate"), 0.0); err != nil {
+	if err := shttp.Parse(&s.TaxRate, ui.ParseNullable(ui.ParsePercent), r.FormValue("tax_rate"), nil); err != nil {
 		return fmt.Errorf("parsing tax rate: %w", err)
 	}
-	s.TaxRate = s.TaxRate / 100.0
-	if err := shttp.Parse(&s.ValuationDiscountFactor, shttp.ParseFloat, r.FormValue("valuation_discount_factor"), 0.5); err != nil {
+	if err := shttp.Parse(&s.ValuationDiscountFactor, ui.ParseNullable(ui.ParsePercent), r.FormValue("valuation_discount_factor"), nil); err != nil {
 		return fmt.Errorf("parsing valuation discount factor: %w", err)
 	}
-	s.ValuationDiscountFactor = s.ValuationDiscountFactor / 100.0
 	return nil
 }
 

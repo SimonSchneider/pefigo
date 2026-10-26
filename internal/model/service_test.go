@@ -34,6 +34,10 @@ func approxEqual(a, b, epsilon float64) bool {
 	return diff < epsilon
 }
 
+func ptr[T any](v T) *T {
+	return &v
+}
+
 func mustParseDate(s string) date.Date {
 	d, err := date.ParseDate(s)
 	if err != nil {

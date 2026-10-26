@@ -14,7 +14,7 @@ import (
 func mustStartupShareAccount(t *testing.T, svc *model.Service, accountID string, rounds []model.InvestmentRoundInput, changes []model.ShareChangeInput) {
 	t.Helper()
 	ctx := t.Context()
-	if _, err := svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: accountID, TaxRate: 0, ValuationDiscountFactor: 1}); err != nil {
+	if _, err := svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: accountID, TaxRate: ptr(0.0), ValuationDiscountFactor: ptr(1.0)}); err != nil {
 		t.Fatalf("create startup share account: %v", err)
 	}
 	for _, ir := range rounds {
