@@ -16,6 +16,16 @@ func TestParseNullableIsNilForAnEmptyValue(t *testing.T) {
 	}
 }
 
+func TestParseNullableIsNilForAValueOfOnlySpaces(t *testing.T) {
+	got, err := ui.ParseNullable(ui.ParsePercent)("  ")
+	if err != nil {
+		t.Fatalf("ParseNullable(ParsePercent)(\"  \") err = %v", err)
+	}
+	if got != nil {
+		t.Errorf("ParseNullable(ParsePercent)(\"  \") = %v, want nil", *got)
+	}
+}
+
 func TestParseNullableParsesAGivenZero(t *testing.T) {
 	got, err := ui.ParseNullable(ui.ParsePercent)("0")
 	if err != nil {

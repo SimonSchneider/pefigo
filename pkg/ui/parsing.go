@@ -76,10 +76,11 @@ func ParseNullableFloat(val string) (*float64, error) {
 	return &f, nil
 }
 
-// ParseNullable makes parse return nil for an empty value: "not given", separately from a given 0.
+// ParseNullable makes parse return nil for an empty value, or one of only spaces: "not given",
+// separately from a given 0.
 func ParseNullable[T any](parse func(string) (T, error)) func(string) (*T, error) {
 	return func(val string) (*T, error) {
-		if val == "" {
+		if strings.TrimSpace(val) == "" {
 			return nil, nil
 		}
 		v, err := parse(val)
@@ -90,13 +91,14 @@ func ParseNullable[T any](parse func(string) (T, error)) func(string) (*T, error
 	}
 }
 
-// ParsePercent parses a percentage into the fraction it stands for: "15" is 0.15, and "" is 0.
-// FormatPercent is its inverse.
+// ParsePercent parses a percentage into the fraction it stands for: "15" is 0.15, and "", or only
+// spaces, is 0. FormatPercent is its inverse.
 func ParsePercent(val string) (float64, error) {
+	val = strings.TrimSpace(val)
 	if val == "" {
 		return 0, nil
 	}
-	percent, err := strconv.ParseFloat(strings.TrimSpace(val), 64)
+	percent, err := strconv.ParseFloat(val, 64)
 	if err != nil {
 		return 0, fmt.Errorf("parsing percent: %w", err)
 	}

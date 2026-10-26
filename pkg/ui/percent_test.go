@@ -23,6 +23,7 @@ func TestParsePercent(t *testing.T) {
 		{" 40 ", 0.4},
 		{"1e1", 0.1},
 		{"", 0},
+		{"  ", 0},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%q is %g", tt.in, tt.want), func(t *testing.T) {
