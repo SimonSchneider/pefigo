@@ -225,7 +225,7 @@ func (b Bill) GenerateTransferTemplates(ba BillAccount) []TransferTemplate {
 			Name:             b.Name,
 			FromAccountID:    ba.FromAccountID,
 			ToAccountID:      "",
-			AmountType:       "fixed",
+			AmountType:       TransferAmountFixed,
 			AmountFixed:      monthlyAmt,
 			Priority:         ba.Priority,
 			Recurrence:       ba.Recurrence,

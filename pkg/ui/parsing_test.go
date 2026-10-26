@@ -1,11 +1,13 @@
-package ui
+package ui_test
 
 import (
 	"testing"
+
+	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
 
 func TestParseNullableIsNilForAnEmptyValue(t *testing.T) {
-	got, err := ParseNullable(ParsePercent)("")
+	got, err := ui.ParseNullable(ui.ParsePercent)("")
 	if err != nil {
 		t.Fatalf("ParseNullable(ParsePercent)(\"\") err = %v", err)
 	}
@@ -15,7 +17,7 @@ func TestParseNullableIsNilForAnEmptyValue(t *testing.T) {
 }
 
 func TestParseNullableParsesAGivenZero(t *testing.T) {
-	got, err := ParseNullable(ParsePercent)("0")
+	got, err := ui.ParseNullable(ui.ParsePercent)("0")
 	if err != nil {
 		t.Fatalf("ParseNullable(ParsePercent)(\"0\") err = %v", err)
 	}
@@ -25,7 +27,7 @@ func TestParseNullableParsesAGivenZero(t *testing.T) {
 }
 
 func TestParseNullableParsesAGivenValue(t *testing.T) {
-	got, err := ParseNullable(ParsePercent)("15")
+	got, err := ui.ParseNullable(ui.ParsePercent)("15")
 	if err != nil {
 		t.Fatalf("ParseNullable(ParsePercent)(\"15\") err = %v", err)
 	}
@@ -35,7 +37,7 @@ func TestParseNullableParsesAGivenValue(t *testing.T) {
 }
 
 func TestParseNullableRejectsWhatItsParserRejects(t *testing.T) {
-	if got, err := ParseNullable(ParsePercent)("abc"); err == nil {
+	if got, err := ui.ParseNullable(ui.ParsePercent)("abc"); err == nil {
 		t.Errorf("ParseNullable(ParsePercent)(\"abc\") = %v, want an error", got)
 	}
 }

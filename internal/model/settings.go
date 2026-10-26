@@ -59,25 +59,26 @@ const (
 	DefaultForecastStartDays date.Cron = "*-*-*"
 )
 
+// The range the Forecast Samples must be within.
 const (
-	minForecastSamples = 100
-	maxForecastSamples = 100000
+	MinForecastSamples int64 = 100
+	MaxForecastSamples int64 = 100000
 )
 
 // check names every setting the Dashboard Forecast can't be run with. It doesn't wrap ErrInvalidInput:
 // saving rejects the input with it, and a Forecast Run fails on stored settings with it.
 func (fs ForecastSettings) check() error {
 	var samples error
-	if fs.Samples < minForecastSamples || fs.Samples > maxForecastSamples {
-		samples = fmt.Errorf("samples %d is not within %d–%d", fs.Samples, minForecastSamples, maxForecastSamples)
+	if fs.Samples < MinForecastSamples || fs.Samples > MaxForecastSamples {
+		samples = fmt.Errorf("samples %d is not within %d–%d", fs.Samples, MinForecastSamples, MaxForecastSamples)
 	}
-	return errors.Join(samples, notADatePattern("Forecast Interval", fs.Interval), fs.checkStartDays())
+	return errors.Join(samples, datePatternError("Forecast Interval", fs.Interval), fs.checkStartDays())
 }
 
 // checkStartDays checks only the Forecast Start Days, the one setting every Forecast uses: the chart
 // page's and the Transfers page's too, not only the Dashboard Forecast's.
 func (fs ForecastSettings) checkStartDays() error {
-	return notADatePattern("Forecast Start Days", fs.StartDays)
+	return datePatternError("Forecast Start Days", fs.StartDays)
 }
 
 // ForecastSettingsInput is a save of the Forecast Settings. A setting that isn't given, a nil Samples

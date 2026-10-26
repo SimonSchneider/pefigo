@@ -124,22 +124,59 @@ func TestDeletingWithoutNextRedirectsToAPageThatExists(t *testing.T) {
 	}
 }
 
-func TestDeletingAGrowthModelWithoutNextRedirectsToItsAccountsEditPage(t *testing.T) {
-	svc, srv := newSettingsServer(t)
-	account, err := svc.UpsertAccount(t.Context(), model.AccountInput{Name: "Savings"})
-	if err != nil {
-		t.Fatalf("create account: %v", err)
-	}
-	gm, err := svc.UpsertAccountGrowthModel(t.Context(), model.AccountGrowthModelInput{AccountID: account.ID, Type: model.GrowthModelFixed, StartDate: date.Today()})
-	if err != nil {
-		t.Fatalf("create growth model: %v", err)
-	}
+// lookupDelete is a delete route whose fallback is the edit page of the deleted row's parent.
+type lookupDelete struct {
+	name   string
+	create func(t *testing.T, svc *model.Service, p parents) (path, parentEditPage string)
+}
 
-	location := postForm(t, srv, "/growth-models/"+gm.ID+"/delete", nil)
-	if want := "/accounts/" + account.ID + "/edit"; location != want {
-		t.Errorf("expected a redirect to %s, got %q", want, location)
+var lookupDeletes = []lookupDelete{
+	{"growth model", func(t *testing.T, svc *model.Service, p parents) (string, string) {
+		gm, err := svc.UpsertAccountGrowthModel(t.Context(), model.AccountGrowthModelInput{AccountID: p.account, Type: model.GrowthModelFixed, StartDate: date.Today()})
+		if err != nil {
+			t.Fatalf("create growth model: %v", err)
+		}
+		return "/growth-models/" + gm.ID + "/delete", "/accounts/" + p.account + "/edit"
+	}},
+	{"investment round", func(t *testing.T, svc *model.Service, p parents) (string, string) {
+		r, err := svc.UpsertInvestmentRound(t.Context(), model.InvestmentRoundInput{AccountID: p.account, Date: date.Today()})
+		if err != nil {
+			t.Fatalf("create investment round: %v", err)
+		}
+		return "/investment-rounds/" + r.ID + "/delete", "/accounts/" + p.account + "/edit"
+	}},
+	{"share change", func(t *testing.T, svc *model.Service, p parents) (string, string) {
+		sc, err := svc.UpsertShareChange(t.Context(), model.ShareChangeInput{AccountID: p.account, Date: date.Today()})
+		if err != nil {
+			t.Fatalf("create share change: %v", err)
+		}
+		return "/share-changes/" + sc.ID + "/delete", "/accounts/" + p.account + "/edit"
+	}},
+	{"startup share option", func(t *testing.T, svc *model.Service, p parents) (string, string) {
+		o, err := svc.UpsertStartupShareOption(t.Context(), model.StartupShareOptionInput{AccountID: p.account, SourceAccountID: p.sourceAccount, GrantDate: date.Today(), EndDate: date.Today().Add(365 * date.Day)})
+		if err != nil {
+			t.Fatalf("create startup share option: %v", err)
+		}
+		return "/startup-share-options/" + o.ID + "/delete", "/accounts/" + p.account + "/edit"
+	}},
+	{"bill", func(t *testing.T, svc *model.Service, p parents) (string, string) {
+		return "/bill-items/" + p.bill + "/delete", "/bills/" + p.billAccount + "/edit"
+	}},
+}
+
+func TestDeletingARowWithoutNextRedirectsToItsParentsEditPage(t *testing.T) {
+	for _, d := range lookupDeletes {
+		t.Run(d.name, func(t *testing.T) {
+			svc, srv := newSettingsServer(t)
+			path, want := d.create(t, svc, mustParents(t, svc))
+
+			location := postForm(t, srv, path, nil)
+			if location != want {
+				t.Errorf("expected a redirect to %s, got %q", want, location)
+			}
+			getPage(t, srv, location)
+		})
 	}
-	getPage(t, srv, location)
 }
 
 func TestUpsertingWithoutARequiredNameIsABadRequest(t *testing.T) {

@@ -97,8 +97,8 @@ func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
 		growthModels[row.AccountID] = append(growthModels[row.AccountID], gm)
 	}
 	for _, acc := range accounts {
-		if acc.hasCashFlow() && !validDatePattern(date.Cron(acc.CashFlowFrequency)) {
-			return nil, fmt.Errorf("account %s has invalid cash-flow frequency %q", acc.ID, acc.CashFlowFrequency)
+		if err := cashFlowError(acc.CashFlowFrequency, acc.CashFlowDestinationID); err != nil {
+			return nil, fmt.Errorf("account %s has invalid cash-flow frequency %q: %w", acc.ID, acc.CashFlowFrequency, err)
 		}
 		growth, err := growthModels[acc.ID].ToFinance()
 		if err != nil {

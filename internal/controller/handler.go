@@ -75,10 +75,31 @@ func upsertHandler[F, T any](what string, upsertFn func(ctx context.Context, for
 	})
 }
 
-// accountEditPage is the edit page of the account accountID, where everything that belongs to an
+// accountEditURL is the edit page of the account accountID, where everything that belongs to an
 // account is edited.
-func accountEditPage(accountID string) string {
+func accountEditURL(accountID string) string {
 	return fmt.Sprintf("/accounts/%s/edit", accountID)
+}
+
+// salaryEditURL is the edit page of the salary salaryID, where everything that belongs to a salary
+// is edited.
+func salaryEditURL(salaryID string) string {
+	return fmt.Sprintf("/salaries/%s/edit", salaryID)
+}
+
+// billAccountEditURL is the edit page of the bill account billAccountID, which lists its bills.
+func billAccountEditURL(billAccountID string) string {
+	return fmt.Sprintf("/bills/%s/edit", billAccountID)
+}
+
+// billEditURL is the edit page of the bill billID, where its amounts are edited.
+func billEditURL(billID string) string {
+	return fmt.Sprintf("/bill-items/%s/edit", billID)
+}
+
+// transferTemplateEditURL is the edit page of the transfer template transferTemplateID.
+func transferTemplateEditURL(transferTemplateID string) string {
+	return fmt.Sprintf("/transfer-templates/%s/edit", transferTemplateID)
 }
 
 func NewHandler(svc *model.Service, public fs.FS) http.Handler {
@@ -250,7 +271,7 @@ func (h *Handler) accountUpsert() http.Handler {
 	return upsertHandler("account", func(ctx context.Context, f accountInputForm) (model.Account, error) {
 		return h.svc.UpsertAccountWithStartupShares(ctx, f.AccountInput, f.StartupShares)
 	}, func(acc model.Account) string {
-		return accountEditPage(acc.ID)
+		return accountEditURL(acc.ID)
 	})
 }
 
@@ -264,13 +285,13 @@ func (h *Handler) accountGrowthModelUpsert() http.Handler {
 	return upsertHandler("account growth model", func(ctx context.Context, f accountGrowthModelInputForm) (model.GrowthModel, error) {
 		return h.svc.UpsertAccountGrowthModel(ctx, f.AccountGrowthModelInput)
 	}, func(gm model.GrowthModel) string {
-		return accountEditPage(gm.AccountID)
+		return accountEditURL(gm.AccountID)
 	})
 }
 
 func (h *Handler) accountGrowthModelDelete() http.Handler {
 	return deleteWithLookupHandler(h.svc.GetGrowthModel, h.svc.DeleteAccountGrowthModel, func(gm model.GrowthModel) string {
-		return accountEditPage(gm.AccountID)
+		return accountEditURL(gm.AccountID)
 	})
 }
 
@@ -280,7 +301,7 @@ func (h *Handler) startupShareAccountUpsert() http.Handler {
 	return upsertHandler("startup share account", func(ctx context.Context, f startupShareAccountInputForm) (model.StartupShareAccount, error) {
 		return h.svc.UpsertStartupShareAccount(ctx, f.StartupShareAccountInput)
 	}, func(ssa model.StartupShareAccount) string {
-		return accountEditPage(ssa.AccountID)
+		return accountEditURL(ssa.AccountID)
 	})
 }
 
@@ -288,13 +309,13 @@ func (h *Handler) investmentRoundUpsert() http.Handler {
 	return upsertHandler("investment round", func(ctx context.Context, f investmentRoundInputForm) (model.InvestmentRound, error) {
 		return h.svc.UpsertInvestmentRound(ctx, f.InvestmentRoundInput)
 	}, func(r model.InvestmentRound) string {
-		return accountEditPage(r.AccountID)
+		return accountEditURL(r.AccountID)
 	})
 }
 
 func (h *Handler) investmentRoundDelete() http.Handler {
 	return deleteWithLookupHandler(h.svc.GetInvestmentRound, h.svc.DeleteInvestmentRound, func(r model.InvestmentRound) string {
-		return accountEditPage(r.AccountID)
+		return accountEditURL(r.AccountID)
 	})
 }
 
@@ -302,13 +323,13 @@ func (h *Handler) shareChangeUpsert() http.Handler {
 	return upsertHandler("share change", func(ctx context.Context, f shareChangeInputForm) (model.ShareChange, error) {
 		return h.svc.UpsertShareChange(ctx, f.ShareChangeInput)
 	}, func(sc model.ShareChange) string {
-		return accountEditPage(sc.AccountID)
+		return accountEditURL(sc.AccountID)
 	})
 }
 
 func (h *Handler) shareChangeDelete() http.Handler {
 	return deleteWithLookupHandler(h.svc.GetShareChange, h.svc.DeleteShareChange, func(sc model.ShareChange) string {
-		return accountEditPage(sc.AccountID)
+		return accountEditURL(sc.AccountID)
 	})
 }
 
@@ -316,13 +337,13 @@ func (h *Handler) startupShareOptionUpsert() http.Handler {
 	return upsertHandler("startup share option", func(ctx context.Context, f startupShareOptionInputForm) (model.StartupShareOption, error) {
 		return h.svc.UpsertStartupShareOption(ctx, f.StartupShareOptionInput)
 	}, func(o model.StartupShareOption) string {
-		return accountEditPage(o.AccountID)
+		return accountEditURL(o.AccountID)
 	})
 }
 
 func (h *Handler) startupShareOptionDelete() http.Handler {
 	return deleteWithLookupHandler(h.svc.GetStartupShareOption, h.svc.DeleteStartupShareOption, func(o model.StartupShareOption) string {
-		return accountEditPage(o.AccountID)
+		return accountEditURL(o.AccountID)
 	})
 }
 
@@ -368,7 +389,7 @@ func (h *Handler) salaryUpsert() http.Handler {
 	return upsertHandler("salary", func(ctx context.Context, f salaryInputForm) (model.Salary, error) {
 		return h.svc.UpsertSalary(ctx, f.Salary)
 	}, func(s model.Salary) string {
-		return fmt.Sprintf("/salaries/%s/edit", s.ID)
+		return salaryEditURL(s.ID)
 	})
 }
 
@@ -380,7 +401,7 @@ func (h *Handler) salaryAmountUpsert() http.Handler {
 	return upsertHandler("salary amount", func(ctx context.Context, f salaryAmountInputForm) (model.SalaryAmount, error) {
 		return h.svc.UpsertSalaryAmount(ctx, f.SalaryAmount)
 	}, func(a model.SalaryAmount) string {
-		return fmt.Sprintf("/salaries/%s/edit", a.SalaryID)
+		return salaryEditURL(a.SalaryID)
 	})
 }
 
@@ -392,7 +413,7 @@ func (h *Handler) salaryAdjustmentUpsert() http.Handler {
 	return upsertHandler("salary adjustment", func(ctx context.Context, f salaryAdjustmentInputForm) (model.SalaryAdjustment, error) {
 		return h.svc.UpsertSalaryAdjustment(ctx, f.SalaryAdjustment)
 	}, func(a model.SalaryAdjustment) string {
-		return fmt.Sprintf("/salaries/%s/edit", a.SalaryID)
+		return salaryEditURL(a.SalaryID)
 	})
 }
 
@@ -404,7 +425,7 @@ func (h *Handler) partialParentalLeaveUpsert() http.Handler {
 	return upsertHandler("partial parental leave", func(ctx context.Context, f partialParentalLeaveInputForm) (model.PartialParentalLeave, error) {
 		return h.svc.UpsertPartialParentalLeave(ctx, f.PartialParentalLeave)
 	}, func(l model.PartialParentalLeave) string {
-		return fmt.Sprintf("/salaries/%s/edit", l.SalaryID)
+		return salaryEditURL(l.SalaryID)
 	})
 }
 
@@ -416,7 +437,7 @@ func (h *Handler) fullParentalLeaveUpsert() http.Handler {
 	return upsertHandler("full parental leave", func(ctx context.Context, f fullParentalLeaveInputForm) (model.FullParentalLeave, error) {
 		return h.svc.UpsertFullParentalLeave(ctx, f.FullParentalLeave)
 	}, func(l model.FullParentalLeave) string {
-		return fmt.Sprintf("/salaries/%s/edit", l.SalaryID)
+		return salaryEditURL(l.SalaryID)
 	})
 }
 
@@ -460,7 +481,7 @@ func (h *Handler) billAccountUpsert() http.Handler {
 	return upsertHandler("bill account", func(ctx context.Context, f billAccountInputForm) (model.BillAccount, error) {
 		return h.svc.UpsertBillAccount(ctx, f.BillAccount)
 	}, func(ba model.BillAccount) string {
-		return fmt.Sprintf("/bills/%s/edit", ba.ID)
+		return billAccountEditURL(ba.ID)
 	})
 }
 
@@ -482,13 +503,13 @@ func (h *Handler) billUpsert() http.Handler {
 	return upsertHandler("bill", func(ctx context.Context, f billInputForm) (model.Bill, error) {
 		return h.svc.UpsertBill(ctx, f.Bill)
 	}, func(b model.Bill) string {
-		return fmt.Sprintf("/bill-items/%s/edit", b.ID)
+		return billEditURL(b.ID)
 	})
 }
 
 func (h *Handler) billDelete() http.Handler {
 	return deleteWithLookupHandler(h.svc.GetBill, h.svc.DeleteBill, func(b model.Bill) string {
-		return fmt.Sprintf("/bills/%s/edit", b.BillAccountID)
+		return billAccountEditURL(b.BillAccountID)
 	})
 }
 
@@ -496,7 +517,7 @@ func (h *Handler) billAmountUpsert() http.Handler {
 	return upsertHandler("bill amount", func(ctx context.Context, f billAmountInputForm) (model.BillAmount, error) {
 		return h.svc.UpsertBillAmount(ctx, f.BillAmount)
 	}, func(a model.BillAmount) string {
-		return fmt.Sprintf("/bill-items/%s/edit", a.BillID)
+		return billEditURL(a.BillID)
 	})
 }
 
@@ -588,7 +609,7 @@ func (h *Handler) transferTemplateUpsert() http.Handler {
 	return upsertHandler("transfer template", func(ctx context.Context, f transferTemplateForm) (model.TransferTemplate, error) {
 		return h.svc.UpsertTransferTemplate(ctx, f.TransferTemplate)
 	}, func(t model.TransferTemplate) string {
-		return fmt.Sprintf("/transfer-templates/%s/edit", t.ID)
+		return transferTemplateEditURL(t.ID)
 	})
 }
 
@@ -598,7 +619,7 @@ func (h *Handler) transferTemplateDuplicate() http.Handler {
 		if err != nil {
 			return fmt.Errorf("duplicating transfer template: %w", err)
 		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/transfer-templates/%s/edit", tr.ID))
+		shttp.RedirectToNext(w, r, transferTemplateEditURL(tr.ID))
 		return nil
 	})
 }
@@ -773,7 +794,7 @@ func (h *Handler) accountSnapshotUpsert() http.Handler {
 		if r.Header.Get("HX-Request") == "true" {
 			return view.NewView(ctx, w, r).Render(view.SnapshotCell(accID, inp.Date, snap))
 		}
-		shttp.RedirectToNext(w, r, accountEditPage(accID))
+		shttp.RedirectToNext(w, r, accountEditURL(accID))
 		return nil
 	})
 }

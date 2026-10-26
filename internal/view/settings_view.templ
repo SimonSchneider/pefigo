@@ -332,7 +332,7 @@ templ settingsTabForecast(view *SettingsPageView) {
 					</p>
 					<div class="form-control mb-4">
 						<label class="label"><span class="label-text font-medium">Sample Count</span></label>
-						<input type="number" name="samples" class="input input-bordered w-full" value={ fmt.Sprintf("%d", view.ForecastSettings.Samples) } placeholder={ fmt.Sprintf("%d", DefaultForecastSamples) } min="100" max="100000" step="100"/>
+						<input type="number" name="samples" class="input input-bordered w-full" value={ fmt.Sprintf("%d", view.ForecastSettings.Samples) } placeholder={ fmt.Sprintf("%d", DefaultForecastSamples) } min={ fmt.Sprintf("%d", MinForecastSamples) } max={ fmt.Sprintf("%d", MaxForecastSamples) } step="100"/>
 						<label class="label"><span class="label-text-alt text-base-content/60">Higher values give more accurate results but take longer to compute</span></label>
 					</div>
 					<div class="form-control mb-4">

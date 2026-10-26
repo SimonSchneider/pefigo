@@ -173,9 +173,9 @@ func evaluate(transfers []ScheduledTransfer, groupOf func(ScheduledTransfer) eva
 			}
 		}
 		switch t.AmountType {
-		case "fixed":
+		case TransferAmountFixed:
 			t.Amount = t.AmountFixed.Mean()
-		case "percent":
+		case TransferAmountPercent:
 			t.Amount = t.AmountPercent * balances[t.FromAccountID].beforeGroup
 		}
 		from := balances[t.FromAccountID]

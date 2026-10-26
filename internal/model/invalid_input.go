@@ -41,17 +41,18 @@ func checkSupportedCurrency(field, code string) error {
 	return nil
 }
 
-// checkDatePattern rejects pattern, the field named field, unless it is a valid date pattern.
+// checkDatePattern rejects pattern, the field named field, unless it is a valid date pattern: it is
+// datePatternError wrapped in ErrInvalidInput.
 func checkDatePattern(field string, pattern date.Cron) error {
-	if err := notADatePattern(field, pattern); err != nil {
+	if err := datePatternError(field, pattern); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
 	return nil
 }
 
-// notADatePattern says why pattern, the field named field, isn't a valid date pattern, or is nil when
+// datePatternError says why pattern, the field named field, isn't a valid date pattern, or is nil when
 // it is one. Unlike checkDatePattern it doesn't wrap ErrInvalidInput, so it suits stored data too.
-func notADatePattern(field string, pattern date.Cron) error {
+func datePatternError(field string, pattern date.Cron) error {
 	if validDatePattern(pattern) {
 		return nil
 	}

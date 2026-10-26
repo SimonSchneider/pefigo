@@ -87,14 +87,14 @@ templ TransferTemplateForm(view *TransferTemplateEditView) {
 							<label class="label"><span class="label-text font-medium">Amount Type</span></label>
 							<select class="select select-bordered w-full" name="amount_type" id="amount-type-select">
 								<option
-									value="fixed"
-									if view.TransferTemplate.AmountType == "fixed" {
+									value={ TransferAmountFixed }
+									if view.TransferTemplate.AmountType == TransferAmountFixed {
 										selected
 									}
 								>Fixed Amount</option>
 								<option
-									value="percent"
-									if view.TransferTemplate.AmountType == "percent" {
+									value={ TransferAmountPercent }
+									if view.TransferTemplate.AmountType == TransferAmountPercent {
 										selected
 									}
 								>Percentage</option>
@@ -314,7 +314,7 @@ templ TransferTemplateTableRow(view *TransferTemplatesView2, t *TransferSchedule
 					@BalanceBadge(t.Amount, false, class)
 				} else {
 					@BalanceBadge(t.Amount, false, class)
-					if t.AmountType == "percent" {
+					if t.AmountType == TransferAmountPercent {
 						<span class="text-xs text-base-content/40">{ ui.FormatPercent(t.AmountPercent) }%</span>
 					} else if t.HasDifferentAmount() {
 					    @BalanceBadge(t.AmountFixed.Mean(), false, "text-xs text-base-content/40")
@@ -431,7 +431,7 @@ templ TransferTemplateMemberRow(view *TransferTemplatesView2, parentID string, t
 					{{ class = "text-green-600" }}
 				}
 				@BalanceBadge(t.Amount, false, class)
-				if t.AmountType == "percent" {
+				if t.AmountType == TransferAmountPercent {
 					<span class="text-xs text-base-content/40">{ ui.FormatPercent(t.AmountPercent) }%</span>
 				} else if t.HasDifferentAmount() {
 					@BalanceBadge(t.AmountFixed.Mean(), false, "text-xs text-base-content/40")

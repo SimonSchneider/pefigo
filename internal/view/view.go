@@ -156,6 +156,22 @@ const (
 	DefaultForecastStartDays = model.DefaultForecastStartDays
 )
 
+// The range the Forecast Samples must be within.
+const (
+	MinForecastSamples = model.MinForecastSamples
+	MaxForecastSamples = model.MaxForecastSamples
+)
+
+// The closed sets of Growth Model types, Transfer Template amount types and Bill Amount periods.
+const (
+	GrowthModelFixed      = model.GrowthModelFixed
+	GrowthModelLogNormal  = model.GrowthModelLogNormal
+	TransferAmountFixed   = model.TransferAmountFixed
+	TransferAmountPercent = model.TransferAmountPercent
+	BillPeriodMonthly     = model.BillPeriodMonthly
+	BillPeriodYearly      = model.BillPeriodYearly
+)
+
 const (
 	BalanceUnchanged BalanceChange = model.BalanceUnchanged
 	BalanceIncreased BalanceChange = model.BalanceIncreased

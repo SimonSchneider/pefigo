@@ -111,7 +111,7 @@ templ billsTable(view *BillsPageData, bills []Bill) {
 								}
 							</td>
 							<td>
-								if bill.CurrentPeriod() == "yearly" {
+								if bill.CurrentPeriod() == BillPeriodYearly {
 									<span class="badge badge-info badge-xs">Yearly</span>
 								} else {
 									<span class="badge badge-ghost badge-xs">Monthly</span>
@@ -388,13 +388,13 @@ templ BillAmountRow(billID string, amt BillAmount) {
 		<div><input type="text" class="input input-xs w-full" placeholder="149" name="amount" value={ amt.GetAmountString() }/></div>
 		<div>
 			<select class="select select-xs w-full" name="amount_period">
-				<option value="monthly"
-					if amt.Period != "yearly" {
+				<option value={ BillPeriodMonthly }
+					if amt.Period != BillPeriodYearly {
 						selected
 					}
 				>Monthly</option>
-				<option value="yearly"
-					if amt.Period == "yearly" {
+				<option value={ BillPeriodYearly }
+					if amt.Period == BillPeriodYearly {
 						selected
 					}
 				>Yearly</option>

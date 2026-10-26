@@ -155,19 +155,20 @@ type StartupShareAccountInput struct {
 // startupShareAccount is the Startup Share Account inp saves, with its defaults applied. It rejects a
 // Tax Rate or Valuation Discount outside 0–100%.
 func (inp StartupShareAccountInput) startupShareAccount() (StartupShareAccount, error) {
-	taxRate, err := fractionWithin0To100Percent("tax rate", inp.TaxRate, DefaultStartupShareTaxRate)
+	taxRate, err := fractionOrDefault("tax rate", inp.TaxRate, DefaultStartupShareTaxRate)
 	if err != nil {
 		return StartupShareAccount{}, err
 	}
-	discount, err := fractionWithin0To100Percent("valuation discount", inp.ValuationDiscountFactor, DefaultValuationDiscount)
+	discount, err := fractionOrDefault("valuation discount", inp.ValuationDiscountFactor, DefaultValuationDiscount)
 	if err != nil {
 		return StartupShareAccount{}, err
 	}
 	return StartupShareAccount{AccountID: inp.AccountID, TaxRate: taxRate, ValuationDiscountFactor: discount}, nil
 }
 
-// fractionWithin0To100Percent is the given fraction, or def when it isn't given.
-func fractionWithin0To100Percent(field string, given *float64, def float64) (float64, error) {
+// fractionOrDefault is the given fraction, or def when it isn't given. It rejects a given fraction
+// outside 0–100%, naming field.
+func fractionOrDefault(field string, given *float64, def float64) (float64, error) {
 	if given == nil {
 		return def, nil
 	}

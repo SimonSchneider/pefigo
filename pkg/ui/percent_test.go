@@ -1,9 +1,11 @@
-package ui
+package ui_test
 
 import (
 	"fmt"
 	"strconv"
 	"testing"
+
+	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
 
 func TestParsePercent(t *testing.T) {
@@ -24,7 +26,7 @@ func TestParsePercent(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%q is %g", tt.in, tt.want), func(t *testing.T) {
-			got, err := ParsePercent(tt.in)
+			got, err := ui.ParsePercent(tt.in)
 			if err != nil {
 				t.Fatalf("ParsePercent(%q) err = %v", tt.in, err)
 			}
@@ -38,7 +40,7 @@ func TestParsePercent(t *testing.T) {
 func TestParsePercentRejectsWhatIsNotANumber(t *testing.T) {
 	for _, in := range []string{"abc", "15%", "NaN", "Inf", "-Inf", "1e400"} {
 		t.Run(in, func(t *testing.T) {
-			if got, err := ParsePercent(in); err == nil {
+			if got, err := ui.ParsePercent(in); err == nil {
 				t.Errorf("ParsePercent(%q) = %v, want an error", in, got)
 			}
 		})
@@ -62,7 +64,7 @@ func TestFormatPercent(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%g is %q", tt.in, tt.want), func(t *testing.T) {
-			if got := FormatPercent(tt.in); got != tt.want {
+			if got := ui.FormatPercent(tt.in); got != tt.want {
 				t.Errorf("FormatPercent(%v) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
@@ -76,12 +78,12 @@ func TestParsePercentReadsBackWhatFormatPercentFormats(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parsing %de-4: %v", i, err)
 		}
-		got, err := ParsePercent(FormatPercent(fraction))
+		got, err := ui.ParsePercent(ui.FormatPercent(fraction))
 		if err != nil {
 			t.Fatalf("ParsePercent(FormatPercent(%v)) err = %v", fraction, err)
 		}
 		if got != fraction {
-			t.Fatalf("ParsePercent(FormatPercent(%v)) = %v via %q", fraction, got, FormatPercent(fraction))
+			t.Fatalf("ParsePercent(FormatPercent(%v)) = %v via %q", fraction, got, ui.FormatPercent(fraction))
 		}
 	}
 }
