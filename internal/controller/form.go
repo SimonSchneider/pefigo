@@ -207,7 +207,7 @@ func (t *transferTemplateForm) FromForm(r *http.Request) error {
 	if err := shttp.Parse(&t.AmountFixed, ui.ParseUncertainValue, r.FormValue("amount_fixed"), uncertain.NewFixed(0)); err != nil {
 		return fmt.Errorf("parsing amount fixed: %w", err)
 	}
-	if err := shttp.Parse(&t.AmountPercent, shttp.ParseFloat, r.FormValue("amount_percent"), 0); err != nil {
+	if err := shttp.Parse(&t.AmountPercent, ui.ParsePercent, r.FormValue("amount_percent"), 0); err != nil {
 		return fmt.Errorf("parsing amount percent: %w", err)
 	}
 	if err := shttp.Parse(&t.Priority, ui.ParseInt64, r.FormValue("priority"), int64(0)); err != nil {

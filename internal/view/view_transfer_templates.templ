@@ -105,8 +105,8 @@ templ TransferTemplateForm(view *TransferTemplateEditView) {
 							<input type="text" class="input input-bordered w-full" placeholder="1000" name="amount_fixed" value={ view.TransferTemplate.AmountFixed.SimpleEncode() }/>
 						</div>
 						<div class="form-control">
-							<label class="label"><span class="label-text font-medium">Percentage</span></label>
-							<input type="number" class="input input-bordered w-full" placeholder="10" step="0.01" min="0" max="100" name="amount_percent" value={ view.TransferTemplate.AmountPercent }/>
+							<label class="label"><span class="label-text font-medium">Percentage (%)</span></label>
+							<input type="number" class="input input-bordered w-full" placeholder="10" step="any" name="amount_percent" value={ ui.FormatPercent(view.TransferTemplate.AmountPercent) }/>
 						</div>
 						<div class="form-control">
 							<label class="label"><span class="label-text font-medium">Priority</span></label>
@@ -315,7 +315,7 @@ templ TransferTemplateTableRow(view *TransferTemplatesView2, t *TransferSchedule
 				} else {
 					@BalanceBadge(t.Amount, false, class)
 					if t.AmountType == "percent" {
-						<span class="text-xs text-base-content/40">{ t.AmountPercent * 100 }%</span>
+						<span class="text-xs text-base-content/40">{ ui.FormatPercent(t.AmountPercent) }%</span>
 					} else if t.HasDifferentAmount() {
 					    @BalanceBadge(t.AmountFixed.Mean(), false, "text-xs text-base-content/40")
 					}
@@ -432,7 +432,7 @@ templ TransferTemplateMemberRow(view *TransferTemplatesView2, parentID string, t
 				}
 				@BalanceBadge(t.Amount, false, class)
 				if t.AmountType == "percent" {
-					<span class="text-xs text-base-content/40">{ t.AmountPercent * 100 }%</span>
+					<span class="text-xs text-base-content/40">{ ui.FormatPercent(t.AmountPercent) }%</span>
 				} else if t.HasDifferentAmount() {
 					@BalanceBadge(t.AmountFixed.Mean(), false, "text-xs text-base-content/40")
 				}

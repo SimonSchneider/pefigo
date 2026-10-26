@@ -126,3 +126,62 @@ func TestANewAccountShowsTheDefaultTaxRateAndValuationDiscount(t *testing.T) {
 		t.Errorf("expected a new account to show a Valuation Discount of 50, got %s", input)
 	}
 }
+
+func TestSavingATransferTemplateStoresItsPercentageAsAFraction(t *testing.T) {
+	tests := []struct {
+		percentage string
+		want       float64
+		show       string
+	}{
+		{"10", 0.1, "10"},
+		{"150", 1.5, "150"},
+		{"-5", -0.05, "-5"},
+		{"", 0, "0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.percentage, func(t *testing.T) {
+			svc, srv := newSettingsServer(t)
+			from, err := svc.UpsertAccount(t.Context(), model.AccountInput{Name: "Checking"})
+			if err != nil {
+				t.Fatalf("create account: %v", err)
+			}
+			postForm(t, srv, "/transfers/", url.Values{
+				"name":            {"Saving"},
+				"from_account_id": {from.ID},
+				"amount_type":     {"percent"},
+				"amount_percent":  {tt.percentage},
+				"recurrence":      {"*-*-25"},
+				"start_date":      {"2025-01-01"},
+				"enabled":         {"on"},
+			})
+
+			templates, err := svc.ListTransferTemplates(t.Context())
+			if err != nil || len(templates) != 1 {
+				t.Fatalf("expected one Transfer Template, got %v (%v)", templates, err)
+			}
+			if got := templates[0].AmountPercent; got != tt.want {
+				t.Errorf("expected a Percentage of %v, got %v", tt.want, got)
+			}
+
+			if list := getPage(t, srv, "/transfer-templates"); !strings.Contains(list, ">"+tt.show+"%<") {
+				t.Errorf("expected the list to show %s%%", tt.show)
+			}
+			edit := getPage(t, srv, "/transfer-templates/"+templates[0].ID+"/edit")
+			if input := inputNamed(edit, "amount_percent"); !strings.Contains(input, `value="`+tt.show+`"`) {
+				t.Errorf("expected the edit page to show a Percentage of %s, got %s", tt.show, input)
+			}
+		})
+	}
+}
+
+func TestTheTransferTemplatePercentageHasNoRange(t *testing.T) {
+	_, srv := newSettingsServer(t)
+
+	input := inputNamed(getPage(t, srv, "/transfer-templates/new"), "amount_percent")
+	if input == "" {
+		t.Fatal("expected a Percentage field")
+	}
+	if strings.Contains(input, "min=") || strings.Contains(input, "max=") {
+		t.Errorf("expected the Percentage field to have no min or max, got %s", input)
+	}
+}

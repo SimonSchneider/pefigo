@@ -352,14 +352,14 @@ func TransferTemplateForm(view *TransferTemplateEditView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text font-medium\">Percentage</span></label> <input type=\"number\" class=\"input input-bordered w-full\" placeholder=\"10\" step=\"0.01\" min=\"0\" max=\"100\" name=\"amount_percent\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text font-medium\">Percentage (%)</span></label> <input type=\"number\" class=\"input input-bordered w-full\" placeholder=\"10\" step=\"any\" name=\"amount_percent\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var15 string
-		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(view.TransferTemplate.AmountPercent)
+		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(ui.FormatPercent(view.TransferTemplate.AmountPercent))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/view_transfer_templates.templ`, Line: 109, Col: 176}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/view_transfer_templates.templ`, Line: 109, Col: 175}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 		if templ_7745c5c3_Err != nil {
@@ -918,9 +918,9 @@ func TransferTemplateTableRow(view *TransferTemplatesView2, t *TransferScheduleR
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var38 string
-				templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(t.AmountPercent * 100)
+				templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(ui.FormatPercent(t.AmountPercent))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/view_transfer_templates.templ`, Line: 318, Col: 72}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/view_transfer_templates.templ`, Line: 318, Col: 84}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 				if templ_7745c5c3_Err != nil {
@@ -1367,9 +1367,9 @@ func TransferTemplateMemberRow(view *TransferTemplatesView2, parentID string, t 
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var57 string
-			templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(t.AmountPercent * 100)
+			templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(ui.FormatPercent(t.AmountPercent))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/view_transfer_templates.templ`, Line: 435, Col: 71}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/view_transfer_templates.templ`, Line: 435, Col: 83}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 			if templ_7745c5c3_Err != nil {
