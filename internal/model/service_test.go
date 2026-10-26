@@ -3705,30 +3705,7 @@ func TestGetSettingsPageData(t *testing.T) {
 	if len(view.Currencies) == 0 {
 		t.Error("expected non-empty currencies list")
 	}
-}
-
-func TestForecastSettings(t *testing.T) {
-	svc := newTestService(t)
-	ctx := t.Context()
-
-	// Default values
-	samples, err := svc.GetForecastSamples(ctx)
-	if err != nil {
-		t.Fatalf("get default samples: %v", err)
-	}
-	if samples != 10000 {
-		t.Fatalf("expected default samples 10000, got %d", samples)
-	}
-
-	// Set custom values
-	if err := svc.SetForecastSamples(ctx, 5000); err != nil {
-		t.Fatalf("set samples: %v", err)
-	}
-	samples, err = svc.GetForecastSamples(ctx)
-	if err != nil {
-		t.Fatalf("get samples after set: %v", err)
-	}
-	if samples != 5000 {
-		t.Fatalf("expected samples 5000, got %d", samples)
+	if view.ForecastSettings != defaultForecastSettings {
+		t.Errorf("expected the default Forecast Settings %+v, got %+v", defaultForecastSettings, view.ForecastSettings)
 	}
 }

@@ -141,9 +141,7 @@ func TestDashboardForecastRunsFromTheForecastStartThroughTheLastSpecialDate(t *t
 	stale := mustAccountType(t, svc, "Stale", "#0000ff")
 	mustSnapshot(t, svc, mustTypedAccount(t, svc, "Savings", savings.ID).ID, mustParseDate("2021-01-10"), 1000)
 	mustSnapshot(t, svc, mustTypedAccount(t, svc, "Stale", stale.ID).ID, mustParseDate("2020-06-01"), 500)
-	if err := svc.SetForecastSnapshotInterval(ctx, "*-*-15"); err != nil {
-		t.Fatalf("set forecast interval: %v", err)
-	}
+	mustForecastSettings(t, svc, model.ForecastSettingsInput{Interval: "*-*-15"})
 	// Both Special Dates are before today, but after the Forecast Start.
 	for _, d := range []string{"2021-03-01", "2021-06-15"} {
 		if _, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{Name: d, Date: mustParseDate(d)}); err != nil {
@@ -175,9 +173,7 @@ func TestDashboardForecastIsEmptyWhenTheLastSpecialDateIsOnOrBeforeTheForecastSt
 			// The Forecast Start is after today, and so is the Special Date.
 			start := date.Today().Add(100 * date.Day)
 			mustSnapshot(t, svc, mustAccount(t, svc, "Checking").ID, start, 1000)
-			if err := svc.SetForecastSnapshotInterval(ctx, "*-*-*"); err != nil {
-				t.Fatalf("set forecast interval: %v", err)
-			}
+			mustForecastSettings(t, svc, model.ForecastSettingsInput{Interval: "*-*-*"})
 			if _, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{Name: "Retirement", Date: start.Add(offset)}); err != nil {
 				t.Fatalf("create special date: %v", err)
 			}

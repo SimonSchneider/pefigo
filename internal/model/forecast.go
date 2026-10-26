@@ -59,12 +59,12 @@ func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
 	if err := schedule.checkRecurrences(); err != nil {
 		return nil, err
 	}
-	startDays, err := s.GetForecastStartDays(ctx)
+	settings, err := s.GetForecastSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if !validDatePattern(date.Cron(startDays)) {
-		return nil, fmt.Errorf("the stored Forecast Start Days %q are not a valid date pattern", startDays)
+	if err := settings.checkStartDays(); err != nil {
+		return nil, fmt.Errorf("the stored Forecast Settings: %w", err)
 	}
 	f := &forecast{
 		accounts:      accounts,
@@ -86,7 +86,7 @@ func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
 		}
 	}
 	if f.hasStart {
-		f.start = firstForecastStartDay(f.start, date.Cron(startDays))
+		f.start = firstForecastStartDay(f.start, settings.StartDays)
 	}
 	growthModels := make(map[string]GrowthModels)
 	for _, row := range growthModelRows {

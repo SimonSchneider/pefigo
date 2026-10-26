@@ -55,6 +55,9 @@ _Avoid_: catch-up, estimated balance
 The Forecast of balances per Account Type from the Forecast Start to the last Special Date, kept up to date in the background using the Forecast Settings. It is empty when there is no Forecast or no Special Date is after the Forecast Start.
 _Avoid_: forecast cache, cached forecast
 
+**Forecast Settings**:
+The samples each Forecast Run takes, the Forecast Interval of the Dashboard Forecast and the Forecast Start Days, read and saved together as one value. A setting left blank saves its default.
+
 **Forecast Run**:
 One computation of the Dashboard Forecast from the current Forecast Inputs. It ends Done or Failed, unless the Dashboard Forecast becomes Stale while it runs: then it is abandoned without an outcome and a newer Forecast Run follows.
 _Avoid_: forecast job, recompute

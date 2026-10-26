@@ -149,6 +149,13 @@ const (
 	DefaultBillAccountRecurrence = model.DefaultBillAccountRecurrence
 )
 
+// The Forecast Settings a blank field saves.
+const (
+	DefaultForecastSamples   = model.DefaultForecastSamples
+	DefaultForecastInterval  = model.DefaultForecastInterval
+	DefaultForecastStartDays = model.DefaultForecastStartDays
+)
+
 const (
 	BalanceUnchanged BalanceChange = model.BalanceUnchanged
 	BalanceIncreased BalanceChange = model.BalanceIncreased

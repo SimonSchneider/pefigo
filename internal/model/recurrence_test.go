@@ -174,26 +174,21 @@ func TestSavingAnInvalidForecastIntervalOrForecastStartDaysIsInvalidInput(t *tes
 	svc := newTestService(t)
 	ctx := t.Context()
 
-	for _, pattern := range append([]date.Cron{""}, invalidDatePatterns...) {
-		if err := svc.SetForecastSnapshotInterval(ctx, string(pattern)); !errors.Is(err, model.ErrInvalidInput) {
+	// An empty pattern isn't given, and saves the default.
+	for _, pattern := range invalidDatePatterns {
+		if err := svc.SetForecastSettings(ctx, model.ForecastSettingsInput{Interval: pattern}); !errors.Is(err, model.ErrInvalidInput) {
 			t.Errorf("Forecast Interval %q: expected ErrInvalidInput, got %v", pattern, err)
 		}
-		if err := svc.SetForecastStartDays(ctx, string(pattern)); !errors.Is(err, model.ErrInvalidInput) {
+		if err := svc.SetForecastSettings(ctx, model.ForecastSettingsInput{StartDays: pattern}); !errors.Is(err, model.ErrInvalidInput) {
 			t.Errorf("Forecast Start Days %q: expected ErrInvalidInput, got %v", pattern, err)
 		}
 	}
-	if interval, err := svc.GetForecastSnapshotInterval(ctx); err != nil || interval != "*-01-01" {
-		t.Errorf("expected the Forecast Interval to stay *-01-01, got %q (%v)", interval, err)
-	}
-	if days, err := svc.GetForecastStartDays(ctx); err != nil || days != "*-*-*" {
-		t.Errorf("expected the Forecast Start Days to stay *-*-*, got %q (%v)", days, err)
+	if settings := mustGetForecastSettings(t, svc); settings.Interval != "*-01-01" || settings.StartDays != "*-*-*" {
+		t.Errorf("expected the Forecast Interval and Start Days to stay *-01-01 and *-*-*, got %q and %q", settings.Interval, settings.StartDays)
 	}
 	for _, pattern := range validDatePatterns {
-		if err := svc.SetForecastSnapshotInterval(ctx, string(pattern)); err != nil {
-			t.Fatalf("Forecast Interval %q: %v", pattern, err)
-		}
-		if err := svc.SetForecastStartDays(ctx, string(pattern)); err != nil {
-			t.Fatalf("Forecast Start Days %q: %v", pattern, err)
+		if err := svc.SetForecastSettings(ctx, model.ForecastSettingsInput{Interval: pattern, StartDays: pattern}); err != nil {
+			t.Fatalf("Forecast Interval and Start Days %q: %v", pattern, err)
 		}
 	}
 }
@@ -247,14 +242,12 @@ var storedInvalidRecurrences = []struct {
 		return savings.ID, ""
 	}},
 	{"Forecast Start Days", func(t *testing.T, svc *model.Service, _ model.Account) (string, string) {
-		mustForecastStartDays(t, svc, "*-*-28")
+		mustForecastSettings(t, svc, model.ForecastSettingsInput{StartDays: "*-*-28"})
 		mustExec(t, svc, `UPDATE app_setting SET value = '28' WHERE key = 'forecast_start_days'`)
 		return "Forecast Start Days", "28"
 	}},
 	{"Forecast Interval", func(t *testing.T, svc *model.Service, _ model.Account) (string, string) {
-		if err := svc.SetForecastSnapshotInterval(t.Context(), "*-*-28"); err != nil {
-			t.Fatalf("set forecast interval: %v", err)
-		}
+		mustForecastSettings(t, svc, model.ForecastSettingsInput{Interval: "*-*-28"})
 		mustExec(t, svc, `UPDATE app_setting SET value = '*-13x-01' WHERE key = 'forecast_snapshot_interval'`)
 		return "Forecast Interval", "*-13x-01"
 	}},

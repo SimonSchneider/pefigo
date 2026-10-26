@@ -31,21 +31,14 @@ func mustPayday(t *testing.T, svc *model.Service) payday {
 	return p
 }
 
-func mustForecastStartDays(t *testing.T, svc *model.Service, days string) {
-	t.Helper()
-	if err := svc.SetForecastStartDays(t.Context(), days); err != nil {
-		t.Fatalf("set forecast start days: %v", err)
-	}
-}
-
 // threeDays is a Forecast of three days from the Forecast Start, reported daily, by Account Type.
 var threeDays = model.PredictionParams{Duration: ptr(3 * date.Day), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByType}
 
 func TestForecastStartsOnTheSnapshotsDayByDefault(t *testing.T) {
 	svc := newTestService(t)
 	p := mustPayday(t, svc)
-	if days, err := svc.GetForecastStartDays(t.Context()); err != nil || days != "*-*-*" {
-		t.Fatalf("expected the Forecast Start Days to be every day by default, got %q (%v)", days, err)
+	if days := mustGetForecastSettings(t, svc).StartDays; days != "*-*-*" {
+		t.Fatalf("expected the Forecast Start Days to be every day by default, got %q", days)
 	}
 
 	rec := forecastWith(t, svc, threeDays)
@@ -61,7 +54,7 @@ func TestForecastStartsOnTheSnapshotsDayByDefault(t *testing.T) {
 func TestForecastStartsOnTheFirstForecastStartDayOnOrAfterTheLatestSnapshot(t *testing.T) {
 	svc := newTestService(t)
 	p := mustPayday(t, svc)
-	mustForecastStartDays(t, svc, "*-*-28")
+	mustForecastSettings(t, svc, model.ForecastSettingsInput{StartDays: "*-*-28"})
 
 	rec := forecastWith(t, svc, threeDays)
 
@@ -77,10 +70,7 @@ func TestDashboardForecastStartsOnTheFirstForecastStartDayOnOrAfterTheLatestSnap
 	svc, timers := newForecastTestService(t, nil)
 	ctx := t.Context()
 	p := mustPayday(t, svc)
-	mustForecastStartDays(t, svc, "*-*-28")
-	if err := svc.SetForecastSnapshotInterval(ctx, "*-*-*"); err != nil {
-		t.Fatalf("set forecast interval: %v", err)
-	}
+	mustForecastSettings(t, svc, model.ForecastSettingsInput{Interval: "*-*-*", StartDays: "*-*-28"})
 	if _, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{Name: "Retirement", Date: mustParseDate("2025-04-28")}); err != nil {
 		t.Fatalf("create special date: %v", err)
 	}
@@ -108,7 +98,7 @@ func TestForecastStartsOnASnapshotOnAForecastStartDay(t *testing.T) {
 	svc := newTestService(t)
 	checking := mustAccount(t, svc, "Checking")
 	mustSnapshot(t, svc, checking.ID, mustParseDate("2025-03-28"), 1000)
-	mustForecastStartDays(t, svc, "*-*-28")
+	mustForecastSettings(t, svc, model.ForecastSettingsInput{StartDays: "*-*-28"})
 
 	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(date.Day), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByNone})
 
@@ -119,7 +109,7 @@ func TestForecastStartsOnTheLatestSnapshotWithoutAForecastStartDayAfterIt(t *tes
 	svc := newTestService(t)
 	checking := mustAccount(t, svc, "Checking")
 	mustSnapshot(t, svc, checking.ID, mustParseDate("2025-03-25"), 1000)
-	mustForecastStartDays(t, svc, "2020-*-*")
+	mustForecastSettings(t, svc, model.ForecastSettingsInput{StartDays: "2020-*-*"})
 
 	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(date.Day), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByNone})
 
@@ -130,10 +120,7 @@ func TestDashboardForecastIsEmptyWhenTheLastSpecialDateIsBeforeTheFirstForecastS
 	svc, timers := newForecastTestService(t, nil)
 	ctx := t.Context()
 	mustPayday(t, svc)
-	mustForecastStartDays(t, svc, "*-*-28")
-	if err := svc.SetForecastSnapshotInterval(ctx, "*-*-*"); err != nil {
-		t.Fatalf("set forecast interval: %v", err)
-	}
+	mustForecastSettings(t, svc, model.ForecastSettingsInput{Interval: "*-*-*", StartDays: "*-*-28"})
 	if _, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{Name: "Holiday", Date: mustParseDate("2025-03-26")}); err != nil {
 		t.Fatalf("create special date: %v", err)
 	}
@@ -152,9 +139,7 @@ func TestWritingTheForecastStartDaysMarksTheDashboardForecastStale(t *testing.T)
 	svc, timers := newForecastTestService(t, nil)
 	ctx := t.Context()
 	p := mustPayday(t, svc)
-	if err := svc.SetForecastSnapshotInterval(ctx, "*-*-28"); err != nil {
-		t.Fatalf("set forecast interval: %v", err)
-	}
+	mustForecastSettings(t, svc, model.ForecastSettingsInput{Interval: "*-*-28"})
 	if _, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{Name: "Retirement", Date: mustParseDate("2025-04-10")}); err != nil {
 		t.Fatalf("create special date: %v", err)
 	}
@@ -173,7 +158,7 @@ func TestWritingTheForecastStartDaysMarksTheDashboardForecastStale(t *testing.T)
 		t.Fatalf("expected the default Forecast Start to charge the cycle again, got %v", got)
 	}
 
-	mustForecastStartDays(t, svc, "*-*-28")
+	mustForecastSettings(t, svc, model.ForecastSettingsInput{Interval: "*-*-28", StartDays: "*-*-28"})
 	if n := timers.pending(); n != 1 {
 		t.Fatalf("expected writing the Forecast Start Days to schedule one Forecast Run, got %d", n)
 	}
@@ -186,12 +171,12 @@ func TestWritingTheForecastStartDaysMarksTheDashboardForecastStale(t *testing.T)
 
 func TestForecastStartDaysMustBeADatePattern(t *testing.T) {
 	svc := newTestService(t)
-	mustForecastStartDays(t, svc, "*-*-28")
+	mustForecastSettings(t, svc, model.ForecastSettingsInput{StartDays: "*-*-28"})
 
-	if err := svc.SetForecastStartDays(t.Context(), "28"); err == nil {
+	if err := svc.SetForecastSettings(t.Context(), model.ForecastSettingsInput{StartDays: "28"}); err == nil {
 		t.Fatal("expected a Forecast Start Days pattern without a year, month and day to be rejected")
 	}
-	if days, err := svc.GetForecastStartDays(t.Context()); err != nil || days != "*-*-28" {
-		t.Fatalf("expected the Forecast Start Days to stay *-*-28, got %q (%v)", days, err)
+	if days := mustGetForecastSettings(t, svc).StartDays; days != "*-*-28" {
+		t.Fatalf("expected the Forecast Start Days to stay *-*-28, got %q", days)
 	}
 }

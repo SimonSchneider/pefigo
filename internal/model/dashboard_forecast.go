@@ -398,22 +398,18 @@ func (s *Service) dashboardForecastParams(ctx context.Context) (params Predictio
 	}
 	last := slices.MaxFunc(specialDates, func(a, b SpecialDate) int { return cmp.Compare(a.Date, b.Date) }).Date
 
-	samples, err := s.GetForecastSamples(ctx)
+	settings, err := s.GetForecastSettings(ctx)
 	if err != nil {
-		return params, false, fmt.Errorf("getting forecast samples: %w", err)
+		return params, false, err
 	}
-	snapshotInterval, err := s.GetForecastSnapshotInterval(ctx)
-	if err != nil {
-		return params, false, fmt.Errorf("getting forecast snapshot interval: %w", err)
-	}
-	if !validDatePattern(date.Cron(snapshotInterval)) {
-		return params, false, fmt.Errorf("the stored Forecast Interval %q is not a valid date pattern", snapshotInterval)
+	if err := settings.check(); err != nil {
+		return params, false, fmt.Errorf("the stored Forecast Settings: %w", err)
 	}
 	return PredictionParams{
 		Through:          last,
-		Samples:          &samples,
+		Samples:          &settings.Samples,
 		Quantile:         ptr(0.0),
-		SnapshotInterval: date.Cron(snapshotInterval),
+		SnapshotInterval: settings.Interval,
 		GroupBy:          GroupByType,
 	}, true, nil
 }

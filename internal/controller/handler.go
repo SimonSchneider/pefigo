@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/SimonSchneider/goslu/date"
@@ -929,30 +928,12 @@ func (h *Handler) currencySettingsSave() http.Handler {
 
 func (h *Handler) forecastSettingsSave() http.Handler {
 	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		if err := r.ParseForm(); err != nil {
-			return fmt.Errorf("parsing form: %w", err)
+		var inp forecastSettingsInputForm
+		if err := srvu.Decode(r, &inp, false); err != nil {
+			return fmt.Errorf("decoding input: %w", err)
 		}
-		samplesStr := r.FormValue("samples")
-		if samplesStr != "" {
-			samples, err := strconv.ParseInt(samplesStr, 10, 64)
-			if err != nil {
-				return fmt.Errorf("parsing samples: %w", err)
-			}
-			if err := h.svc.SetForecastSamples(ctx, samples); err != nil {
-				return fmt.Errorf("setting forecast samples: %w", err)
-			}
-		}
-		snapshotInterval := r.FormValue("snapshot_interval")
-		if snapshotInterval != "" {
-			if err := h.svc.SetForecastSnapshotInterval(ctx, snapshotInterval); err != nil {
-				return fmt.Errorf("setting forecast snapshot interval: %w", err)
-			}
-		}
-		startDays := r.FormValue("start_days")
-		if startDays != "" {
-			if err := h.svc.SetForecastStartDays(ctx, startDays); err != nil {
-				return fmt.Errorf("setting forecast start days: %w", err)
-			}
+		if err := h.svc.SetForecastSettings(ctx, inp.ForecastSettingsInput); err != nil {
+			return fmt.Errorf("setting forecast settings: %w", err)
 		}
 		shttp.RedirectToNext(w, r, "/settings?tab=forecast")
 		return nil

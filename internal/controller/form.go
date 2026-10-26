@@ -461,3 +461,16 @@ func extractExcludedTypeIDs(r *http.Request) []string {
 	}
 	return ids
 }
+
+type forecastSettingsInputForm struct {
+	model.ForecastSettingsInput
+}
+
+func (f *forecastSettingsInputForm) FromForm(r *http.Request) error {
+	if err := shttp.Parse(&f.Samples, ui.ParseNullable(ui.ParseInt64), r.FormValue("samples"), nil); err != nil {
+		return fmt.Errorf("parsing samples: %w", err)
+	}
+	f.Interval = date.Cron(r.FormValue("snapshot_interval"))
+	f.StartDays = date.Cron(r.FormValue("start_days"))
+	return nil
+}

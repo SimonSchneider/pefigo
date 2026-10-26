@@ -135,14 +135,8 @@ func forecastInputMutations() []forecastInputMutation {
 		{"SetDefaultCurrency", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.SetDefaultCurrency(ctx, "EUR")
 		}},
-		{"SetForecastSamples", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return svc.SetForecastSamples(ctx, 500)
-		}},
-		{"SetForecastSnapshotInterval", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return svc.SetForecastSnapshotInterval(ctx, "*-*-01")
-		}},
-		{"SetForecastStartDays", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return svc.SetForecastStartDays(ctx, "*-*-28")
+		{"SetForecastSettings", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return svc.SetForecastSettings(ctx, model.ForecastSettingsInput{Samples: ptr[int64](500), Interval: "*-*-01", StartDays: "*-*-28"})
 		}},
 		// snapshot.go
 		{"UpsertAccountSnapshot", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
@@ -282,8 +276,8 @@ func TestForecastInputWriteMarksDashboardForecastStale(t *testing.T) {
 		t.Fatalf("expected no Forecast Run scheduled after the first one, got %d", n)
 	}
 
-	if err := svc.SetForecastSamples(ctx, 100); err != nil {
-		t.Fatalf("set forecast samples: %v", err)
+	if err := svc.SetForecastSettings(ctx, model.ForecastSettingsInput{Samples: ptr[int64](100)}); err != nil {
+		t.Fatalf("set forecast settings: %v", err)
 	}
 	if n := timers.pending(); n != 1 {
 		t.Fatalf("expected a Forecast Input write to schedule one Forecast Run, got %d", n)
