@@ -2,7 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"strconv"
+	"strings"
 	"unicode"
 
 	"github.com/SimonSchneider/goslu/date"
@@ -72,6 +74,38 @@ func ParseNullableFloat(val string) (*float64, error) {
 		return nil, fmt.Errorf("parsing float: %w", err)
 	}
 	return &f, nil
+}
+
+// ParseNullable makes parse return nil for an empty value: "not given", separately from a given 0.
+func ParseNullable[T any](parse func(string) (T, error)) func(string) (*T, error) {
+	return func(val string) (*T, error) {
+		if val == "" {
+			return nil, nil
+		}
+		v, err := parse(val)
+		if err != nil {
+			return nil, err
+		}
+		return &v, nil
+	}
+}
+
+// ParsePercent parses a percentage into the fraction it stands for: "15" is 0.15, and "" is 0.
+// FormatPercent is its inverse.
+func ParsePercent(val string) (float64, error) {
+	if val == "" {
+		return 0, nil
+	}
+	percent, err := strconv.ParseFloat(strings.TrimSpace(val), 64)
+	if err != nil {
+		return 0, fmt.Errorf("parsing percent: %w", err)
+	}
+	if math.IsNaN(percent) || math.IsInf(percent, 0) {
+		return 0, fmt.Errorf("parsing percent: %q is not a number", val)
+	}
+	// Moving the decimal point, rather than dividing by 100, gives the fraction closest to what was
+	// typed: "99.9" is 0.999, not 0.9990000000000001.
+	return strconv.ParseFloat(strconv.FormatFloat(percent, 'f', -1, 64)+"e-2", 64)
 }
 
 func WithDefaultNull[T comparable](val T) *T {
