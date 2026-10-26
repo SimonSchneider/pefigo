@@ -222,3 +222,62 @@ func TestRunForecastValuesAStartupShareAccountFromItsFirstInvestmentRoundWithSha
 		}
 	}
 }
+
+func TestRunForecastAppliesEveryShareChangeOnADay(t *testing.T) {
+	startup := newAccount("Startup", func(e *finance2.Entity) {
+		e.GrowthModel = &finance2.StartupGrowth{
+			TotalShares:           uncertain.NewFixed(1_000),
+			OwnedShares:           uncertain.NewFixed(0),
+			Valuation:             uncertain.NewFixed(1_000_000),
+			TaxRate:               uncertain.NewFixed(0.5),
+			DiscountFactor:        uncertain.NewFixed(1),
+			PurchasePricePerShare: uncertain.NewFixed(0),
+			ShareChanges: map[date.Date][]finance2.StartupGrowthShareChange{
+				parseDay("2027-02-01"): {
+					{DeltaShares: uncertain.NewFixed(10), TotalPrice: uncertain.NewFixed(100)},
+					{DeltaShares: uncertain.NewFixed(20), TotalPrice: uncertain.NewFixed(400)},
+				},
+			},
+		}
+	})
+
+	reports := runForecast(t, "2027-01-01", "2027-02-02", "*-02-01", mks(*startup))
+
+	// 30 of 1,000 shares at 1M are worth 30,000, and half the gain over the 500 paid for them is tax.
+	if want := 30_000 - (30_000-500)*0.5; len(reports) != 1 || !near(reports[0].balances[startup.ID].Mean(), want) {
+		t.Fatalf("expected %f on 2027-02-01, got %v", want, reports)
+	}
+}
+
+func TestRunForecastExercisesEveryOptionEndingOnADay(t *testing.T) {
+	checking := newAccount("Checking", withBalance(parseDay("2027-01-01"), uncertain.NewFixed(100_000)))
+	startup := newAccount("Startup", func(e *finance2.Entity) {
+		e.GrowthModel = &finance2.StartupGrowth{
+			TotalShares:           uncertain.NewFixed(1_000),
+			OwnedShares:           uncertain.NewFixed(0),
+			Valuation:             uncertain.NewFixed(1_000_000),
+			TaxRate:               uncertain.NewFixed(0),
+			DiscountFactor:        uncertain.NewFixed(1),
+			PurchasePricePerShare: uncertain.NewFixed(0),
+			Options: map[date.Date][]finance2.StartupGrowthOption{
+				parseDay("2027-02-01"): {
+					{StrikePricePerShare: uncertain.NewFixed(10), NumShares: uncertain.NewFixed(10), SourceAccountID: checking.ID},
+					{StrikePricePerShare: uncertain.NewFixed(10), NumShares: uncertain.NewFixed(20), SourceAccountID: checking.ID},
+				},
+			},
+		}
+	})
+
+	reports := runForecast(t, "2027-01-01", "2027-02-02", "*-02-01", mks(*checking, *startup))
+
+	if len(reports) != 1 {
+		t.Fatalf("expected one report, got %v", reportDays(reports))
+	}
+	// Both options are exercised: 30 more shares for 300.
+	if want := 30.0 / 1_030 * 1_000_300; !near(reports[0].balances[startup.ID].Mean(), want) {
+		t.Errorf("expected the startup to be worth %f, got %f", want, reports[0].balances[startup.ID].Mean())
+	}
+	if got := reports[0].balances[checking.ID].Mean(); got != 99_700 {
+		t.Errorf("expected the strike price 300 to be paid from checking, got a balance of %f", got)
+	}
+}

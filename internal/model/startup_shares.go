@@ -450,9 +450,9 @@ func CalculateStartupShareBalance(cfg *uncertain.Config, valuation uncertain.Val
 // startupShares is a Startup Share account with its investment rounds, share changes and options.
 type startupShares struct {
 	StartupShareAccount
-	rounds       []InvestmentRound // by date
-	shareChanges []ShareChange     // by date
-	options      []StartupShareOption
+	rounds       []InvestmentRound    // by date
+	shareChanges []ShareChange        // by date and ID
+	options      []StartupShareOption // by grant date and ID
 }
 
 // listStartupShares returns every Startup Share account, keyed by account ID, with a fixed number of
@@ -525,8 +525,8 @@ func (ss *startupShares) growthOn(day date.Date) *finance.StartupGrowth {
 		DiscountFactor:        uncertain.NewFixed(ss.ValuationDiscountFactor),
 		PurchasePricePerShare: uncertain.NewFixed(avgPurchasePrice),
 		InvestmentRounds:      make(map[date.Date]finance.StartupGrowthInvestmentRound),
-		ShareChanges:          make(map[date.Date]finance.StartupGrowthShareChange),
-		Options:               make(map[date.Date]finance.StartupGrowthOption, len(ss.options)),
+		ShareChanges:          make(map[date.Date][]finance.StartupGrowthShareChange),
+		Options:               make(map[date.Date][]finance.StartupGrowthOption, len(ss.options)),
 	}
 	if round := ss.latestRoundOn(day); round != nil {
 		postMoneyValuation, postMoneyShares := PostMoneyValuationAndShares(round.Valuation, round.PreMoneyShares, round.Investment)
@@ -546,25 +546,25 @@ func (ss *startupShares) growthOn(day date.Date) *finance.StartupGrowth {
 	}
 	for _, c := range ss.shareChanges {
 		if c.Date.After(day) {
-			growth.ShareChanges[c.Date] = finance.StartupGrowthShareChange{
+			growth.ShareChanges[c.Date] = append(growth.ShareChanges[c.Date], finance.StartupGrowthShareChange{
 				DeltaShares: uncertain.NewFixed(c.DeltaShares),
 				TotalPrice:  uncertain.NewFixed(c.TotalPrice),
-			}
+			})
 		}
 	}
 	for _, o := range ss.options {
-		growth.Options[o.EndDate] = finance.StartupGrowthOption{
+		growth.Options[o.EndDate] = append(growth.Options[o.EndDate], finance.StartupGrowthOption{
 			StrikePricePerShare: uncertain.NewFixed(o.StrikePricePerShare),
 			NumShares:           uncertain.NewFixed(o.Shares),
 			SourceAccountID:     o.SourceAccountID,
-		}
+		})
 	}
 	return growth
 }
 
 // history is the account's derived balance on each day one of its investment rounds or share changes
-// is dated, while it has shares to value. In a Forecast, which starts on start, it leaves out the days
-// from start on and ends with its balance on start.
+// is dated, from the first day it has shares to value, so selling them all shows as 0. In a Forecast,
+// which starts on start, it leaves out the days from start on and ends with its balance on start.
 func (ss *startupShares) history(ucfg *uncertain.Config, start date.Date, isForecast bool) []finance.BalanceSnapshot {
 	days := make([]date.Date, 0, len(ss.rounds)+len(ss.shareChanges))
 	for _, r := range ss.rounds {
@@ -582,7 +582,7 @@ func (ss *startupShares) history(ucfg *uncertain.Config, start date.Date, isFore
 		if ss.latestRoundOn(day) == nil {
 			continue
 		}
-		if growth := ss.growthOn(day); growth.OwnedShares.Mean() != 0 {
+		if growth := ss.growthOn(day); len(history) > 0 || growth.OwnedShares.Mean() != 0 {
 			history = append(history, finance.BalanceSnapshot{Date: day, Balance: growth.Balance(ucfg)})
 		}
 	}
@@ -601,7 +601,7 @@ type startupShareHistory struct {
 }
 
 // listStartupShareHistories returns the Startup Share accounts with investment rounds that aren't
-// in withSnapshots, keyed by account ID.
+// in withSnapshots, keyed by account ID. A nil withSnapshots leaves none out.
 func (s *Service) listStartupShareHistories(ctx context.Context, withSnapshots map[string]struct{}) (map[string]*startupShareHistory, error) {
 	rows, err := s.q.ListStartupShareSnapshotHistory(ctx)
 	if err != nil {

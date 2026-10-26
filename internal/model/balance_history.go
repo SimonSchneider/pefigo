@@ -59,19 +59,25 @@ func (s *Service) balanceHistory(ctx context.Context, today date.Date) (map[stri
 }
 
 // recordedBalances are the balances of every account recorded on or before today, by day. A
-// Startup Share account without snapshots counts at its derived value on every day a snapshot was
-// recorded, so that day's total includes it.
+// Startup Share account has no Snapshots, as in a Forecast: the ones recorded on it are ignored, and
+// it counts at its derived value on every day a Snapshot was recorded, so that day's total includes it.
 func (s *Service) recordedBalances(ctx context.Context, today date.Date) ([]recordedBalance, error) {
 	rows, err := s.q.ListSnapshotHistoryWithType(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing snapshot history: %w", err)
 	}
+	startupShareAccounts, err := s.q.ListStartupShareAccounts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing startup share accounts: %w", err)
+	}
+	isStartupShare := make(map[string]bool, len(startupShareAccounts))
+	for _, a := range startupShareAccounts {
+		isStartupShare[a.AccountID] = true
+	}
 	recorded := make([]recordedBalance, 0, len(rows))
-	withSnapshots := make(map[string]struct{})
 	var snapshotDays []date.Date
 	for _, r := range rows {
-		withSnapshots[r.AccountID] = struct{}{}
-		if date.Date(r.Date).After(today) {
+		if isStartupShare[r.AccountID] || date.Date(r.Date).After(today) {
 			continue
 		}
 		snapshotDays = append(snapshotDays, date.Date(r.Date))
@@ -82,7 +88,7 @@ func (s *Service) recordedBalances(ctx context.Context, today date.Date) ([]reco
 		recorded = append(recorded, recordedBalance{accountID: r.AccountID, typeID: r.TypeID, day: date.Date(r.Date), balance: v.Mean()})
 	}
 
-	startupAccounts, err := s.listStartupShareHistories(ctx, withSnapshots)
+	startupAccounts, err := s.listStartupShareHistories(ctx, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -335,3 +335,20 @@ func TestDashboardForecastHistoryHasNoSeriesToProjectWithoutAForecast(t *testing
 		t.Fatalf("expected no series without a Forecast, got %+v", data.Series)
 	}
 }
+
+func TestDashboardForecastHistoryIgnoresSnapshotsOnAStartupShareAccount(t *testing.T) {
+	svc := newTestService(t)
+	equity := mustAccountType(t, svc, "Equity", "#ff00ff")
+	startup := mustTypedAccount(t, svc, "Startup", equity.ID)
+	mustStartupShareAccount(t, svc, startup.ID,
+		[]model.InvestmentRoundInput{{Date: mustParseDate("2025-01-01"), Valuation: 1e6, PreMoneyShares: 1000}},
+		[]model.ShareChangeInput{{Date: mustParseDate("2025-01-01"), DeltaShares: 10, TotalPrice: 100}},
+	)
+	mustSnapshot(t, svc, startup.ID, mustParseDate("2025-03-01"), 777)
+	mustSnapshot(t, svc, mustTypedAccount(t, svc, "Savings", mustAccountType(t, svc, "Savings", "#00ff00").ID).ID, mustParseDate("2025-01-15"), 1000)
+
+	data := dashboardForecastHistory(t, svc, nil)
+
+	// Valued as derived on the regular Snapshot's day, the Forecast Start, and not after it.
+	expectHistory(t, seriesByID(data)[equity.ID], points(mustParseDate("2025-01-15"), 10000.0))
+}

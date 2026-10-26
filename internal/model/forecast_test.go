@@ -1,6 +1,7 @@
 package model_test
 
 import (
+	"math"
 	"slices"
 	"testing"
 
@@ -269,4 +270,34 @@ func TestForecastIgnoresSnapshotsOnAStartupShareAccount(t *testing.T) {
 
 	expectPoints(t, before, point(equity.ID, "2021-02-28", 10000), point("", "2021-02-28", 1000))
 	expectPoints(t, after, before...)
+}
+
+func TestForecastExercisesEveryOptionEndingOnADay(t *testing.T) {
+	svc := newTestService(t)
+	ctx := t.Context()
+	equity := mustAccountType(t, svc, "Equity", "#ff00ff")
+	startup := mustTypedAccount(t, svc, "Startup", equity.ID)
+	checking := mustAccount(t, svc, "Checking")
+	mustStartupShareAccount(t, svc, startup.ID,
+		[]model.InvestmentRoundInput{{Date: mustParseDate("2021-01-01"), Valuation: 1e6, PreMoneyShares: 1000}},
+		[]model.ShareChangeInput{{Date: mustParseDate("2021-01-01"), DeltaShares: 10, TotalPrice: 100}},
+	)
+	for _, shares := range []float64{10, 20} {
+		if _, err := svc.UpsertStartupShareOption(ctx, model.StartupShareOptionInput{
+			AccountID: startup.ID, SourceAccountID: checking.ID, Shares: shares, StrikePricePerShare: 10,
+			GrantDate: mustParseDate("2020-01-01"), EndDate: mustParseDate("2021-03-01"),
+		}); err != nil {
+			t.Fatalf("create startup share option: %v", err)
+		}
+	}
+	mustSnapshot(t, svc, checking.ID, mustParseDate("2021-02-10"), 100_000)
+
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: 30 * date.Day, Samples: 1, SnapshotInterval: "*-*-10", GroupBy: model.GroupByNone})
+
+	// Both options are exercised on their End Date: 30 more shares, paid 300 from checking.
+	points := rec.pointsOf(startup.ID)
+	if want := 1_000_300 * (40.0 / 1_030); len(points) != 2 || math.Abs(points[1].Balance-want) > 1e-6 {
+		t.Fatalf("expected the startup to be worth %f on 2021-03-10, got %+v", want, points)
+	}
+	expectPoints(t, rec.pointsOf(checking.ID), point(checking.ID, "2021-02-10", 100_000), point(checking.ID, "2021-03-10", 99_700))
 }

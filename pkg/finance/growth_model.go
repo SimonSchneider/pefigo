@@ -138,8 +138,9 @@ type StartupGrowth struct {
 	PurchasePricePerShare uncertain.Value
 
 	InvestmentRounds map[date.Date]StartupGrowthInvestmentRound
-	ShareChanges     map[date.Date]StartupGrowthShareChange
-	Options          map[date.Date]StartupGrowthOption
+	// ShareChanges and Options are applied on their day, in order.
+	ShareChanges map[date.Date][]StartupGrowthShareChange
+	Options      map[date.Date][]StartupGrowthOption
 }
 
 func (s *StartupGrowth) Apply(ucfg *uncertain.Config, day date.Date, entities map[string]*ModeledEntity, totalBalance uncertain.Value) uncertain.Value {
@@ -152,7 +153,7 @@ func (s *StartupGrowth) Apply(ucfg *uncertain.Config, day date.Date, entities ma
 		s.Valuation = round.PreMoneyValuation.Add(ucfg, round.Investment)
 		changed = true
 	}
-	if sc, ok := s.ShareChanges[day]; ok {
+	for _, sc := range s.ShareChanges[day] {
 		prevOwned := s.OwnedShares
 		s.OwnedShares = s.OwnedShares.Add(ucfg, sc.DeltaShares)
 		if sc.DeltaShares.Mean() > 0 {
@@ -162,7 +163,7 @@ func (s *StartupGrowth) Apply(ucfg *uncertain.Config, day date.Date, entities ma
 		}
 		changed = true
 	}
-	if opt, ok := s.Options[day]; ok {
+	for _, opt := range s.Options[day] {
 		sourceAccount, ok := entities[opt.SourceAccountID]
 		if !ok {
 			panic(fmt.Sprintf("no account found for %s", opt.SourceAccountID))

@@ -207,3 +207,31 @@ func TestChartWithoutAForecastShowsAStartupShareAccountsDerivedHistory(t *testin
 		t.Fatalf("expected no forecast points without a Forecast, got %+v", rec.snapshots)
 	}
 }
+
+func TestChartHistoryKeepsAStartupShareAccountAfterItsSharesAreSold(t *testing.T) {
+	svc := newTestService(t)
+	equity := mustAccountType(t, svc, "Equity", "#ff00ff")
+	startup := mustTypedAccount(t, svc, "Startup", equity.ID)
+	mustStartupShareAccount(t, svc, startup.ID,
+		[]model.InvestmentRoundInput{
+			{Date: mustParseDate("2021-01-01"), Valuation: 1e6, PreMoneyShares: 1000},
+			{Date: mustParseDate("2021-05-01"), Valuation: 2e6, PreMoneyShares: 1000},
+		},
+		[]model.ShareChangeInput{
+			{Date: mustParseDate("2021-02-01"), DeltaShares: 10, TotalPrice: 100},
+			{Date: mustParseDate("2021-04-01"), DeltaShares: -10},
+		},
+	)
+
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: date.Year, Samples: 1, SnapshotInterval: "*-*-*", GroupBy: model.GroupByType})
+
+	// No point before it first has shares, then every day of a round or share change, sold out included.
+	if len(rec.setup.Entities) != 1 {
+		t.Fatalf("expected the Equity entity, got %+v", rec.setup.Entities)
+	}
+	expectPoints(t, rec.setup.Entities[0].Snapshots,
+		point(equity.ID, "2021-02-01", 10000),
+		point(equity.ID, "2021-04-01", 0),
+		point(equity.ID, "2021-05-01", 0),
+	)
+}
