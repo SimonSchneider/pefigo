@@ -42,18 +42,24 @@ func (b *Bill) SetCurrencyConverter(defaultCurrency string, getRate func(from, t
 	b.getRate = getRate
 }
 
+// The Bill Amount periods (BillAmount.Period).
+const (
+	BillPeriodMonthly = "monthly"
+	BillPeriodYearly  = "yearly"
+)
+
 type BillAmount struct {
 	ID        string
 	BillID    string
 	Amount    uncertain.Value
-	Period    string // "monthly" or "yearly"
-	Currency  string // ISO 4217 code; empty means default currency
+	Period    string // BillPeriodMonthly or BillPeriodYearly; saving it empty saves BillPeriodMonthly
+	Currency  string // a supported ISO 4217 code; empty means default currency
 	StartDate date.Date
 	EndDate   *date.Date
 }
 
 func (ba BillAmount) MonthlyAmountValue() uncertain.Value {
-	if ba.Period == "yearly" {
+	if ba.Period == BillPeriodYearly {
 		v := ba.Amount
 		return uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
 			return v.Sample(cfg) / 12
@@ -63,7 +69,7 @@ func (ba BillAmount) MonthlyAmountValue() uncertain.Value {
 }
 
 func (ba BillAmount) YearlyAmountValue() uncertain.Value {
-	if ba.Period == "yearly" {
+	if ba.Period == BillPeriodYearly {
 		return ba.Amount
 	}
 	v := ba.Amount
@@ -116,8 +122,8 @@ func (b Bill) currentBillAmount() *BillAmount {
 
 func (b Bill) CurrentPeriod() string {
 	amt := b.currentBillAmount()
-	if amt == nil || amt.Period == "" {
-		return "monthly"
+	if amt == nil {
+		return BillPeriodMonthly
 	}
 	return amt.Period
 }
@@ -265,15 +271,11 @@ func billAmountFromDB(a pdb.BillAmount) (BillAmount, error) {
 		d := date.Date(*a.EndDate)
 		endDate = &d
 	}
-	period := a.Period
-	if period == "" {
-		period = "monthly"
-	}
 	return BillAmount{
 		ID:        a.ID,
 		BillID:    a.BillID,
 		Amount:    amount,
-		Period:    period,
+		Period:    a.Period,
 		Currency:  a.Currency,
 		StartDate: date.Date(a.StartDate),
 		EndDate:   endDate,
@@ -395,6 +397,17 @@ func (s *Service) DeleteBill(ctx context.Context, id string) error {
 }
 
 func (s *Service) UpsertBillAmount(ctx context.Context, inp BillAmount) (BillAmount, error) {
+	if inp.Period == "" {
+		inp.Period = BillPeriodMonthly
+	}
+	if err := checkOneOf("bill amount period", inp.Period, BillPeriodMonthly, BillPeriodYearly); err != nil {
+		return BillAmount{}, err
+	}
+	if inp.Currency != "" {
+		if err := checkSupportedCurrency("bill amount currency", inp.Currency); err != nil {
+			return BillAmount{}, err
+		}
+	}
 	if err := checkEndDate(inp.StartDate, inp.EndDate); err != nil {
 		return BillAmount{}, err
 	}
@@ -411,15 +424,11 @@ func (s *Service) UpsertBillAmount(ctx context.Context, inp BillAmount) (BillAmo
 		endDate = &d
 	}
 	now := time.Now().Unix()
-	period := inp.Period
-	if period == "" {
-		period = "monthly"
-	}
 	a, err := s.q.UpsertBillAmount(ctx, pdb.UpsertBillAmountParams{
 		ID:        inp.ID,
 		BillID:    inp.BillID,
 		Amount:    encoded,
-		Period:    period,
+		Period:    inp.Period,
 		Currency:  inp.Currency,
 		StartDate: int64(inp.StartDate),
 		EndDate:   endDate,

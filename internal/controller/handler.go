@@ -1030,11 +1030,7 @@ func (h *Handler) currencySettingsSave() http.Handler {
 		if err := r.ParseForm(); err != nil {
 			return fmt.Errorf("parsing form: %w", err)
 		}
-		code := r.FormValue("currency")
-		if code == "" {
-			return fmt.Errorf("currency code is required")
-		}
-		if err := h.svc.SetDefaultCurrency(ctx, code); err != nil {
+		if err := h.svc.SetDefaultCurrency(ctx, r.FormValue("currency")); err != nil {
 			return fmt.Errorf("setting default currency: %w", err)
 		}
 		shttp.RedirectToNext(w, r, "/settings?tab=currency")

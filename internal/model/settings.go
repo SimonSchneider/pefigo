@@ -29,7 +29,11 @@ func (s *Service) GetDefaultCurrency(ctx context.Context) (string, error) {
 	return val, nil
 }
 
+// SetDefaultCurrency stores the default currency, which must be a supported currency.
 func (s *Service) SetDefaultCurrency(ctx context.Context, code string) error {
+	if err := checkSupportedCurrency("default currency", code); err != nil {
+		return err
+	}
 	if err := s.q.UpsertSetting(ctx, pdb.UpsertSettingParams{
 		Key:   settingDefaultCurrency,
 		Value: code,

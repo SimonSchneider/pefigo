@@ -65,9 +65,6 @@ func (a *accountGrowthModelInputForm) FromForm(r *http.Request) error {
 	a.ID = r.FormValue("id")
 	a.AccountID = r.FormValue("account_id")
 	a.Type = r.FormValue("type")
-	if a.Type != "fixed" && a.Type != "lognormal" {
-		return fmt.Errorf("invalid growth model type: %s", a.Type)
-	}
 	if err := shttp.Parse(&a.AnnualRate, ui.ParseUncertainValue, r.FormValue("annual_rate"), uncertain.NewFixed(0)); err != nil {
 		return fmt.Errorf("parsing annual rate: %w", err)
 	}
@@ -201,9 +198,6 @@ func (t *transferTemplateForm) FromForm(r *http.Request) error {
 	t.FromAccountID = r.FormValue("from_account_id")
 	t.ToAccountID = r.FormValue("to_account_id")
 	t.AmountType = r.FormValue("amount_type")
-	if t.AmountType != "fixed" && t.AmountType != "percent" {
-		return fmt.Errorf("invalid amount type: %s", t.AmountType)
-	}
 	if err := shttp.Parse(&t.AmountFixed, ui.ParseUncertainValue, r.FormValue("amount_fixed"), uncertain.NewFixed(0)); err != nil {
 		return fmt.Errorf("parsing amount fixed: %w", err)
 	}
@@ -490,11 +484,7 @@ func (a *billAmountInputForm) FromForm(r *http.Request) error {
 	if err := shttp.Parse(&a.Amount, ui.ParseUncertainValue, r.FormValue("amount"), uncertain.NewFixed(0)); err != nil {
 		return fmt.Errorf("parsing amount: %w", err)
 	}
-	if r.FormValue("amount_period") == "yearly" {
-		a.Period = "yearly"
-	} else {
-		a.Period = "monthly"
-	}
+	a.Period = r.FormValue("amount_period")
 	a.Currency = r.FormValue("amount_currency")
 	return nil
 }

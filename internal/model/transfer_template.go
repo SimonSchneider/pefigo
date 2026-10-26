@@ -25,6 +25,12 @@ func (s TransferTemplateSource) IsGenerated() bool {
 	return s.Type != ""
 }
 
+// The Transfer Template amount types (TransferTemplate.AmountType).
+const (
+	TransferAmountFixed   = "fixed"
+	TransferAmountPercent = "percent"
+)
+
 type TransferTemplate struct {
 	ID            string
 	Name          string
@@ -109,6 +115,9 @@ type TransferTemplateInput struct {
 }
 
 func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTemplate) (TransferTemplate, error) {
+	if err := checkOneOf("transfer template amount type", inp.AmountType, TransferAmountFixed, TransferAmountPercent); err != nil {
+		return TransferTemplate{}, err
+	}
 	if err := checkEndDate(inp.StartDate, inp.EndDate); err != nil {
 		return TransferTemplate{}, err
 	}

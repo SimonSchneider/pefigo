@@ -127,3 +127,26 @@ func TestTheForecastSettingsShowTheForecastStartDaysAsForecastStartsOn(t *testin
 		}
 	}
 }
+
+func TestSavingAnUnsupportedDefaultCurrencyIsABadRequest(t *testing.T) {
+	svc, srv := newSettingsServer(t)
+
+	resp, err := srv.Client().PostForm(srv.URL+"/settings/currency", url.Values{"currency": {"XYZ"}})
+	if err != nil {
+		t.Fatalf("save currency settings: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"XYZ"`) {
+		t.Errorf("expected the response to name the currency, got %q", body)
+	}
+	if code, err := svc.GetDefaultCurrency(t.Context()); err != nil || code != "SEK" {
+		t.Fatalf("expected the default currency to stay SEK, got %q (%v)", code, err)
+	}
+}

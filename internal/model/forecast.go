@@ -14,11 +14,11 @@ import (
 // front, so building the accounts runs no queries. It is the only place that builds them, for the
 // Forecasts and for the Transfers page alike.
 type forecast struct {
-	accounts      []Account                    // by name and ID
-	snapshots     map[string][]AccountSnapshot // by account ID, each by date; none of a Startup Share account
-	growthModels  map[string]GrowthModels      // by account ID
-	startupShares map[string]*startupShares    // the Startup Share accounts, by account ID
-	sweParams     []SweYearlyParams            // by ValidFrom
+	accounts      []Account                      // by name and ID
+	snapshots     map[string][]AccountSnapshot   // by account ID, each by date; none of a Startup Share account
+	growthModels  map[string]finance.GrowthModel // every account's, by account ID
+	startupShares map[string]*startupShares      // the Startup Share accounts, by account ID
+	sweParams     []SweYearlyParams              // by ValidFrom
 	schedule      *TransferSchedule
 
 	// start is the Forecast Start, the first of the Forecast Start Days on or after the latest
@@ -63,7 +63,7 @@ func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
 	f := &forecast{
 		accounts:      accounts,
 		snapshots:     make(map[string][]AccountSnapshot),
-		growthModels:  make(map[string]GrowthModels),
+		growthModels:  make(map[string]finance.GrowthModel, len(accounts)),
 		startupShares: startupShares,
 		sweParams:     sweParams,
 		schedule:      schedule,
@@ -82,12 +82,20 @@ func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
 	if f.hasStart {
 		f.start = firstForecastStartDay(f.start, date.Cron(startDays))
 	}
+	growthModels := make(map[string]GrowthModels)
 	for _, row := range growthModelRows {
 		gm, err := growthModelFromDB(row)
 		if err != nil {
 			return nil, fmt.Errorf("converting growth model from db: %w", err)
 		}
-		f.growthModels[row.AccountID] = append(f.growthModels[row.AccountID], gm)
+		growthModels[row.AccountID] = append(growthModels[row.AccountID], gm)
+	}
+	for _, acc := range accounts {
+		growth, err := growthModels[acc.ID].ToFinance()
+		if err != nil {
+			return nil, fmt.Errorf("loading the growth models of %s: %w", acc.Name, err)
+		}
+		f.growthModels[acc.ID] = growth
 	}
 	return f, nil
 }
@@ -125,7 +133,7 @@ func (f *forecast) entities(ucfg *uncertain.Config, day date.Date) []finance.Ent
 			entity.GrowthModel = growth
 			startingBalance = growth.Balance(ucfg)
 		} else {
-			entity.GrowthModel = f.growthModels[acc.ID].ToFinance()
+			entity.GrowthModel = f.growthModels[acc.ID]
 			startingBalance = latestSnapshotBalance(f.snapshots[acc.ID], day)
 		}
 		entity.Snapshots = []finance.BalanceSnapshot{{Date: day, Balance: startingBalance}}
