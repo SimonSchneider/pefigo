@@ -55,6 +55,7 @@ func TestSavingTheForecastSettings(t *testing.T) {
 	resp, err := client.PostForm(srv.URL+"/settings/forecast", url.Values{
 		"samples":           {"500"},
 		"snapshot_interval": {"*-*-01"},
+		"start_days":        {"*-*-28"},
 	})
 	if err != nil {
 		t.Fatalf("save forecast settings: %v", err)
@@ -69,6 +70,9 @@ func TestSavingTheForecastSettings(t *testing.T) {
 	}
 	if interval, err := svc.GetForecastSnapshotInterval(t.Context()); err != nil || interval != "*-*-01" {
 		t.Fatalf("expected the snapshot interval *-*-01, got %q (%v)", interval, err)
+	}
+	if days, err := svc.GetForecastStartDays(t.Context()); err != nil || days != "*-*-28" {
+		t.Fatalf("expected the Forecast Start Days *-*-28, got %q (%v)", days, err)
 	}
 }
 
@@ -95,6 +99,31 @@ func TestTheForecastIntervalIsLabelledForecastInterval(t *testing.T) {
 			if strings.Contains(string(body), old) {
 				t.Errorf("expected %s not to label the setting %q", path, old)
 			}
+		}
+	}
+}
+
+func TestTheForecastSettingsShowTheForecastStartDaysAsForecastStartsOn(t *testing.T) {
+	svc, srv := newSettingsServer(t)
+	if err := svc.SetForecastStartDays(t.Context(), "*-*-28"); err != nil {
+		t.Fatalf("set forecast start days: %v", err)
+	}
+
+	resp, err := srv.Client().Get(srv.URL + "/settings?tab=forecast")
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected the Forecast settings, got %d: %s", resp.StatusCode, body)
+	}
+	for _, want := range []string{"Forecast starts on", `name="start_days"`, `value="*-*-28"`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("expected the Forecast settings to contain %s", want)
 		}
 	}
 }

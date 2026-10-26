@@ -38,7 +38,10 @@ A projection of every account's balance from the Forecast Start, beginning at ea
 _Avoid_: simulation, prediction
 
 **Forecast Start**:
-The first day a Forecast projects: the day of the latest Snapshot of any account, whatever day today is.
+The first day a Forecast projects: the first of the Forecast Start Days on or after the latest Snapshot of any account, whatever day today is. Transfers before it are taken to be in the Snapshots.
+
+**Forecast Start Days**:
+The days a Forecast may start on, such as the 28th of every month for Snapshots recorded after a payday's Transfers. By default they are every day, so a Forecast starts on the latest Snapshot's day.
 
 **Forecast Interval**:
 The days a Forecast reports balances on, such as the 28th of every month. Every day it reports holds every account of the Forecast.

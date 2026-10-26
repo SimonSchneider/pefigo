@@ -212,6 +212,7 @@ type SettingsPageView struct {
 	Currencies               []currency.Currency
 	ForecastSamples          int64
 	ForecastSnapshotInterval string
+	ForecastStartDays        string
 }
 
 func (s *Service) GetSettingsPageData(ctx context.Context) (*SettingsPageView, error) {
@@ -243,6 +244,10 @@ func (s *Service) GetSettingsPageData(ctx context.Context) (*SettingsPageView, e
 	if err != nil {
 		return nil, fmt.Errorf("getting forecast snapshot interval: %w", err)
 	}
+	forecastStartDays, err := s.GetForecastStartDays(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting forecast start days: %w", err)
+	}
 	return &SettingsPageView{
 		AccountTypes:             accountTypes,
 		Categories:               categories,
@@ -252,6 +257,7 @@ func (s *Service) GetSettingsPageData(ctx context.Context) (*SettingsPageView, e
 		Currencies:               currency.SupportedCurrencies(),
 		ForecastSamples:          forecastSamples,
 		ForecastSnapshotInterval: forecastSnapshotInterval,
+		ForecastStartDays:        forecastStartDays,
 	}, nil
 }
 

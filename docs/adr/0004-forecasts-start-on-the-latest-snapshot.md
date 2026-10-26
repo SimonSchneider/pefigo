@@ -15,3 +15,4 @@ A Forecast starts on the day of the latest Snapshot of any account, and every ac
 - Growth, interest waiting to be paid out and ISK quarters start counting on the Forecast Start, so an account's first interest payout or ISK tax leaves out the time before it.
 - Without any Snapshot there is no Forecast, and the Dashboard Forecast is empty.
 - Don't reintroduce a start day per account. Every day a Forecast reports holds every account only because they all start together.
+- A Forecast can start on a configured day after the latest Snapshot instead: see ADR 0005.

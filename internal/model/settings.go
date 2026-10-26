@@ -15,6 +15,7 @@ const (
 	settingDefaultCurrency          = "default_currency"
 	settingForecastSamples          = "forecast_samples"
 	settingForecastSnapshotInterval = "forecast_snapshot_interval"
+	settingForecastStartDays        = "forecast_start_days"
 )
 
 func (s *Service) GetDefaultCurrency(ctx context.Context) (string, error) {
@@ -85,6 +86,33 @@ func (s *Service) SetForecastSnapshotInterval(ctx context.Context, interval stri
 	if err := s.q.UpsertSetting(ctx, pdb.UpsertSettingParams{
 		Key:   settingForecastSnapshotInterval,
 		Value: interval,
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// GetForecastStartDays returns the Forecast Start Days, a date pattern that matches every day by
+// default.
+func (s *Service) GetForecastStartDays(ctx context.Context) (string, error) {
+	val, err := s.q.GetSetting(ctx, settingForecastStartDays)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "*-*-*", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("getting forecast start days: %w", err)
+	}
+	return val, nil
+}
+
+func (s *Service) SetForecastStartDays(ctx context.Context, days string) error {
+	parts := strings.Split(days, "-")
+	if len(parts) != 3 {
+		return fmt.Errorf("forecast start days must have format YEAR-MONTH-DAY (e.g. *-*-28), got %q", days)
+	}
+	if err := s.q.UpsertSetting(ctx, pdb.UpsertSettingParams{
+		Key:   settingForecastStartDays,
+		Value: days,
 	}); err != nil {
 		return err
 	}

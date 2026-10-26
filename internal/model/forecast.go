@@ -21,11 +21,15 @@ type forecast struct {
 	sweParams     []SweYearlyParams            // by ValidFrom
 	schedule      *TransferSchedule
 
-	// start is the Forecast Start, the day of the latest Snapshot. Without one, hasStart is false and
-	// there is no Forecast.
+	// start is the Forecast Start, the first of the Forecast Start Days on or after the latest
+	// Snapshot. Without a Snapshot, hasStart is false and there is no Forecast.
 	start    date.Date
 	hasStart bool
 }
+
+// forecastStartDaysSearched is how long after the latest Snapshot the Forecast Start Days are looked
+// for: four years hold every day of the year, February 29 included.
+const forecastStartDaysSearched = 4*date.Year + date.Day
 
 func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
 	accounts, err := s.ListAccounts(ctx)
@@ -52,6 +56,10 @@ func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading transfer schedule: %w", err)
 	}
+	startDays, err := s.GetForecastStartDays(ctx)
+	if err != nil {
+		return nil, err
+	}
 	f := &forecast{
 		accounts:      accounts,
 		snapshots:     make(map[string][]AccountSnapshot),
@@ -71,6 +79,9 @@ func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
 			f.start, f.hasStart = snap.Date, true
 		}
 	}
+	if f.hasStart {
+		f.start = firstForecastStartDay(f.start, date.Cron(startDays))
+	}
 	for _, row := range growthModelRows {
 		gm, err := growthModelFromDB(row)
 		if err != nil {
@@ -79,6 +90,18 @@ func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
 		f.growthModels[row.AccountID] = append(f.growthModels[row.AccountID], gm)
 	}
 	return f, nil
+}
+
+// firstForecastStartDay is the first of startDays on or after latest, the latest Snapshot's day. The
+// Transfers before it are taken to be in the Snapshots. Without one within the searched years, it is
+// latest.
+func firstForecastStartDay(latest date.Date, startDays date.Cron) date.Date {
+	for day := range date.Iter(latest, latest.Add(forecastStartDaysSearched), date.Day) {
+		if startDays.Matches(day) {
+			return day
+		}
+	}
+	return latest
 }
 
 // entities builds every account for a Forecast that starts on day, each at its Starting Balance on
