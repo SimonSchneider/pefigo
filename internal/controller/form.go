@@ -333,21 +333,17 @@ type predictionParamsForm struct {
 }
 
 func (p *predictionParamsForm) FromForm(r *http.Request) error {
-	if err := shttp.Parse(&p.Duration, date.ParseDuration, r.FormValue("duration"), 365); err != nil {
+	if err := shttp.Parse(&p.Duration, ui.ParseNullable(date.ParseDuration), r.FormValue("duration"), nil); err != nil {
 		return fmt.Errorf("parsing duration: %w", err)
 	}
-	if err := shttp.Parse(&p.Samples, ui.ParseHumanNumber(ui.ParseInt64), r.FormValue("samples"), 2000); err != nil {
+	if err := shttp.Parse(&p.Samples, ui.ParseNullable(ui.ParseHumanNumber(ui.ParseInt64)), r.FormValue("samples"), nil); err != nil {
 		return fmt.Errorf("parsing samples: %w", err)
 	}
-	if err := shttp.Parse(&p.Quantile, shttp.ParseFloat, r.FormValue("quantile"), 0.8); err != nil {
+	if err := shttp.Parse(&p.Quantile, ui.ParseNullable(shttp.ParseFloat), r.FormValue("quantile"), nil); err != nil {
 		return fmt.Errorf("parsing quantile: %w", err)
 	}
-	if err := shttp.Parse(&p.SnapshotInterval, ui.ParseDateCron, r.FormValue("snapshot_interval"), "*-*-28"); err != nil {
-		return fmt.Errorf("parsing snapshot interval: %w", err)
-	}
-	if err := shttp.Parse(&p.GroupBy, model.ParseGroupBy, r.FormValue("group_by"), model.GroupByType); err != nil {
-		return fmt.Errorf("parsing group by: %w", err)
-	}
+	p.SnapshotInterval = date.Cron(r.FormValue("snapshot_interval"))
+	p.GroupBy = model.GroupBy(r.FormValue("group_by"))
 	return nil
 }
 

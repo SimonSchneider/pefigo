@@ -157,7 +157,7 @@ func TestForecastChargesABillPriceChangeOnceOnItsRecurrenceDay(t *testing.T) {
 
 	forecast := recordedForecast{}
 	err := svc.RunPrediction(ctx, forecast, model.PredictionParams{
-		Duration: mustParseDate("2025-04-06").Sub(start), Samples: 1, Quantile: 0.8, SnapshotInterval: "*-*-02", GroupBy: model.GroupByNone,
+		Duration: ptr(mustParseDate("2025-04-06").Sub(start)), Samples: ptr[int64](1), Quantile: ptr(0.8), SnapshotInterval: "*-*-02", GroupBy: model.GroupByNone,
 	})
 	if err != nil {
 		t.Fatalf("RunPrediction: %v", err)
@@ -227,7 +227,7 @@ func TestForecastAndAccountsApplyTheLatestStartingGrowthModel(t *testing.T) {
 			}
 			forecast := recordedForecast{}
 			if err := svc.RunPrediction(ctx, forecast, model.PredictionParams{
-				Duration: 30 * date.Day, Samples: 1, Quantile: 0.8, SnapshotInterval: "*-*-*", GroupBy: model.GroupByNone,
+				Duration: ptr(30 * date.Day), Samples: ptr[int64](1), Quantile: ptr(0.8), SnapshotInterval: "*-*-*", GroupBy: model.GroupByNone,
 			}); err != nil {
 				t.Fatalf("RunPrediction: %v", err)
 			}

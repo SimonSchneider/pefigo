@@ -113,7 +113,7 @@ func BenchmarkForecast(b *testing.B) {
 			b.Fatalf("seed snapshot: %v", err)
 		}
 	}
-	params := model.PredictionParams{Duration: date.Year, Samples: 100, Quantile: 0.8, SnapshotInterval: "*-*-28", GroupBy: model.GroupByType}
+	params := model.PredictionParams{Duration: ptr(date.Year), Samples: ptr[int64](100), Quantile: ptr(0.8), SnapshotInterval: "*-*-28", GroupBy: model.GroupByType}
 	b.ResetTimer()
 	for b.Loop() {
 		if err := svc.RunPrediction(ctx, discardedForecast{}, params); err != nil {

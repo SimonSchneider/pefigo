@@ -955,26 +955,40 @@ func (h *Handler) transferChartData() http.Handler {
 
 func (h *Handler) chartPage() http.Handler {
 	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var p predictionParamsForm
-		if err := srvu.Decode(r, &p, false); err != nil {
+		var inp predictionParamsForm
+		if err := srvu.Decode(r, &inp, false); err != nil {
 			return fmt.Errorf("decoding input: %w", err)
 		}
-		return view.NewView(ctx, w, r).Render(view.Page("Chart", view.PageChart(p.PredictionParams)))
+		params, err := inp.WithDefaults()
+		if err != nil {
+			return err
+		}
+		return view.NewView(ctx, w, r).Render(view.Page("Chart", view.PageChart(params)))
 	})
 }
 
+// ssePredictionEventHandler streams a Forecast as server-sent events. The stream starts with the first
+// event, so an error before it, such as invalid parameters, is still answered with its own status.
 type ssePredictionEventHandler struct {
-	w *srvu.SSESender
+	w      http.ResponseWriter
+	stream *srvu.SSESender
+}
+
+func (s *ssePredictionEventHandler) sender() *srvu.SSESender {
+	if s.stream == nil {
+		s.stream = srvu.SSEResponse(s.w)
+	}
+	return s.stream
 }
 
 func (s *ssePredictionEventHandler) Setup(e model.PredictionSetupEvent) error {
-	return s.w.SendNamedJson("setup", e)
+	return s.sender().SendNamedJson("setup", e)
 }
 func (s *ssePredictionEventHandler) Snapshot(e model.PredictionBalanceSnapshot) error {
-	return s.w.SendNamedJson("balanceSnapshot", e)
+	return s.sender().SendNamedJson("balanceSnapshot", e)
 }
 func (s *ssePredictionEventHandler) Close() error {
-	return s.w.SendEventWithoutData("close")
+	return s.sender().SendEventWithoutData("close")
 }
 
 func (h *Handler) chartsDataStream() http.Handler {
@@ -983,7 +997,7 @@ func (h *Handler) chartsDataStream() http.Handler {
 		if err := srvu.Decode(r, &params, false); err != nil {
 			return fmt.Errorf("decoding input: %w", err)
 		}
-		if err := h.svc.RunPrediction(ctx, &ssePredictionEventHandler{w: srvu.SSEResponse(w)}, params.PredictionParams); err != nil {
+		if err := h.svc.RunPrediction(ctx, &ssePredictionEventHandler{w: w}, params.PredictionParams); err != nil {
 			return fmt.Errorf("running prediction: %w", err)
 		}
 		return nil

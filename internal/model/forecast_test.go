@@ -52,7 +52,7 @@ func TestForecastStartsOnTheLatestSnapshotEvenMonthsBeforeToday(t *testing.T) {
 	mustSnapshot(t, svc, savings.ID, start, 5000)
 	interval := date.Cron("*-*-01")
 
-	rec := forecastWith(t, svc, model.PredictionParams{Duration: date.Year, Samples: 1, SnapshotInterval: interval, GroupBy: model.GroupByTotal})
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(date.Year), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: interval, GroupBy: model.GroupByTotal})
 
 	first := start
 	for !interval.Matches(first) {
@@ -69,7 +69,7 @@ func TestForecastStartsOnASnapshotDatedAfterToday(t *testing.T) {
 	mustSnapshot(t, svc, mustAccount(t, svc, "Checking").ID, date.Today().Add(-10*date.Day), 1000)
 	mustSnapshot(t, svc, mustAccount(t, svc, "Savings").ID, start, 5000)
 
-	rec := forecastWith(t, svc, model.PredictionParams{Duration: 3 * date.Day, Samples: 1, SnapshotInterval: "*-*-*", GroupBy: model.GroupByTotal})
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(3 * date.Day), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByTotal})
 
 	want := make([]model.PredictionBalanceSnapshot, 3)
 	for i := range want {
@@ -89,7 +89,7 @@ func TestForecastPointsDependOnlyOnTheForecastInputs(t *testing.T) {
 		Recurrence: "*-*-15", StartDate: mustParseDate("2021-01-01"), Enabled: true,
 	})
 
-	rec := forecastWith(t, svc, model.PredictionParams{Duration: 80 * date.Day, Samples: 1, SnapshotInterval: "*-*-28", GroupBy: model.GroupByNone})
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(80 * date.Day), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-28", GroupBy: model.GroupByNone})
 
 	expectPoints(t, rec.snapshots,
 		point(checking.ID, "2021-03-28", 1100),
@@ -126,7 +126,7 @@ func TestNoForecastWithoutASnapshot(t *testing.T) {
 			if rows := subscribe(t, svc).Rows; len(rows) != 0 {
 				t.Fatalf("expected the Dashboard Forecast to be empty, got %v", rows)
 			}
-			rec := forecastWith(t, svc, model.PredictionParams{Duration: date.Year, Samples: 1, SnapshotInterval: "*-*-*", GroupBy: model.GroupByType})
+			rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(date.Year), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByType})
 			if len(rec.setup.Marklines) == 0 || len(rec.snapshots) != 0 || !rec.closed {
 				t.Fatalf("expected /chart to send its setup and close without forecast points, got %+v", rec)
 			}
@@ -206,7 +206,7 @@ func TestForecastShowsATransferIntoAnAccountWithoutASnapshot(t *testing.T) {
 		Recurrence: "*-01-20", StartDate: mustParseDate("2021-01-01"), Enabled: true,
 	})
 
-	rec := forecastWith(t, svc, model.PredictionParams{Duration: 30 * date.Day, Samples: 1, SnapshotInterval: "*-*-28", GroupBy: model.GroupByType})
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(30 * date.Day), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-28", GroupBy: model.GroupByType})
 
 	expectPoints(t, rec.pointsOf(savingsType.ID), point(savingsType.ID, "2021-01-28", 500))
 	expectPoints(t, rec.pointsOf(checkingType.ID), point(checkingType.ID, "2021-01-28", 500))
@@ -219,7 +219,7 @@ func TestForecastValuesAStartupShareAccountWithoutInvestmentRoundsAtZero(t *test
 	mustStartupShareAccount(t, svc, startup.ID, nil, []model.ShareChangeInput{{Date: mustParseDate("2021-01-01"), DeltaShares: 10, TotalPrice: 100}})
 	mustSnapshot(t, svc, mustAccount(t, svc, "Checking").ID, mustParseDate("2021-01-10"), 1000)
 
-	rec := forecastWith(t, svc, model.PredictionParams{Duration: 60 * date.Day, Samples: 100, Quantile: 0.8, SnapshotInterval: "*-*-28", GroupBy: model.GroupByType})
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(60 * date.Day), Samples: ptr[int64](100), Quantile: ptr(0.8), SnapshotInterval: "*-*-28", GroupBy: model.GroupByType})
 
 	expectPoints(t, rec.pointsOf(equity.ID), point(equity.ID, "2021-01-28", 0), point(equity.ID, "2021-02-28", 0))
 }
@@ -240,7 +240,7 @@ func TestForecastStartsAStartupShareAccountAtItsDerivedValue(t *testing.T) {
 	)
 	mustSnapshot(t, svc, mustAccount(t, svc, "Checking").ID, mustParseDate("2021-02-10"), 1000)
 
-	rec := forecastWith(t, svc, model.PredictionParams{Duration: 70 * date.Day, Samples: 1, SnapshotInterval: "*-*-10", GroupBy: model.GroupByType})
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(70 * date.Day), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-10", GroupBy: model.GroupByType})
 
 	// The share change on the Forecast Start counts once: 10 of 1000 shares at 1M, then 20 shares, then
 	// 20 shares at 2M from the later investment round.
@@ -260,7 +260,7 @@ func TestForecastIgnoresSnapshotsOnAStartupShareAccount(t *testing.T) {
 		[]model.ShareChangeInput{{Date: mustParseDate("2021-01-01"), DeltaShares: 10, TotalPrice: 100}},
 	)
 	mustSnapshot(t, svc, mustAccount(t, svc, "Checking").ID, mustParseDate("2021-02-10"), 1000)
-	params := model.PredictionParams{Duration: 30 * date.Day, Samples: 1, SnapshotInterval: "*-*-28", GroupBy: model.GroupByType}
+	params := model.PredictionParams{Duration: ptr(30 * date.Day), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-28", GroupBy: model.GroupByType}
 	before := forecastWith(t, svc, params).snapshots
 
 	// One Snapshot would be its Starting Balance, the other would move the Forecast Start.
@@ -292,7 +292,7 @@ func TestForecastExercisesEveryOptionEndingOnADay(t *testing.T) {
 	}
 	mustSnapshot(t, svc, checking.ID, mustParseDate("2021-02-10"), 100_000)
 
-	rec := forecastWith(t, svc, model.PredictionParams{Duration: 30 * date.Day, Samples: 1, SnapshotInterval: "*-*-10", GroupBy: model.GroupByNone})
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(30 * date.Day), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-10", GroupBy: model.GroupByNone})
 
 	// Both options are exercised on their End Date: 30 more shares, paid 300 from checking.
 	points := rec.pointsOf(startup.ID)

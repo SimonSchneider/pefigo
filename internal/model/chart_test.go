@@ -1,11 +1,14 @@
 package model_test
 
 import (
+	"errors"
+	"math"
 	"slices"
 	"testing"
 
 	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/internal/model"
+	"github.com/SimonSchneider/pefigo/pkg/uncertain"
 )
 
 // recordedPrediction keeps every event of a prediction.
@@ -45,7 +48,7 @@ func forecastWith(t *testing.T, svc *model.Service, params model.PredictionParam
 func runPrediction(t *testing.T, svc *model.Service, groupBy model.GroupBy) *recordedPrediction {
 	t.Helper()
 	return forecastWith(t, svc, model.PredictionParams{
-		Duration: 10 * date.Day, Samples: 1, Quantile: 0.8, SnapshotInterval: "*-*-*", GroupBy: groupBy,
+		Duration: ptr(10 * date.Day), Samples: ptr[int64](1), Quantile: ptr(0.8), SnapshotInterval: "*-*-*", GroupBy: groupBy,
 	})
 }
 
@@ -196,7 +199,7 @@ func TestChartWithoutAForecastShowsAStartupShareAccountsDerivedHistory(t *testin
 		[]model.ShareChangeInput{{Date: mustParseDate("2021-02-01"), DeltaShares: 10, TotalPrice: 100}},
 	)
 
-	rec := forecastWith(t, svc, model.PredictionParams{Duration: date.Year, Samples: 1, SnapshotInterval: "*-*-*", GroupBy: model.GroupByType})
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(date.Year), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByType})
 
 	// Its balance on each day of an investment round or share change with shares to value.
 	if len(rec.setup.Entities) != 1 || rec.setup.Entities[0].ID != equity.ID {
@@ -223,7 +226,7 @@ func TestChartHistoryKeepsAStartupShareAccountAfterItsSharesAreSold(t *testing.T
 		},
 	)
 
-	rec := forecastWith(t, svc, model.PredictionParams{Duration: date.Year, Samples: 1, SnapshotInterval: "*-*-*", GroupBy: model.GroupByType})
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(date.Year), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByType})
 
 	// No point before it first has shares, then every day of a round or share change, sold out included.
 	if len(rec.setup.Entities) != 1 {
@@ -234,4 +237,66 @@ func TestChartHistoryKeepsAStartupShareAccountAfterItsSharesAreSold(t *testing.T
 		point(equity.ID, "2021-04-01", 0),
 		point(equity.ID, "2021-05-01", 0),
 	)
+}
+
+func TestAForecastWithNothingGivenRunsWithTheChartPageDefaults(t *testing.T) {
+	svc := newTestService(t)
+	savings := mustAccountType(t, svc, "Savings", "#00ff00")
+	acc := mustTypedAccount(t, svc, "Savings account", savings.ID)
+	start := mustParseDate("2025-03-10")
+	if _, err := svc.UpsertAccountSnapshot(t.Context(), acc.ID, model.AccountSnapshotInput{Date: start, Balance: uncertain.NewUniform(0, 1000)}); err != nil {
+		t.Fatalf("create snapshot: %v", err)
+	}
+
+	rec := forecastWith(t, svc, model.PredictionParams{})
+
+	// A year from the Forecast Start,
+	if want := start.Add(date.Year); rec.setup.Max != want {
+		t.Errorf("expected the Forecast to run for a year, to %s, got %s", want, rec.setup.Max)
+	}
+	// grouped by Account Type,
+	if len(rec.setup.Entities) != 1 || rec.setup.Entities[0].ID != savings.ID {
+		t.Errorf("expected the series of the Account Type, got %+v", rec.setup.Entities)
+	}
+	// with a point on the 28th of every month,
+	var wantDays, days []date.Date
+	for day := start; day.Before(start.Add(date.Year)); day = day.Add(date.Day) {
+		if date.Cron("*-*-28").Matches(day) {
+			wantDays = append(wantDays, day)
+		}
+	}
+	for _, s := range rec.snapshots {
+		days = append(days, s.Day)
+		if s.ID != savings.ID {
+			t.Errorf("expected every point in the series of the Account Type, got %+v", s)
+		}
+		// bounding 80% of outcomes.
+		if math.Abs(s.LowerBound-100) > 50 || math.Abs(s.UpperBound-900) > 50 {
+			t.Errorf("expected the bounds of 80%% of outcomes, about 100 and 900, got %+v", s)
+		}
+	}
+	if !slices.Equal(days, wantDays) {
+		t.Errorf("expected a point on each of %v, got %v", wantDays, days)
+	}
+}
+
+func TestAForecastWithAnInvalidIntervalOrGroupingIsInvalidInput(t *testing.T) {
+	svc := newTestService(t)
+	mustSnapshot(t, svc, mustAccount(t, svc, "Checking").ID, mustParseDate("2025-03-10"), 1000)
+	invalid := map[string]model.PredictionParams{"group by account": {GroupBy: "account"}}
+	for _, interval := range invalidDatePatterns {
+		invalid["interval "+string(interval)] = model.PredictionParams{SnapshotInterval: interval}
+	}
+
+	for name, params := range invalid {
+		t.Run(name, func(t *testing.T) {
+			rec := &recordedPrediction{}
+			if err := svc.RunPrediction(t.Context(), rec, params); !errors.Is(err, model.ErrInvalidInput) {
+				t.Fatalf("expected ErrInvalidInput, got %v", err)
+			}
+			if rec.setup.Max != 0 || len(rec.snapshots) != 0 || rec.closed {
+				t.Fatalf("expected nothing sent, got %+v", rec)
+			}
+		})
+	}
 }

@@ -39,7 +39,7 @@ func mustForecastStartDays(t *testing.T, svc *model.Service, days string) {
 }
 
 // threeDays is a Forecast of three days from the Forecast Start, reported daily, by Account Type.
-var threeDays = model.PredictionParams{Duration: 3 * date.Day, Samples: 1, SnapshotInterval: "*-*-*", GroupBy: model.GroupByType}
+var threeDays = model.PredictionParams{Duration: ptr(3 * date.Day), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByType}
 
 func TestForecastStartsOnTheSnapshotsDayByDefault(t *testing.T) {
 	svc := newTestService(t)
@@ -110,7 +110,7 @@ func TestForecastStartsOnASnapshotOnAForecastStartDay(t *testing.T) {
 	mustSnapshot(t, svc, checking.ID, mustParseDate("2025-03-28"), 1000)
 	mustForecastStartDays(t, svc, "*-*-28")
 
-	rec := forecastWith(t, svc, model.PredictionParams{Duration: date.Day, Samples: 1, SnapshotInterval: "*-*-*", GroupBy: model.GroupByNone})
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(date.Day), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByNone})
 
 	expectPoints(t, rec.snapshots, point(checking.ID, "2025-03-28", 1000))
 }
@@ -121,7 +121,7 @@ func TestForecastStartsOnTheLatestSnapshotWithoutAForecastStartDayAfterIt(t *tes
 	mustSnapshot(t, svc, checking.ID, mustParseDate("2025-03-25"), 1000)
 	mustForecastStartDays(t, svc, "2020-*-*")
 
-	rec := forecastWith(t, svc, model.PredictionParams{Duration: date.Day, Samples: 1, SnapshotInterval: "*-*-*", GroupBy: model.GroupByNone})
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(date.Day), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByNone})
 
 	expectPoints(t, rec.snapshots, point(checking.ID, "2025-03-25", 1000))
 }

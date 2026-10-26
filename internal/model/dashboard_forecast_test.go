@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -379,13 +380,15 @@ func TestDashboardForecastRunForecastsThroughTheLastSpecialDate(t *testing.T) {
 	startForecast(svc)
 	timers.fire()
 
+	// Without lower and upper bounds: a Quantile of 0.
 	want := model.PredictionParams{
 		Through:          last,
-		Samples:          123,
+		Samples:          ptr[int64](123),
+		Quantile:         ptr(0.0),
 		SnapshotInterval: date.Cron("*-*-15"),
 		GroupBy:          model.GroupByType,
 	}
-	if len(got) != 1 || got[0] != want {
+	if len(got) != 1 || !reflect.DeepEqual(got[0], want) {
 		t.Fatalf("expected one Forecast with %+v, got %+v", want, got)
 	}
 }

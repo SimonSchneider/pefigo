@@ -411,7 +411,8 @@ func (s *Service) dashboardForecastParams(ctx context.Context) (params Predictio
 	}
 	return PredictionParams{
 		Through:          last,
-		Samples:          samples,
+		Samples:          &samples,
+		Quantile:         ptr(0.0),
 		SnapshotInterval: date.Cron(snapshotInterval),
 		GroupBy:          GroupByType,
 	}, true, nil
