@@ -11,8 +11,9 @@ import (
 	"github.com/SimonSchneider/pefigo/internal/model"
 )
 
-// postForm posts form to path and expects the redirect a saved form answers with.
-func postForm(t *testing.T, srv *httptest.Server, path string, form url.Values) {
+// postForm posts form to path, expects the redirect a saved form answers with and returns where it
+// redirects to.
+func postForm(t *testing.T, srv *httptest.Server, path string, form url.Values) string {
 	t.Helper()
 	client := *srv.Client()
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -25,6 +26,7 @@ func postForm(t *testing.T, srv *httptest.Server, path string, form url.Values) 
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected post %s to redirect, got %d: %s", path, resp.StatusCode, body)
 	}
+	return resp.Header.Get("Location")
 }
 
 // getPage gets the page at path.

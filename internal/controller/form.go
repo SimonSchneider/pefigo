@@ -13,6 +13,8 @@ import (
 
 type accountInputForm struct {
 	model.AccountInput
+	// StartupShares is the Startup Share part of the form in startup mode, and nil otherwise.
+	StartupShares *model.StartupShareAccountInput
 }
 
 func (a *accountInputForm) FromForm(r *http.Request) error {
@@ -26,6 +28,13 @@ func (a *accountInputForm) FromForm(r *http.Request) error {
 	a.TypeID = r.FormValue("type_id")
 	a.BudgetCategoryID = ui.WithDefaultNull(r.FormValue("budget_category_id"))
 	a.IsISK = r.FormValue("is_isk") == "on"
+	if r.FormValue("account_form_mode") == "startup" {
+		var startupShares startupShareAccountInputForm
+		if err := startupShares.FromForm(r); err != nil {
+			return fmt.Errorf("parsing startup shares: %w", err)
+		}
+		a.StartupShares = &startupShares.StartupShareAccountInput
+	}
 	return nil
 }
 
