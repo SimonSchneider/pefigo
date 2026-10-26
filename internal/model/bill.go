@@ -191,10 +191,11 @@ func (b Bill) GenerateTransferTemplates(ba BillAccount) []TransferTemplate {
 	}
 
 	source := TransferTemplateSource{
-		Type:     "bill",
-		EntityID: b.ID,
-		Label:    b.Name,
-		EditURL:  "/bills/" + ba.ID + "/edit",
+		Type:          "bill",
+		EntityID:      b.ID,
+		Label:         b.Name,
+		EditURL:       "/bills/" + ba.ID + "/edit",
+		recurrenceRow: "bill account " + ba.ID,
 	}
 
 	enabled := ba.Enabled && b.Enabled
@@ -299,7 +300,17 @@ func (s *Service) applyCurrencyConverter(ctx context.Context, bills []Bill) {
 	}
 }
 
+// DefaultBillAccountRecurrence is the recurrence of a Bill account saved without one: the 1st of every
+// month.
+const DefaultBillAccountRecurrence date.Cron = "*-*-01"
+
 func (s *Service) UpsertBillAccount(ctx context.Context, inp BillAccount) (BillAccount, error) {
+	if inp.Recurrence == "" {
+		inp.Recurrence = DefaultBillAccountRecurrence
+	}
+	if err := checkDatePattern("bill account recurrence", inp.Recurrence); err != nil {
+		return BillAccount{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}

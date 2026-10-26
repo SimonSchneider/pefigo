@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
+	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/pkg/currency"
 )
 
@@ -27,4 +29,50 @@ func checkSupportedCurrency(field, code string) error {
 		return fmt.Errorf("%w: %s %q is not a supported currency", ErrInvalidInput, field, code)
 	}
 	return nil
+}
+
+// checkDatePattern rejects pattern, the field named field, unless it is a valid date pattern.
+func checkDatePattern(field string, pattern date.Cron) error {
+	if validDatePattern(pattern) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s %q is not a date pattern: year-month-day, each *, */n or a number", ErrInvalidInput, field, pattern)
+}
+
+// validDatePattern reports whether pattern is a date pattern date.Cron can match days with: a year, a
+// month and a day separated by dashes, each "*", "*/n" with n a positive integer, or an unsigned
+// integer. Every recurrence is one: of a Transfer Template, a Salary and a Bill account, an account's
+// cash-flow frequency, the Forecast Interval and the Forecast Start Days.
+func validDatePattern(pattern date.Cron) bool {
+	parts := strings.Split(string(pattern), "-")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if !validDatePatternPart(part) {
+			return false
+		}
+	}
+	return true
+}
+
+func validDatePatternPart(part string) bool {
+	if part == "*" {
+		return true
+	}
+	if n, ok := strings.CutPrefix(part, "*/"); ok {
+		every, ok := unsignedInt(n)
+		return ok && every > 0
+	}
+	_, ok := unsignedInt(part)
+	return ok
+}
+
+// unsignedInt parses s when it is only digits.
+func unsignedInt(s string) (int, bool) {
+	if s == "" || strings.Trim(s, "0123456789") != "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(s)
+	return n, err == nil
 }

@@ -1344,7 +1344,7 @@ func BillAmountRow(billID string, amt BillAmount) templ.Component {
 
 func billAccountRecurrenceValue(ba BillAccount) string {
 	if ba.ID == "" {
-		return "*-*-01"
+		return string(DefaultBillAccountRecurrence)
 	}
 	return string(ba.Recurrence)
 }

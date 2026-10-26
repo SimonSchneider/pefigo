@@ -406,6 +406,9 @@ func (s *Service) dashboardForecastParams(ctx context.Context) (params Predictio
 	if err != nil {
 		return params, false, fmt.Errorf("getting forecast snapshot interval: %w", err)
 	}
+	if !validDatePattern(date.Cron(snapshotInterval)) {
+		return params, false, fmt.Errorf("the stored Forecast Interval %q is not a valid date pattern", snapshotInterval)
+	}
 	return PredictionParams{
 		Through:          last,
 		Samples:          samples,

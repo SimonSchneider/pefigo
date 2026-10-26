@@ -435,7 +435,7 @@ templ BillAmountRow(billID string, amt BillAmount) {
 
 func billAccountRecurrenceValue(ba BillAccount) string {
 	if ba.ID == "" {
-		return "*-*-01"
+		return string(DefaultBillAccountRecurrence)
 	}
 	return string(ba.Recurrence)
 }

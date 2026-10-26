@@ -19,10 +19,23 @@ type TransferTemplateSource struct {
 	EntityID string
 	Label    string
 	EditURL  string
+
+	// recurrenceRow names the stored row a generated Transfer Template's recurrence is from, such as
+	// its Bill account, for an error about it.
+	recurrenceRow string
 }
 
 func (s TransferTemplateSource) IsGenerated() bool {
 	return s.Type != ""
+}
+
+// recurrenceRow names the stored row t's recurrence is from: t itself, or the Salary or Bill account
+// it is generated from.
+func (t TransferTemplate) recurrenceRow() string {
+	if t.Source.recurrenceRow != "" {
+		return t.Source.recurrenceRow
+	}
+	return "transfer template " + t.ID
 }
 
 // The Transfer Template amount types (TransferTemplate.AmountType).
@@ -116,6 +129,9 @@ type TransferTemplateInput struct {
 
 func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTemplate) (TransferTemplate, error) {
 	if err := checkOneOf("transfer template amount type", inp.AmountType, TransferAmountFixed, TransferAmountPercent); err != nil {
+		return TransferTemplate{}, err
+	}
+	if err := checkDatePattern("transfer template recurrence", inp.Recurrence); err != nil {
 		return TransferTemplate{}, err
 	}
 	if err := checkEndDate(inp.StartDate, inp.EndDate); err != nil {

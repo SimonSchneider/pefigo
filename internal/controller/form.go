@@ -260,7 +260,7 @@ func (s *salaryInputForm) FromForm(r *http.Request) error {
 	if err := shttp.Parse(&s.Priority, ui.ParseInt64, r.FormValue("priority"), int64(0)); err != nil {
 		return fmt.Errorf("parsing priority: %w", err)
 	}
-	if err := shttp.Parse(&s.Recurrence, ui.ParseDateCron, r.FormValue("recurrence"), date.Cron("*-*-25")); err != nil {
+	if err := shttp.Parse(&s.Recurrence, ui.ParseDateCron, r.FormValue("recurrence"), date.Cron("")); err != nil {
 		return fmt.Errorf("parsing recurrence: %w", err)
 	}
 	s.Enabled = r.FormValue("enabled") == "on"
@@ -435,7 +435,7 @@ func (b *billAccountInputForm) FromForm(r *http.Request) error {
 	if err := shttp.Parse(&b.Priority, ui.ParseInt64, r.FormValue("priority"), int64(0)); err != nil {
 		return fmt.Errorf("parsing priority: %w", err)
 	}
-	if err := shttp.Parse(&b.Recurrence, ui.ParseDateCron, r.FormValue("recurrence"), date.Cron("*-*-01")); err != nil {
+	if err := shttp.Parse(&b.Recurrence, ui.ParseDateCron, r.FormValue("recurrence"), date.Cron("")); err != nil {
 		return fmt.Errorf("parsing recurrence: %w", err)
 	}
 	b.Enabled = r.FormValue("enabled") == "on"

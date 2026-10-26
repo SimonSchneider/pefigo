@@ -25,6 +25,12 @@ type Account struct {
 	UpdatedAt             time.Time
 }
 
+// hasCashFlow reports whether the account's interest is paid out on its cash-flow frequency, rather
+// than added to it every day.
+func (a Account) hasCashFlow() bool {
+	return a.CashFlowFrequency != "" || a.CashFlowDestinationID != ""
+}
+
 type AccountDetailed struct {
 	Account
 	LastSnapshot        *AccountSnapshot
@@ -66,7 +72,22 @@ func (s *Service) GetAccount(ctx context.Context, id string) (Account, error) {
 	return accountFromDB(acc), nil
 }
 
+// checkCashFlow rejects a cash flow the forecast can't pay out. Without a cash-flow frequency and
+// destination the account has none, but a destination needs a frequency to be paid out on.
+func (inp AccountInput) checkCashFlow() error {
+	if inp.CashFlowFrequency == "" {
+		if inp.CashFlowDestinationID != "" {
+			return fmt.Errorf("%w: a cash-flow destination needs a cash-flow frequency", ErrInvalidInput)
+		}
+		return nil
+	}
+	return checkDatePattern("cash-flow frequency", date.Cron(inp.CashFlowFrequency))
+}
+
 func (s *Service) UpsertAccount(ctx context.Context, inp AccountInput) (Account, error) {
+	if err := inp.checkCashFlow(); err != nil {
+		return Account{}, err
+	}
 	var (
 		q   = s.q
 		acc pdb.Account

@@ -89,10 +89,11 @@ type FullParentalLeave struct {
 
 func (s Salary) GenerateTransferTemplates() []TransferTemplate {
 	source := TransferTemplateSource{
-		Type:     "salary",
-		EntityID: s.ID,
-		Label:    s.Name,
-		EditURL:  "/salaries/" + s.ID + "/edit",
+		Type:          "salary",
+		EntityID:      s.ID,
+		Label:         s.Name,
+		EditURL:       "/salaries/" + s.ID + "/edit",
+		recurrenceRow: "salary " + s.ID,
 	}
 
 	var templates []TransferTemplate
@@ -199,7 +200,16 @@ func salaryAmountFromDB(a pdb.SalaryAmount) (SalaryAmount, error) {
 	}, nil
 }
 
+// DefaultSalaryRecurrence is the recurrence of a Salary saved without one: the 25th of every month.
+const DefaultSalaryRecurrence date.Cron = "*-*-25"
+
 func (s *Service) UpsertSalary(ctx context.Context, inp Salary) (Salary, error) {
+	if inp.Recurrence == "" {
+		inp.Recurrence = DefaultSalaryRecurrence
+	}
+	if err := checkDatePattern("salary recurrence", inp.Recurrence); err != nil {
+		return Salary{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}

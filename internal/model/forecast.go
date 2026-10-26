@@ -56,9 +56,15 @@ func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading transfer schedule: %w", err)
 	}
+	if err := schedule.checkRecurrences(); err != nil {
+		return nil, err
+	}
 	startDays, err := s.GetForecastStartDays(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if !validDatePattern(date.Cron(startDays)) {
+		return nil, fmt.Errorf("the stored Forecast Start Days %q are not a valid date pattern", startDays)
 	}
 	f := &forecast{
 		accounts:      accounts,
@@ -91,6 +97,9 @@ func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
 		growthModels[row.AccountID] = append(growthModels[row.AccountID], gm)
 	}
 	for _, acc := range accounts {
+		if acc.hasCashFlow() && !validDatePattern(date.Cron(acc.CashFlowFrequency)) {
+			return nil, fmt.Errorf("account %s has invalid cash-flow frequency %q", acc.ID, acc.CashFlowFrequency)
+		}
 		growth, err := growthModels[acc.ID].ToFinance()
 		if err != nil {
 			return nil, fmt.Errorf("loading the growth models of %s: %w", acc.Name, err)
@@ -121,7 +130,7 @@ func (f *forecast) entities(ucfg *uncertain.Config, day date.Date) []finance.Ent
 		if acc.BalanceUpperLimit != nil {
 			entity.BalanceLimit = finance.BalanceLimit{Upper: uncertain.NewFixed(*acc.BalanceUpperLimit)}
 		}
-		if acc.CashFlowFrequency != "" || acc.CashFlowDestinationID != "" {
+		if acc.hasCashFlow() {
 			entity.CashFlow = &finance.CashFlowModel{
 				Frequency:     date.Cron(acc.CashFlowFrequency),
 				DestinationID: acc.CashFlowDestinationID,

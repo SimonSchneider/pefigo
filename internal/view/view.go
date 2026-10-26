@@ -142,6 +142,13 @@ type (
 	BillEditView                     = model.BillEditView
 )
 
+// The recurrences a new Salary and Bill account are pre-filled with, the ones the Service saves when
+// none is given.
+const (
+	DefaultSalaryRecurrence      = model.DefaultSalaryRecurrence
+	DefaultBillAccountRecurrence = model.DefaultBillAccountRecurrence
+)
+
 const (
 	BalanceUnchanged BalanceChange = model.BalanceUnchanged
 	BalanceIncreased BalanceChange = model.BalanceIncreased

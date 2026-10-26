@@ -37,7 +37,7 @@ func seedBenchData(b *testing.B, svc *model.Service) {
 		b.Fatalf("seed account: %v", err)
 	}
 	names := []string{"Rent", "Groceries", "Gym", "Netflix", "Insurance", "Phone", "Internet", "Electricity", "Water", "Gas"}
-	recurrences := []string{"*-*-01", "*-*-15", "Mon *-*-*"}
+	recurrences := []string{"*-*-01", "*-*-15", "*-*/3-01"}
 	start, _ := date.ParseDate("2024-01-01")
 	for i := range 30 {
 		_, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{

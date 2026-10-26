@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 
+	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/internal/pdb"
 )
 
@@ -83,9 +83,8 @@ func (s *Service) GetForecastSnapshotInterval(ctx context.Context) (string, erro
 }
 
 func (s *Service) SetForecastSnapshotInterval(ctx context.Context, interval string) error {
-	parts := strings.Split(interval, "-")
-	if len(parts) != 3 {
-		return fmt.Errorf("snapshot interval must have format YEAR-MONTH-DAY (e.g. *-01-01), got %q", interval)
+	if err := checkDatePattern("forecast interval", date.Cron(interval)); err != nil {
+		return err
 	}
 	if err := s.q.UpsertSetting(ctx, pdb.UpsertSettingParams{
 		Key:   settingForecastSnapshotInterval,
@@ -110,9 +109,8 @@ func (s *Service) GetForecastStartDays(ctx context.Context) (string, error) {
 }
 
 func (s *Service) SetForecastStartDays(ctx context.Context, days string) error {
-	parts := strings.Split(days, "-")
-	if len(parts) != 3 {
-		return fmt.Errorf("forecast start days must have format YEAR-MONTH-DAY (e.g. *-*-28), got %q", days)
+	if err := checkDatePattern("forecast start days", date.Cron(days)); err != nil {
+		return err
 	}
 	if err := s.q.UpsertSetting(ctx, pdb.UpsertSettingParams{
 		Key:   settingForecastStartDays,

@@ -38,6 +38,18 @@ func (s *Service) TransferSchedule(ctx context.Context) (*TransferSchedule, erro
 	return &TransferSchedule{templates: all}, nil
 }
 
+// checkRecurrences fails on the first Transfer Template whose recurrence isn't a valid date pattern,
+// naming the stored row it is from. Only charging a day matches recurrences, so a Forecast checks them
+// when it loads, while listing the schedule shows them, to be fixed.
+func (ts *TransferSchedule) checkRecurrences() error {
+	for _, t := range ts.templates {
+		if !validDatePattern(t.Recurrence) {
+			return fmt.Errorf("%s has invalid recurrence %q", t.recurrenceRow(), t.Recurrence)
+		}
+	}
+	return nil
+}
+
 // ForecastTransfers returns the schedule for the forecast engine, which charges each Transfer Template
 // on the days TransferScheduleDay.Charged would.
 func (ts *TransferSchedule) ForecastTransfers() []finance.TransferTemplate {
