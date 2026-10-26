@@ -5,20 +5,11 @@ import (
 	"github.com/SimonSchneider/pefigo/pkg/uncertain"
 )
 
-type SnapshotRecorder interface {
-	OnSnapshot(accountID string, day date.Date, balance uncertain.Value) error
-}
-
-type SnapshotRecorderFunc func(accountID string, day date.Date, balance uncertain.Value) error
-
-func (f SnapshotRecorderFunc) OnSnapshot(accountID string, day date.Date, balance uncertain.Value) error {
-	return f(accountID, day, balance)
-}
-
-func EmptySnapshotRecorder() SnapshotRecorder {
-	return SnapshotRecorderFunc(func(accountID string, day date.Date, balance uncertain.Value) error {
-		return nil
-	})
+// ReportRecorder receives a Forecast's reports.
+type ReportRecorder interface {
+	// OnReport receives the balance of every entity at the end of a Forecast Interval day, by entity ID.
+	// The map is the recorder's to keep.
+	OnReport(day date.Date, balances map[string]uncertain.Value) error
 }
 
 type TransferRecorder interface {
@@ -37,20 +28,21 @@ func EmptyTransferRecorder() TransferRecorder {
 }
 
 type Recorder interface {
-	SnapshotRecorder
+	ReportRecorder
 	TransferRecorder
 }
 
+// CompositeRecorder is a Recorder made of a ReportRecorder and a TransferRecorder. Either may be nil.
 type CompositeRecorder struct {
-	SnapshotRecorder
+	ReportRecorder
 	TransferRecorder
 }
 
-func (r CompositeRecorder) OnSnapshot(accountID string, day date.Date, balance uncertain.Value) error {
-	if r.SnapshotRecorder == nil {
+func (r CompositeRecorder) OnReport(day date.Date, balances map[string]uncertain.Value) error {
+	if r.ReportRecorder == nil {
 		return nil
 	}
-	return r.SnapshotRecorder.OnSnapshot(accountID, day, balance)
+	return r.ReportRecorder.OnReport(day, balances)
 }
 
 func (r CompositeRecorder) OnTransfer(sourceAccountID, destinationAccountID string, day date.Date, amount uncertain.Value) error {

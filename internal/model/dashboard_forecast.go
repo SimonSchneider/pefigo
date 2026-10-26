@@ -1,10 +1,11 @@
 package model
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"runtime/debug"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -75,7 +76,7 @@ type ForecastTimer interface {
 	Stop() bool
 }
 
-// ForecastCompute computes a prediction. The Service implements it.
+// ForecastCompute computes a Forecast. The Service implements it.
 type ForecastCompute interface {
 	RunPrediction(ctx context.Context, handler PredictionEventHandler, params PredictionParams) error
 }
@@ -362,7 +363,7 @@ func (f *DashboardForecast) finish(ctx context.Context, err error) {
 	f.broadcastLocked(ForecastEvent{Type: ForecastEventDone})
 }
 
-// dashboardForecastHandler stores and emits each snapshot of a Forecast Run's prediction.
+// dashboardForecastHandler stores and emits each point of a Forecast Run's Forecast.
 type dashboardForecastHandler struct {
 	ctx context.Context
 	f   *DashboardForecast
@@ -383,9 +384,10 @@ func (h *dashboardForecastHandler) Close() error {
 	return nil
 }
 
-// dashboardForecastParams builds the prediction of a Forecast Run from the Forecast Settings: it
-// ends at the last Special Date, grouped by Account Type, without lower and upper bounds. ok is
-// false when no Special Date is after today, which leaves the Dashboard Forecast empty.
+// dashboardForecastParams builds the Forecast of a Forecast Run from the Forecast Settings: it runs
+// through the last Special Date, grouped by Account Type, without lower and upper bounds. ok is false
+// without a Special Date, which leaves the Dashboard Forecast empty. The Forecast is empty too when the
+// last Special Date is on or before the Forecast Start.
 func (s *Service) dashboardForecastParams(ctx context.Context) (params PredictionParams, ok bool, err error) {
 	specialDates, err := s.ListSpecialDates(ctx)
 	if err != nil {
@@ -394,14 +396,7 @@ func (s *Service) dashboardForecastParams(ctx context.Context) (params Predictio
 	if len(specialDates) == 0 {
 		return params, false, nil
 	}
-	sort.Slice(specialDates, func(i, j int) bool {
-		return specialDates[i].Date.Before(specialDates[j].Date)
-	})
-	endDate := specialDates[len(specialDates)-1].Date
-	today := date.Today()
-	if !endDate.After(today) {
-		return params, false, nil
-	}
+	last := slices.MaxFunc(specialDates, func(a, b SpecialDate) int { return cmp.Compare(a.Date, b.Date) }).Date
 
 	samples, err := s.GetForecastSamples(ctx)
 	if err != nil {
@@ -412,7 +407,7 @@ func (s *Service) dashboardForecastParams(ctx context.Context) (params Predictio
 		return params, false, fmt.Errorf("getting forecast snapshot interval: %w", err)
 	}
 	return PredictionParams{
-		Duration:         endDate.Sub(today),
+		Through:          last,
 		Samples:          samples,
 		SnapshotInterval: date.Cron(snapshotInterval),
 		GroupBy:          GroupByType,
@@ -453,8 +448,9 @@ type ForecastDashboardData struct {
 
 // GetDashboardForecastHistory returns a series for Uncategorized and every Account Type that has
 // Balance History or forecast points, in the order of the Account Types with Uncategorized last.
-// Forecast points are in rows, or still to come for an Account Type with an account the
-// prediction projects. A series holds its Balance History only: its forecast points are rows.
+// Forecast points are in rows, or still to come for every Account Type with an account when there
+// is a Forecast, which projects every account. A series holds its Balance History only: its
+// forecast points are rows.
 func (s *Service) GetDashboardForecastHistory(ctx context.Context, rows []ForecastCacheRow) (*ForecastDashboardData, error) {
 	accountTypes, err := s.ListAccountTypes(ctx)
 	if err != nil {

@@ -48,6 +48,11 @@ FROM account_snapshot
 WHERE account_id IN (sqlc.slice('ids'))
 ORDER BY date,
   account_id;
+-- name: ListSnapshots :many
+SELECT *
+FROM account_snapshot
+ORDER BY account_id,
+  date;
 -- name: GetSnapshot :one
 SELECT *
 FROM account_snapshot
@@ -169,19 +174,17 @@ ORDER BY s.date,
   a.type_id,
   s.account_id;
 -- name: ListProjectedAccountTypeIDs :many
--- Returns the type_id of every account a prediction projects: one with a snapshot, or a Startup
--- Share account. Accounts without a type have ''.
+-- Returns the type_id of every account when there is a Forecast, which projects every account: when
+-- an account other than a Startup Share account has a snapshot. Accounts without a type have ''.
 SELECT DISTINCT COALESCE(a.type_id, '') AS type_id
 FROM account a
 WHERE EXISTS (
     SELECT 1
     FROM account_snapshot s
-    WHERE s.account_id = a.id
-  )
-  OR EXISTS (
-    SELECT 1
-    FROM startup_share_account ssa
-    WHERE ssa.account_id = a.id
+    WHERE s.account_id NOT IN (
+        SELECT ssa.account_id
+        FROM startup_share_account ssa
+      )
   )
 ORDER BY type_id;
 -- name: ListStartupShareSnapshotHistory :many
@@ -281,6 +284,10 @@ RETURNING *;
 SELECT *
 FROM startup_share_account
 WHERE account_id = ?;
+-- name: ListStartupShareAccounts :many
+SELECT *
+FROM startup_share_account
+ORDER BY account_id;
 -- name: DeleteStartupShareAccount :exec
 DELETE FROM startup_share_account
 WHERE account_id = ?;
@@ -312,6 +319,12 @@ FROM share_change
 WHERE account_id = ?
 ORDER BY date ASC,
   id;
+-- name: ListAllShareChanges :many
+SELECT *
+FROM share_change
+ORDER BY account_id,
+  date,
+  id;
 -- name: DeleteShareChange :exec
 DELETE FROM share_change
 WHERE id = ?;
@@ -342,6 +355,12 @@ SELECT *
 FROM investment_round
 WHERE account_id = ?
 ORDER BY date DESC,
+  id;
+-- name: ListAllInvestmentRounds :many
+SELECT *
+FROM investment_round
+ORDER BY account_id,
+  date,
   id;
 -- name: GetLatestInvestmentRound :one
 SELECT *
@@ -384,6 +403,12 @@ SELECT *
 FROM startup_share_option
 WHERE account_id = ?
 ORDER BY grant_date,
+  id;
+-- name: ListAllStartupShareOptions :many
+SELECT *
+FROM startup_share_option
+ORDER BY account_id,
+  grant_date,
   id;
 -- name: DeleteStartupShareOption :exec
 DELETE FROM startup_share_option

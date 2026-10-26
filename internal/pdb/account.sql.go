@@ -767,6 +767,126 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]Account, error) {
 	return items, nil
 }
 
+const listAllInvestmentRounds = `-- name: ListAllInvestmentRounds :many
+SELECT id, account_id, date, valuation, created_at, updated_at, pre_money_shares, investment
+FROM investment_round
+ORDER BY account_id,
+  date,
+  id
+`
+
+func (q *Queries) ListAllInvestmentRounds(ctx context.Context) ([]InvestmentRound, error) {
+	rows, err := q.db.QueryContext(ctx, listAllInvestmentRounds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InvestmentRound
+	for rows.Next() {
+		var i InvestmentRound
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.Date,
+			&i.Valuation,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PreMoneyShares,
+			&i.Investment,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllShareChanges = `-- name: ListAllShareChanges :many
+SELECT id, account_id, date, delta_shares, total_price, created_at, updated_at
+FROM share_change
+ORDER BY account_id,
+  date,
+  id
+`
+
+func (q *Queries) ListAllShareChanges(ctx context.Context) ([]ShareChange, error) {
+	rows, err := q.db.QueryContext(ctx, listAllShareChanges)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ShareChange
+	for rows.Next() {
+		var i ShareChange
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.Date,
+			&i.DeltaShares,
+			&i.TotalPrice,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllStartupShareOptions = `-- name: ListAllStartupShareOptions :many
+SELECT id, account_id, source_account_id, shares, strike_price_per_share, grant_date, end_date, created_at, updated_at
+FROM startup_share_option
+ORDER BY account_id,
+  grant_date,
+  id
+`
+
+func (q *Queries) ListAllStartupShareOptions(ctx context.Context) ([]StartupShareOption, error) {
+	rows, err := q.db.QueryContext(ctx, listAllStartupShareOptions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []StartupShareOption
+	for rows.Next() {
+		var i StartupShareOption
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.SourceAccountID,
+			&i.Shares,
+			&i.StrikePricePerShare,
+			&i.GrantDate,
+			&i.EndDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listGrowthModels = `-- name: ListGrowthModels :many
 SELECT id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at
 FROM growth_model
@@ -887,18 +1007,16 @@ FROM account a
 WHERE EXISTS (
     SELECT 1
     FROM account_snapshot s
-    WHERE s.account_id = a.id
-  )
-  OR EXISTS (
-    SELECT 1
-    FROM startup_share_account ssa
-    WHERE ssa.account_id = a.id
+    WHERE s.account_id NOT IN (
+        SELECT ssa.account_id
+        FROM startup_share_account ssa
+      )
   )
 ORDER BY type_id
 `
 
-// Returns the type_id of every account a prediction projects: one with a snapshot, or a Startup
-// Share account. Accounts without a type have ”.
+// Returns the type_id of every account when there is a Forecast, which projects every account: when
+// an account other than a Startup Share account has a snapshot. Accounts without a type have ”.
 func (q *Queries) ListProjectedAccountTypeIDs(ctx context.Context) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listProjectedAccountTypeIDs)
 	if err != nil {
@@ -996,6 +1114,65 @@ func (q *Queries) ListSnapshotHistoryWithType(ctx context.Context) ([]ListSnapsh
 			&i.Balance,
 			&i.TypeID,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSnapshots = `-- name: ListSnapshots :many
+SELECT account_id, date, balance
+FROM account_snapshot
+ORDER BY account_id,
+  date
+`
+
+func (q *Queries) ListSnapshots(ctx context.Context) ([]AccountSnapshot, error) {
+	rows, err := q.db.QueryContext(ctx, listSnapshots)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AccountSnapshot
+	for rows.Next() {
+		var i AccountSnapshot
+		if err := rows.Scan(&i.AccountID, &i.Date, &i.Balance); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStartupShareAccounts = `-- name: ListStartupShareAccounts :many
+SELECT account_id, tax_rate, valuation_discount_factor
+FROM startup_share_account
+ORDER BY account_id
+`
+
+func (q *Queries) ListStartupShareAccounts(ctx context.Context) ([]StartupShareAccount, error) {
+	rows, err := q.db.QueryContext(ctx, listStartupShareAccounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []StartupShareAccount
+	for rows.Next() {
+		var i StartupShareAccount
+		if err := rows.Scan(&i.AccountID, &i.TaxRate, &i.ValuationDiscountFactor); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

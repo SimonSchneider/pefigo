@@ -138,20 +138,22 @@ type StartupGrowth struct {
 	PurchasePricePerShare uncertain.Value
 
 	InvestmentRounds map[date.Date]StartupGrowthInvestmentRound
-	ShareChanges     map[date.Date]StartupGrowthShareChange
-	Options          map[date.Date]StartupGrowthOption
+	// ShareChanges and Options are applied on their day, in order.
+	ShareChanges map[date.Date][]StartupGrowthShareChange
+	Options      map[date.Date][]StartupGrowthOption
 }
 
 func (s *StartupGrowth) Apply(ucfg *uncertain.Config, day date.Date, entities map[string]*ModeledEntity, totalBalance uncertain.Value) uncertain.Value {
 	var changed bool
-	if round, ok := s.InvestmentRounds[day]; ok {
+	// A round without pre-money shares or a price per share is ignored.
+	if round, ok := s.InvestmentRounds[day]; ok && round.PreMoneyShares.Mean() > 0 && round.PreMoneyValuation.Mean() > 0 {
 		pricePerShare := round.PreMoneyValuation.Div(ucfg, round.PreMoneyShares)
 		issuedShares := round.Investment.Div(ucfg, pricePerShare)
 		s.TotalShares = round.PreMoneyShares.Add(ucfg, issuedShares)
 		s.Valuation = round.PreMoneyValuation.Add(ucfg, round.Investment)
 		changed = true
 	}
-	if sc, ok := s.ShareChanges[day]; ok {
+	for _, sc := range s.ShareChanges[day] {
 		prevOwned := s.OwnedShares
 		s.OwnedShares = s.OwnedShares.Add(ucfg, sc.DeltaShares)
 		if sc.DeltaShares.Mean() > 0 {
@@ -161,7 +163,7 @@ func (s *StartupGrowth) Apply(ucfg *uncertain.Config, day date.Date, entities ma
 		}
 		changed = true
 	}
-	if opt, ok := s.Options[day]; ok {
+	for _, opt := range s.Options[day] {
 		sourceAccount, ok := entities[opt.SourceAccountID]
 		if !ok {
 			panic(fmt.Sprintf("no account found for %s", opt.SourceAccountID))
@@ -182,7 +184,17 @@ func (s *StartupGrowth) Apply(ucfg *uncertain.Config, day date.Date, entities ma
 	return uncertain.NewFixed(0.0)
 }
 
+// hasPricePerShare reports whether the shares are valued by an investment round with shares and a price per share.
+func (s *StartupGrowth) hasPricePerShare() bool {
+	return s.TotalShares.Mean() > 0 && s.Valuation.Mean() > 0
+}
+
+// Balance is the value of the owned shares after the discount and the tax on capital gains. It is 0
+// without an investment round with shares and a price per share.
 func (s *StartupGrowth) Balance(ucfg *uncertain.Config) uncertain.Value {
+	if !s.hasPricePerShare() {
+		return uncertain.NewFixed(0.0)
+	}
 	fractionOwned := s.OwnedShares.Div(ucfg, s.TotalShares)
 	grossValue := s.Valuation.Mul(ucfg, fractionOwned)
 	discountedGrossValue := grossValue.Mul(ucfg, s.DiscountFactor)

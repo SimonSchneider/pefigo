@@ -301,11 +301,13 @@ func TestDashboardForecastHistoryHasASeriesForEveryAccountTypeTheForecastProject
 	if _, err := svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: startup.ID, TaxRate: 0, ValuationDiscountFactor: 1}); err != nil {
 		t.Fatalf("create startup share account: %v", err)
 	}
-	mustTypedAccount(t, svc, "Not recorded yet", mustAccountType(t, svc, "Empty", "#00ffff").ID)
+	empty := mustAccountType(t, svc, "Empty", "#00ffff")
+	mustTypedAccount(t, svc, "Not recorded yet", empty.ID)
+	mustAccountType(t, svc, "Unused", "#ffff00")
 	mustSnapshot(t, svc, mustAccount(t, svc, "No type").ID, future, 500)
 
-	// No Forecast Run has stored rows yet, but the prediction projects these accounts: their series
-	// must exist before the first live forecast point arrives.
+	// No Forecast Run has stored rows yet, but a Forecast projects every account: the series of each
+	// Account Type with an account must exist before the first live forecast point arrives.
 	data := dashboardForecastHistory(t, svc, nil)
 
 	var ids []string
@@ -313,7 +315,40 @@ func TestDashboardForecastHistoryHasASeriesForEveryAccountTypeTheForecastProject
 		expectHistory(t, s, []model.BalancePoint{})
 		ids = append(ids, s.ID)
 	}
-	if want := []string{equity.ID, pension.ID, ""}; !slices.Equal(ids, want) {
-		t.Fatalf("expected series for Equity, Pension and Uncategorized only (%v), got %+v", want, data.Series)
+	if want := []string{empty.ID, equity.ID, pension.ID, ""}; !slices.Equal(ids, want) {
+		t.Fatalf("expected series for Empty, Equity, Pension and Uncategorized only (%v), got %+v", want, data.Series)
 	}
+}
+
+func TestDashboardForecastHistoryHasNoSeriesToProjectWithoutAForecast(t *testing.T) {
+	svc := newTestService(t)
+	equity := mustAccountType(t, svc, "Equity", "#ff00ff")
+	startup := mustTypedAccount(t, svc, "Startup", equity.ID)
+	if _, err := svc.UpsertStartupShareAccount(t.Context(), model.StartupShareAccountInput{AccountID: startup.ID, TaxRate: 0, ValuationDiscountFactor: 1}); err != nil {
+		t.Fatalf("create startup share account: %v", err)
+	}
+	// A Snapshot of a Startup Share account doesn't count, so there is no Forecast.
+	mustSnapshot(t, svc, startup.ID, date.Today().Add(30*date.Day), 1000)
+	mustTypedAccount(t, svc, "Not recorded yet", mustAccountType(t, svc, "Empty", "#00ffff").ID)
+
+	if data := dashboardForecastHistory(t, svc, nil); len(data.Series) != 0 {
+		t.Fatalf("expected no series without a Forecast, got %+v", data.Series)
+	}
+}
+
+func TestDashboardForecastHistoryIgnoresSnapshotsOnAStartupShareAccount(t *testing.T) {
+	svc := newTestService(t)
+	equity := mustAccountType(t, svc, "Equity", "#ff00ff")
+	startup := mustTypedAccount(t, svc, "Startup", equity.ID)
+	mustStartupShareAccount(t, svc, startup.ID,
+		[]model.InvestmentRoundInput{{Date: mustParseDate("2025-01-01"), Valuation: 1e6, PreMoneyShares: 1000}},
+		[]model.ShareChangeInput{{Date: mustParseDate("2025-01-01"), DeltaShares: 10, TotalPrice: 100}},
+	)
+	mustSnapshot(t, svc, startup.ID, mustParseDate("2025-03-01"), 777)
+	mustSnapshot(t, svc, mustTypedAccount(t, svc, "Savings", mustAccountType(t, svc, "Savings", "#00ff00").ID).ID, mustParseDate("2025-01-15"), 1000)
+
+	data := dashboardForecastHistory(t, svc, nil)
+
+	// Valued as derived on the regular Snapshot's day, the Forecast Start, and not after it.
+	expectHistory(t, seriesByID(data)[equity.ID], points(mustParseDate("2025-01-15"), 10000.0))
 }

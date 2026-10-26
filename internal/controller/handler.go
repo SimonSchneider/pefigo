@@ -1050,6 +1050,12 @@ func (h *Handler) forecastSettingsSave() http.Handler {
 				return fmt.Errorf("setting forecast snapshot interval: %w", err)
 			}
 		}
+		startDays := r.FormValue("start_days")
+		if startDays != "" {
+			if err := h.svc.SetForecastStartDays(ctx, startDays); err != nil {
+				return fmt.Errorf("setting forecast start days: %w", err)
+			}
+		}
 		shttp.RedirectToNext(w, r, "/settings?tab=forecast")
 		return nil
 	})

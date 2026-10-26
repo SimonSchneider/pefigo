@@ -166,7 +166,7 @@ func ChartControls(p PredictionParams) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" min=\"0\" max=\"1\" step=\"0.1\" class=\"input input-bordered w-24\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Snapshot Interval</span></label> <input type=\"text\" name=\"snapshot_interval\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" min=\"0\" max=\"1\" step=\"0.1\" class=\"input input-bordered w-24\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Forecast interval</span></label> <input type=\"text\" name=\"snapshot_interval\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

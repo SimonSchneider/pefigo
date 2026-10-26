@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -355,15 +356,16 @@ func TestDashboardForecastRunWithTheServiceStoresTheForecast(t *testing.T) {
 	expectSameRows(t, subscribe(t, svc).Rows, streamed)
 }
 
-func TestDashboardForecastRunPredictsUntilTheLastSpecialDate(t *testing.T) {
+func TestDashboardForecastRunForecastsThroughTheLastSpecialDate(t *testing.T) {
 	var got []model.PredictionParams
 	svc, timers := newForecastTestService(t, computeFunc(func(_ context.Context, _ model.PredictionEventHandler, params model.PredictionParams) error {
 		got = append(got, params)
 		return nil
 	}))
 	ctx := t.Context()
-	last := date.Today().Add(3 * date.Year)
-	for _, d := range []date.Date{date.Today().Add(date.Year), last, date.Today().Add(-date.Year)} {
+	// Whether a Special Date is after the Forecast Start is up to the Forecast, not today.
+	last := mustParseDate("2045-06-01")
+	for _, d := range []date.Date{mustParseDate("2030-01-01"), last, mustParseDate("2020-01-01")} {
 		if _, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{Name: d.String(), Date: d}); err != nil {
 			t.Fatalf("create special date: %v", err)
 		}
@@ -372,19 +374,19 @@ func TestDashboardForecastRunPredictsUntilTheLastSpecialDate(t *testing.T) {
 		t.Fatalf("set forecast samples: %v", err)
 	}
 	if err := svc.SetForecastSnapshotInterval(ctx, "*-*-15"); err != nil {
-		t.Fatalf("set forecast snapshot interval: %v", err)
+		t.Fatalf("set forecast interval: %v", err)
 	}
 	startForecast(svc)
 	timers.fire()
 
 	want := model.PredictionParams{
-		Duration:         last.Sub(date.Today()),
+		Through:          last,
 		Samples:          123,
 		SnapshotInterval: date.Cron("*-*-15"),
 		GroupBy:          model.GroupByType,
 	}
 	if len(got) != 1 || got[0] != want {
-		t.Fatalf("expected one prediction with %+v, got %+v", want, got)
+		t.Fatalf("expected one Forecast with %+v, got %+v", want, got)
 	}
 }
 
@@ -422,22 +424,29 @@ func TestDashboardForecastRunWithoutSpecialDatesClearsTheForecast(t *testing.T) 
 	}
 }
 
-func TestDashboardForecastRunWithOnlyPastSpecialDatesClearsTheForecast(t *testing.T) {
-	computed := 0
-	svc, timers := newForecastTestService(t, computeFunc(func(ctx context.Context, h model.PredictionEventHandler, p model.PredictionParams) error {
-		computed++
-		return emittingCompute(3, nil)(ctx, h, p)
-	}))
+func TestDashboardForecastRunWithOnlySpecialDatesOnOrBeforeTheForecastStartClearsTheForecast(t *testing.T) {
+	svc, timers := newForecastTestService(t, nil)
 	ctx := t.Context()
-	sd := addFutureSpecialDate(t, svc)
-	startForecast(svc)
-	storeForecastRows(t, svc, timers, 3)
-
-	if _, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{ID: sd.ID, Name: sd.Name, Date: date.Today()}); err != nil {
-		t.Fatalf("move special date to today: %v", err)
+	start := mustParseDate("2026-01-01")
+	mustSnapshot(t, svc, mustAccount(t, svc, "Checking").ID, start, 1000)
+	if err := svc.SetForecastSnapshotInterval(ctx, "*-*-01"); err != nil {
+		t.Fatalf("set forecast interval: %v", err)
 	}
-	if _, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{Name: "Graduation", Date: date.Today().Add(-date.Year)}); err != nil {
-		t.Fatalf("create past special date: %v", err)
+	sd, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{Name: "Retirement", Date: mustParseDate("2027-01-01")})
+	if err != nil {
+		t.Fatalf("create special date: %v", err)
+	}
+	startForecast(svc)
+	timers.fire()
+	if rows := subscribe(t, svc).Rows; len(rows) != 13 {
+		t.Fatalf("expected a row on the first of every month through the Special Date, got %v", rows)
+	}
+
+	if _, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{ID: sd.ID, Name: sd.Name, Date: start}); err != nil {
+		t.Fatalf("move special date to the Forecast Start: %v", err)
+	}
+	if _, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{Name: "Graduation", Date: start.Add(-date.Year)}); err != nil {
+		t.Fatalf("create earlier special date: %v", err)
 	}
 	sub := subscribe(t, svc)
 	timers.fire()
@@ -445,9 +454,6 @@ func TestDashboardForecastRunWithOnlyPastSpecialDatesClearsTheForecast(t *testin
 	expectEventTypes(t, received(sub.Events), model.ForecastEventStarted, model.ForecastEventDone)
 	if rows := subscribe(t, svc).Rows; len(rows) != 0 {
 		t.Fatalf("expected the Dashboard Forecast to be empty, got %v", rows)
-	}
-	if computed != 1 {
-		t.Fatalf("expected no prediction when every Special Date is past, got %d predictions in total", computed)
 	}
 }
 
@@ -509,42 +515,63 @@ func TestDashboardForecastSubscribeAfterFailedRunReturnsTheFailure(t *testing.T)
 	}
 }
 
-// TestDashboardForecastRunFailsOnCashFlowToAccountWithoutSnapshots is the setup from issue #130, which
-// panics in the simulation. The Forecast Run must end Failed instead of crashing.
-func TestDashboardForecastRunFailsOnCashFlowToAccountWithoutSnapshots(t *testing.T) {
+// TestDashboardForecastRunPaysInterestIntoAnAccountWithoutASnapshot is the setup from issue #130,
+// which used to fail the Forecast Run. Every account takes part in a Forecast, so the interest lands
+// in the account without a Snapshot.
+func TestDashboardForecastRunPaysInterestIntoAnAccountWithoutASnapshot(t *testing.T) {
 	svc, timers := newForecastTestService(t, nil)
 	ctx := t.Context()
-	destination, err := svc.UpsertAccount(ctx, model.AccountInput{Name: "No snapshots"})
-	if err != nil {
-		t.Fatalf("create destination account: %v", err)
-	}
-	acc, err := svc.UpsertAccount(ctx, model.AccountInput{Name: "Savings", CashFlowFrequency: "*-*-01", CashFlowDestinationID: destination.ID})
+	interestType := mustAccountType(t, svc, "Interest", "#ff0000")
+	savingsType := mustAccountType(t, svc, "Savings", "#00ff00")
+	destination := mustTypedAccount(t, svc, "No snapshots", interestType.ID)
+	acc, err := svc.UpsertAccount(ctx, model.AccountInput{Name: "Savings", TypeID: savingsType.ID, CashFlowFrequency: "*-*-01", CashFlowDestinationID: destination.ID})
 	if err != nil {
 		t.Fatalf("create account: %v", err)
 	}
-	if _, err := svc.UpsertAccountSnapshot(ctx, acc.ID, model.AccountSnapshotInput{Date: mustParseDate("2026-01-01"), Balance: newFixedValue(10000)}); err != nil {
-		t.Fatalf("create snapshot: %v", err)
-	}
+	mustSnapshot(t, svc, acc.ID, mustParseDate("2026-01-01"), 10000)
 	if _, err := svc.UpsertAccountGrowthModel(ctx, model.AccountGrowthModelInput{
 		AccountID: acc.ID, Type: "fixed", AnnualRate: newFixedValue(0.05), AnnualVolatility: newFixedValue(0), StartDate: mustParseDate("2026-01-01"),
 	}); err != nil {
 		t.Fatalf("create growth model: %v", err)
 	}
-	addFutureSpecialDate(t, svc)
-	logger := startForecast(svc)
+	if err := svc.SetForecastSnapshotInterval(ctx, "*-*-02"); err != nil {
+		t.Fatalf("set forecast interval: %v", err)
+	}
+	if _, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{Name: "Retirement", Date: mustParseDate("2026-02-02")}); err != nil {
+		t.Fatalf("create special date: %v", err)
+	}
+	startForecast(svc)
 
 	sub := subscribe(t, svc)
 	timers.fire()
 
 	got := received(sub.Events)
-	if len(got) < 2 || got[0].Type != model.ForecastEventStarted || got[len(got)-1].Type != model.ForecastEventFailed {
-		t.Fatalf("expected Started, then Failed, got %v", eventTypes(got))
+	if len(got) < 2 || got[0].Type != model.ForecastEventStarted || got[len(got)-1].Type != model.ForecastEventDone {
+		t.Fatalf("expected Started, forecast points, then Done, got %v", eventTypes(got))
 	}
-	if msg := got[len(got)-1].Message; !strings.Contains(msg, destination.ID) {
-		t.Fatalf("expected the Failed message to name the destination account, got %q", msg)
+	// The Forecast Start's interest is paid out on it, then January's on February 1.
+	daily := math.Pow(1.05, 1.0/365) - 1
+	interest := map[string]float64{
+		"2026-01-02": 10000 * daily,
+		"2026-02-02": 10000*daily + 10000*(math.Pow(1+daily, 31)-1),
 	}
-	if !strings.Contains(logger.String(), destination.ID) {
-		t.Fatalf("expected the panic to be logged, got %q", logger.String())
+	rows := subscribe(t, svc).Rows
+	if len(rows) != 4 {
+		t.Fatalf("expected a row per Account Type on 2026-01-02 and 2026-02-02, got %v", rows)
+	}
+	for _, row := range rows {
+		switch row.AccountTypeID {
+		case savingsType.ID:
+			if row.Balance != 10000 {
+				t.Errorf("expected the savings to keep 10000 on %s, got %f", row.Date, row.Balance)
+			}
+		case interestType.ID:
+			if want := interest[row.Date.String()]; math.Abs(row.Balance-want) > 1e-6 {
+				t.Errorf("expected the interest %f in the account without a Snapshot on %s, got %f", want, row.Date, row.Balance)
+			}
+		default:
+			t.Errorf("unexpected row %+v", row)
+		}
 	}
 }
 

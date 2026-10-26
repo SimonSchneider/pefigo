@@ -141,6 +141,9 @@ func forecastInputMutations() []forecastInputMutation {
 		{"SetForecastSnapshotInterval", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.SetForecastSnapshotInterval(ctx, "*-*-01")
 		}},
+		{"SetForecastStartDays", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return svc.SetForecastStartDays(ctx, "*-*-28")
+		}},
 		// snapshot.go
 		{"UpsertAccountSnapshot", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return discard(svc.UpsertAccountSnapshot(ctx, ids.account, model.AccountSnapshotInput{Date: mustParseDate("2026-02-01"), Balance: newFixedValue(2000)}))

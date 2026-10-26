@@ -2,8 +2,6 @@ package model
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
@@ -147,13 +145,12 @@ func accountsListFromDB(dbAccs []pdb.Account) []Account {
 	return accs
 }
 
-func accountsListFromDBDetailed(dbAccs []pdb.Account, snapshots map[string]pdb.AccountSnapshot, growthModels map[string]pdb.GrowthModel, startupShareAccounts map[string]pdb.StartupShareAccount) []AccountDetailed {
+func accountsListFromDBDetailed(dbAccs []pdb.Account, snapshots map[string]AccountSnapshot, growthModels map[string]pdb.GrowthModel, startupShareAccounts map[string]StartupShareAccount) []AccountDetailed {
 	accs := make([]AccountDetailed, len(dbAccs))
 	for i := range dbAccs {
 		accs[i].Account = accountFromDB(dbAccs[i])
 		if snapshot, ok := snapshots[accs[i].ID]; ok {
-			s := accountSnapshotFromDB(snapshot)
-			accs[i].LastSnapshot = &s
+			accs[i].LastSnapshot = &snapshot
 		}
 		if gm, ok := growthModels[accs[i].ID]; ok {
 			gmd, err := growthModelFromDB(gm)
@@ -163,11 +160,23 @@ func accountsListFromDBDetailed(dbAccs []pdb.Account, snapshots map[string]pdb.A
 			accs[i].GrowthModel = &gmd
 		}
 		if ssa, ok := startupShareAccounts[accs[i].ID]; ok {
-			ssaCore := startupShareAccountFromDB(ssa)
-			accs[i].StartupShareAccount = &ssaCore
+			accs[i].StartupShareAccount = &ssa
 		}
 	}
 	return accs
+}
+
+// latestSnapshots returns the latest Snapshot of every account with one, keyed by account ID.
+func (s *Service) latestSnapshots(ctx context.Context) (map[string]AccountSnapshot, error) {
+	rows, err := s.q.ListLatestSnapshotPerAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	snapshots := make(map[string]AccountSnapshot, len(rows))
+	for _, row := range rows {
+		snapshots[row.AccountID] = accountSnapshotFromDB(row)
+	}
+	return snapshots, nil
 }
 
 func (s *Service) ListAccounts(ctx context.Context) ([]Account, error) {
@@ -186,82 +195,47 @@ func (s *Service) ListBudgetAccounts(ctx context.Context, today date.Date) ([]Ac
 	if len(budgetAccs) == 0 {
 		return nil, nil
 	}
-	snapshots, err := s.q.ListLatestSnapshotPerAccount(ctx)
+	snapshots, err := s.latestSnapshots(ctx)
 	if err != nil {
 		return nil, err
-	}
-	snapshotsMap := make(map[string]pdb.AccountSnapshot)
-	for _, snapshot := range snapshots {
-		snapshotsMap[snapshot.AccountID] = snapshot
 	}
 	growthModelsMap, err := s.growthModelsAppliedOn(ctx, today)
 	if err != nil {
 		return nil, err
 	}
-	return accountsListFromDBDetailed(budgetAccs, snapshotsMap, growthModelsMap, nil), nil
+	return accountsListFromDBDetailed(budgetAccs, snapshots, growthModelsMap, nil), nil
 }
 
+// ListAccountsDetailed returns every account with its latest Snapshot and the growth model applied on
+// today. A Startup Share account without Snapshots shows its derived balance on today instead,
+// dated on the investment round it is valued by.
 func (s *Service) ListAccountsDetailed(ctx context.Context, today date.Date) ([]AccountDetailed, error) {
 	accs, err := s.q.ListAccounts(ctx)
 	if err != nil {
 		return nil, err
 	}
-	snapshots, err := s.q.ListLatestSnapshotPerAccount(ctx)
+	snapshots, err := s.latestSnapshots(ctx)
 	if err != nil {
 		return nil, err
-	}
-	snapshotsMap := make(map[string]pdb.AccountSnapshot)
-	for _, snapshot := range snapshots {
-		snapshotsMap[snapshot.AccountID] = snapshot
 	}
 	growthModelsMap, err := s.growthModelsAppliedOn(ctx, today)
 	if err != nil {
 		return nil, err
 	}
-	startupShareAccountsMap := make(map[string]pdb.StartupShareAccount)
+	startupShares, err := s.listStartupShares(ctx)
+	if err != nil {
+		return nil, err
+	}
+	startupShareAccounts := make(map[string]StartupShareAccount, len(startupShares))
 	ucfg := uncertain.NewConfig(time.Now().UnixMilli(), 1)
-	for _, acc := range accs {
-		ssa, err := s.q.GetStartupShareAccount(ctx, acc.ID)
-		if err != nil {
-			if err != sql.ErrNoRows {
-				return nil, fmt.Errorf("failed to get startup share account: %w", err)
-			}
+	for accountID, ss := range startupShares {
+		startupShareAccounts[accountID] = ss.StartupShareAccount
+		if _, hasSnapshot := snapshots[accountID]; hasSnapshot {
 			continue
 		}
-		startupShareAccountsMap[acc.ID] = ssa
-		if _, hasSnapshot := snapshotsMap[acc.ID]; !hasSnapshot {
-			round, err := s.GetLatestInvestmentRound(ctx, acc.ID, today)
-			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					continue
-				}
-				return nil, fmt.Errorf("failed to get latest investment round for account %s: %w", acc.ID, err)
-			}
-			postMoneyValuation, postMoneyShares := PostMoneyValuationAndShares(round.Valuation, round.PreMoneyShares, round.Investment)
-			changes, err := s.ListShareChanges(ctx, acc.ID)
-			if err != nil {
-				return nil, fmt.Errorf("listing share changes for account %s: %w", acc.ID, err)
-			}
-			sharesOwned, avgPurchasePrice := DeriveShareState(changes, today)
-			balance := CalculateStartupShareBalance(
-				ucfg,
-				uncertain.NewFixed(postMoneyValuation),
-				sharesOwned,
-				avgPurchasePrice,
-				ssa.TaxRate,
-				postMoneyShares,
-				ssa.ValuationDiscountFactor,
-			)
-			encoded, err := balance.Encode()
-			if err != nil {
-				return nil, fmt.Errorf("encoding startup share balance: %w", err)
-			}
-			snapshotsMap[acc.ID] = pdb.AccountSnapshot{
-				AccountID: acc.ID,
-				Date:      int64(round.Date),
-				Balance:   encoded,
-			}
+		if round := ss.latestRoundOn(today); round != nil {
+			snapshots[accountID] = AccountSnapshot{AccountID: accountID, Date: round.Date, Balance: ss.growthOn(today).Balance(ucfg)}
 		}
 	}
-	return accountsListFromDBDetailed(accs, snapshotsMap, growthModelsMap, startupShareAccountsMap), nil
+	return accountsListFromDBDetailed(accs, snapshots, growthModelsMap, startupShareAccounts), nil
 }

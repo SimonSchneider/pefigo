@@ -20,7 +20,7 @@ type TransfersView struct {
 
 	TransfersReady      bool
 	IncompleteTransfers bool
-	Accounts            map[string]Account
+	Accounts            map[string]Account // every account, by ID
 	Transfers           []Transfer
 }
 
@@ -30,14 +30,17 @@ type Transfer struct {
 	Amount        float64
 }
 
+// ComputeTransfersView computes the Transfers page on day. Once every amount it needs is entered, it
+// charges day's Transfers with every account at its Starting Balance on day, modelled as in a
+// Forecast that starts on day.
 func (s *Service) ComputeTransfersView(ctx context.Context, day date.Date, amounts map[string]float64) (*TransfersView, error) {
 	view := &TransfersView{Day: day}
-	schedule, err := s.TransferSchedule(ctx)
+	f, err := s.loadForecast(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("loading transfer schedule: %w", err)
+		return nil, fmt.Errorf("loading the Forecast: %w", err)
 	}
 	view.TransfersReady = false
-	for _, t := range schedule.On(day).Charged() {
+	for _, t := range f.schedule.On(day).Charged() {
 		if t.AmountType == "fixed" && t.AmountFixed.Distribution != uncertain.DistFixed {
 			amount, ok := amounts[t.ID]
 			if ok {
@@ -51,40 +54,8 @@ func (s *Service) ComputeTransfersView(ctx context.Context, day date.Date, amoun
 	}
 	if view.TransfersReady {
 		ucfg := uncertain.NewConfig(time.Now().UnixMilli(), 1)
-		transfers := make([]finance2.TransferTemplate, 0)
-		entities := make([]finance2.Entity, 0)
-		accounts, err := s.ListAccountsDetailed(ctx, day)
-		if err != nil {
-			return nil, fmt.Errorf("listing accounts: %w", err)
-		}
-		view.Accounts = make(map[string]Account)
-		for _, a := range accounts {
-			if a.StartupShareAccount != nil {
-				continue
-			}
-			if a.LastSnapshot == nil {
-				continue
-			}
-
-			view.Accounts[a.ID] = a.Account
-			ul := uncertain.Value{}
-			if a.BalanceUpperLimit != nil {
-				ul = uncertain.NewFixed(*a.BalanceUpperLimit)
-			}
-			entity := finance2.Entity{
-				ID:   a.ID,
-				Name: a.Name,
-				BalanceLimit: finance2.BalanceLimit{
-					Upper: ul,
-				},
-				Snapshots: []finance2.BalanceSnapshot{a.LastSnapshot.ToFinance()},
-			}
-			if a.GrowthModel != nil {
-				entity.GrowthModel = GrowthModels([]GrowthModel{*a.GrowthModel}).ToFinance()
-			}
-			entities = append(entities, entity)
-		}
-
+		view.Accounts = KeyBy(f.accounts, func(a Account) string { return a.ID })
+		transfers := make([]finance2.TransferTemplate, 0, len(view.TransferTemplatesThatNeedAmount)+len(view.TransferTemplates))
 		for _, t := range view.TransferTemplatesThatNeedAmount {
 			ft := t.TransferTemplate.ToFinanceTransferTemplate()
 			ft.AmountFixed.Amount = uncertain.NewFixed(t.Amount)
@@ -106,8 +77,9 @@ func (s *Service) ComputeTransfersView(ctx context.Context, day date.Date, amoun
 			})
 			return nil
 		})
-		if err := finance2.RunPrediction(ctx, ucfg, day, day.Add(1*date.Day), date.Cron(day.String()), entities, transfers, finance2.CompositeRecorder{TransferRecorder: transferRecorder}); err != nil {
-			return nil, fmt.Errorf("running prediction for SSE: %w", err)
+		// Only day's Transfers are charged: the Forecast isn't run up to day.
+		if err := finance2.RunForecast(ctx, ucfg, day, day.Add(date.Day), date.Cron(day.String()), f.entities(ucfg, day), transfers, finance2.CompositeRecorder{TransferRecorder: transferRecorder}); err != nil {
+			return nil, fmt.Errorf("charging the transfers on %s: %w", day, err)
 		}
 	}
 	view.Transfers = SimplifyTransfers(view.Transfers)

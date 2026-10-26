@@ -3,6 +3,8 @@ package finance_test
 import (
 	"context"
 	"fmt"
+	"maps"
+	"math"
 	"testing"
 	"time"
 
@@ -47,6 +49,14 @@ func withLogNormGrowth(annualRate, annualVolatility uncertain.Value) func(*finan
 		acc.GrowthModel = &finance2.LogNormalGrowth{
 			AnnualRate:       annualRate,
 			AnnualVolatility: annualVolatility,
+		}
+	}
+}
+
+func withFixedGrowth(annualRate uncertain.Value) func(*finance2.Entity) {
+	return func(acc *finance2.Entity) {
+		acc.GrowthModel = &finance2.FixedGrowth{
+			AnnualRate: annualRate,
 		}
 	}
 }
@@ -106,17 +116,12 @@ func mks[T any](accounts ...T) []T {
 }
 
 func runPredict(ctx context.Context, accounts []finance2.Entity, transfers []finance2.TransferTemplate) (map[string]uncertain.Value, error) {
-	m := make(map[string]finance2.BalanceSnapshot)
-	snapshotRecorder := finance2.SnapshotRecorderFunc(func(accountID string, day date.Date, balance uncertain.Value) error {
-		if s, ok := m[accountID]; !ok || s.Date < day {
-			m[accountID] = finance2.BalanceSnapshot{
-				Date:    day,
-				Balance: balance,
-			}
-		}
+	results := make(map[string]uncertain.Value)
+	reportRecorder := reportRecorderFunc(func(day date.Date, balances map[string]uncertain.Value) error {
+		maps.Copy(results, balances)
 		return nil
 	})
-	err := finance2.RunPrediction(
+	err := finance2.RunForecast(
 		ctx,
 		uncertain.NewConfig(time.Now().UnixMilli(), 2_000),
 		startDate,
@@ -124,16 +129,10 @@ func runPredict(ctx context.Context, accounts []finance2.Entity, transfers []fin
 		"*-*-01",
 		accounts,
 		transfers,
-		finance2.CompositeRecorder{SnapshotRecorder: snapshotRecorder},
+		finance2.CompositeRecorder{ReportRecorder: reportRecorder},
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to run prediction: %w", err)
-	}
-	results := make(map[string]uncertain.Value)
-	for _, acc := range accounts {
-		if s, ok := m[acc.ID]; ok {
-			results[acc.ID] = s.Balance
-		}
+		return nil, fmt.Errorf("failed to run forecast: %w", err)
 	}
 	return results, nil
 }
@@ -160,7 +159,7 @@ func TestMortgageInterestPayments(t *testing.T) {
 	)
 	bals, err := runPredict(t.Context(), mks(*checkAcc, *mortgAcc), nil)
 	if err != nil {
-		t.Fatalf("failed to run simulation: %s", err)
+		t.Fatalf("failed to run forecast: %s", err)
 	}
 	if cBal := bals[checkAcc.ID]; !isAround(cBal, 700) {
 		t.Errorf("checking account balance after interest payment is %s, expected around 700", cBal)
@@ -177,7 +176,7 @@ func TestSavingsAccountInterestPayments(t *testing.T) {
 	)
 	bals, err := runPredict(t.Context(), mks(*savingsAcc), nil)
 	if err != nil {
-		t.Fatalf("failed to run simulation: %s", err)
+		t.Fatalf("failed to run forecast: %s", err)
 	}
 	if bal := bals[savingsAcc.ID]; !isAround(bal, 1040) {
 		t.Errorf("savings account balance after interest payment is %s, expected around 1040", bal)
@@ -189,7 +188,7 @@ func TestTransfersToAndFromExternal(t *testing.T) {
 	salaryTrn := newTransfer("", salaryAcc.ID, 1, "*-*-25", withFixed(uncertain.NewFixed(1000)))
 	bals, err := runPredict(t.Context(), mks(*salaryAcc), mks(salaryTrn))
 	if err != nil {
-		t.Fatalf("failed to run simulation: %s", err)
+		t.Fatalf("failed to run forecast: %s", err)
 	}
 	if bal := bals[salaryAcc.ID].Mean(); bal != 12000 {
 		t.Errorf("salary account balance after transfer is %f, expected to be 12000", bal)
@@ -202,7 +201,7 @@ func TestTransfersBetweenAccounts(t *testing.T) {
 	savingsTrn := newTransfer(checkingAcc.ID, savingsAcc.ID, 1, "*-*-25", withFixed(uncertain.NewFixed(1000)))
 	bals, err := runPredict(t.Context(), mks(*checkingAcc, *savingsAcc), mks(savingsTrn))
 	if err != nil {
-		t.Fatalf("failed to run simulation: %s", err)
+		t.Fatalf("failed to run forecast: %s", err)
 	}
 	if bal := bals[checkingAcc.ID].Mean(); bal != 1000 {
 		t.Errorf("checking account balance after transfers is %f, expected to be 1000", bal)
@@ -219,7 +218,7 @@ func TestRealEstateAppreciation(t *testing.T) {
 	)
 	bals, err := runPredict(t.Context(), mks(*realEstateAcc), nil)
 	if err != nil {
-		t.Fatalf("failed to run simulation: %s", err)
+		t.Fatalf("failed to run forecast: %s", err)
 	}
 	if bal := bals[realEstateAcc.ID]; !isAround(bal, 103_000) {
 		t.Errorf("real estate account balance after appreciation is %s, expected around 103000", bal)
@@ -233,29 +232,31 @@ func BenchmarkRealEstateAppreciation(b *testing.B) {
 	)
 	for b.Loop() {
 		if _, err := runPredict(b.Context(), mks(*realEstateAcc), nil); err != nil {
-			b.Fatalf("failed to run simulation: %s", err)
+			b.Fatalf("failed to run forecast: %s", err)
 		}
 	}
 }
 
-func TestInterestForwardingUntilFromDate(t *testing.T) {
+func TestAStaleEntityGrowsFromTheForecastStartNotFromItsSnapshot(t *testing.T) {
 	checkingAcc := newAccount("Checking Account", withBalance(firstDate, uncertain.NewFixed(1000)))
 	savingsAcc := newAccount("Savings Account",
 		withBalance(firstDate.Add(-date.Year), uncertain.NewFixed(1000)),
-		withLogNormGrowth(uncertain.NewFixed(0.50), uncertain.NewFixed(0.05)),
+		withFixedGrowth(uncertain.NewFixed(0.50)),
 	)
 	salary := newTransfer("", checkingAcc.ID, 1, "*-*-25", withFixed(uncertain.NewFixed(10_000)))
 	transfer := newTransfer(checkingAcc.ID, savingsAcc.ID, 1, "*-01-24", withFixed(uncertain.NewFixed(1000)))
 	bals, err := runPredict(t.Context(), mks(*checkingAcc, *savingsAcc), mks(salary, transfer))
 	if err != nil {
-		t.Fatalf("failed to run simulation: %s", err)
+		t.Fatalf("failed to run forecast: %s", err)
 	}
 	if bal := bals[checkingAcc.ID]; !isAround(bal, 1000+10_000*12-1000) {
-		t.Errorf("checking account balance after transfers is %s, expected to be around 1000", bal)
+		t.Errorf("checking account balance after transfers is %s, expected to be around 120000", bal)
 	}
-	savingsTarget := 4327.0
-	if bal := bals[savingsAcc.ID]; !isAround(bal, savingsTarget) {
-		t.Errorf("savings account balance after interest payment is %s, expected around %f", bal, savingsTarget)
+	// The year between its Snapshot and the Forecast Start is not counted: the Snapshot's 1,000 grows
+	// from 2000-01-01, and the transfer from 2000-01-24, both through the last report on 2001-01-01.
+	savingsTarget := 1000*math.Pow(1.5, 367.0/365) + 1000*math.Pow(1.5, 344.0/365)
+	if bal := bals[savingsAcc.ID].Mean(); math.Abs(bal-savingsTarget) > 0.01 {
+		t.Errorf("savings account balance is %f, expected %f", bal, savingsTarget)
 	}
 }
 
@@ -283,7 +284,7 @@ func TestTaxModelDeductsAnnually(t *testing.T) {
 	)
 	bals, err := runPredict(t.Context(), mks(*acc), nil)
 	if err != nil {
-		t.Fatalf("failed to run prediction: %s", err)
+		t.Fatalf("failed to run forecast: %s", err)
 	}
 	if bal := bals[acc.ID].Mean(); !isAround(bals[acc.ID], 99_000) {
 		t.Errorf("balance after tax is %f, expected around 99000", bal)
@@ -298,7 +299,7 @@ func TestTaxModelWithDeposits(t *testing.T) {
 	deposit := newTransfer("", acc.ID, 1, "*-*-25", withFixed(uncertain.NewFixed(1000)))
 	bals, err := runPredict(t.Context(), mks(*acc), mks(deposit))
 	if err != nil {
-		t.Fatalf("failed to run prediction: %s", err)
+		t.Fatalf("failed to run forecast: %s", err)
 	}
 	// 100k initial + 12k deposits over the year, 1% tax on Jan 1 balance (~111k)
 	bal := bals[acc.ID].Mean()
