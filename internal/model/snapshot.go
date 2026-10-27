@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/SimonSchneider/goslu/date"
@@ -54,8 +55,16 @@ func accountSnapshotFromDB(s pdb.AccountSnapshot) AccountSnapshot {
 	}
 }
 
+// checkSnapshot rejects a Snapshot without an account or a date.
+func checkSnapshot(accountID string, day date.Date) error {
+	return errors.Join(checkRequired("account", accountID), checkRequired("date", day))
+}
+
 func (s *Service) UpsertAccountSnapshot(ctx context.Context, accountID string, inp AccountSnapshotInput) (AccountSnapshot, error) {
-	balance, err := inp.Balance.Encode()
+	if err := checkSnapshot(accountID, inp.Date); err != nil {
+		return AccountSnapshot{}, err
+	}
+	balance, err := orZero(inp.Balance).Encode()
 	if err != nil {
 		return AccountSnapshot{}, fmt.Errorf("encoding balance: %w", err)
 	}
@@ -94,6 +103,9 @@ func (s *Service) ListAccountsSnapshots(ctx context.Context, ids []string) ([]Ac
 }
 
 func (s *Service) UpdateSnapshotDate(ctx context.Context, oldDate, newDate date.Date) ([]AccountSnapshot, error) {
+	if err := errors.Join(checkRequired("old date", oldDate), checkRequired("new date", newDate)); err != nil {
+		return nil, err
+	}
 	snaps, err := s.q.UpdateSnapshotDate(ctx, pdb.UpdateSnapshotDateParams{
 		Date:   int64(newDate),
 		Date_2: int64(oldDate),
@@ -109,6 +121,9 @@ func (s *Service) UpdateSnapshotDate(ctx context.Context, oldDate, newDate date.
 }
 
 func (s *Service) UpsertOrDeleteSnapshot(ctx context.Context, accountID string, inp AccountSnapshotInput) (AccountSnapshotCell, error) {
+	if err := checkSnapshot(accountID, inp.Date); err != nil {
+		return AccountSnapshotCell{}, err
+	}
 	if inp.EmptyBalance {
 		if err := s.DeleteAccountSnapshot(ctx, accountID, inp.Date); err != nil {
 			return AccountSnapshotCell{}, fmt.Errorf("deleting existing snapshot: %w", err)

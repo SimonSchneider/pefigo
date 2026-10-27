@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -23,6 +24,12 @@ type Account struct {
 	IsISK                 bool
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+}
+
+// hasCashFlow reports whether the account's interest is paid out on its cash-flow frequency, rather
+// than added to it every day.
+func (a Account) hasCashFlow() bool {
+	return a.CashFlowFrequency != "" || a.CashFlowDestinationID != ""
 }
 
 type AccountDetailed struct {
@@ -66,7 +73,32 @@ func (s *Service) GetAccount(ctx context.Context, id string) (Account, error) {
 	return accountFromDB(acc), nil
 }
 
+// cashFlowError says why the forecast can't pay out a cash flow on frequency to destinationID, or is
+// nil when it can. Without a cash-flow frequency and destination the account has none, but a
+// destination needs a frequency to be paid out on. It doesn't wrap ErrInvalidInput, so it suits stored
+// accounts too.
+func cashFlowError(frequency, destinationID string) error {
+	if frequency == "" {
+		if destinationID != "" {
+			return errors.New("a cash-flow destination needs a cash-flow frequency")
+		}
+		return nil
+	}
+	return datePatternError("cash-flow frequency", date.Cron(frequency))
+}
+
+// checkCashFlow rejects a cash flow the forecast can't pay out.
+func (inp AccountInput) checkCashFlow() error {
+	if err := cashFlowError(inp.CashFlowFrequency, inp.CashFlowDestinationID); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidInput, err)
+	}
+	return nil
+}
+
 func (s *Service) UpsertAccount(ctx context.Context, inp AccountInput) (Account, error) {
+	if err := errors.Join(checkRequired("name", inp.Name), inp.checkCashFlow()); err != nil {
+		return Account{}, err
+	}
 	var (
 		q   = s.q
 		acc pdb.Account
@@ -109,6 +141,12 @@ func (s *Service) UpsertAccount(ctx context.Context, inp AccountInput) (Account,
 }
 
 func (s *Service) UpsertAccountWithStartupShares(ctx context.Context, inp AccountInput, startupShares *StartupShareAccountInput) (Account, error) {
+	if startupShares != nil {
+		// Reject invalid startup shares before saving the account, so nothing is saved.
+		if _, err := startupShares.startupShareAccount(); err != nil {
+			return Account{}, err
+		}
+	}
 	acc, err := s.UpsertAccount(ctx, inp)
 	if err != nil {
 		return Account{}, fmt.Errorf("upserting account: %w", err)

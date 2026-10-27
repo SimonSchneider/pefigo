@@ -422,14 +422,14 @@ templ GrowthModelRow(accountID string, growthModel GrowthModel) {
 			<input type="hidden" name="account_id" value={ accountID }/>
 			<select class="select select-xs w-full" name="type">
 				<option
-					value="fixed"
-					if growthModel.Type == "fixed" || growthModel.ID == "" {
+					value={ GrowthModelFixed }
+					if growthModel.Type == GrowthModelFixed || growthModel.ID == "" {
 						selected
 					}
 				>Fixed</option>
 				<option
-					value="lognormal"
-					if growthModel.Type == "lognormal" {
+					value={ GrowthModelLogNormal }
+					if growthModel.Type == GrowthModelLogNormal {
 						selected
 					}
 				>Lognormal</option>
@@ -491,8 +491,8 @@ templ AccountTableRow(view *AccountsView, account *AccountDetailed) {
 			if account.GrowthModel != nil {
 				<span
 					class={ "badge",
-					templ.KV("badge-primary", account.GrowthModel.Type == "fixed"),
-					templ.KV("badge-secondary", account.GrowthModel.Type == "lognormal") }
+					templ.KV("badge-primary", account.GrowthModel.Type == GrowthModelFixed),
+					templ.KV("badge-secondary", account.GrowthModel.Type == GrowthModelLogNormal) }
 				>{ account.GrowthModel.Type }</span>
 			} else {
 				<span class="text-base-content/50"></span>

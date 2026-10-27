@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,12 @@ import (
 	"github.com/SimonSchneider/pefigo/internal/pdb"
 	"github.com/SimonSchneider/pefigo/pkg/finance"
 	"github.com/SimonSchneider/pefigo/pkg/uncertain"
+)
+
+// The Growth Model types (GrowthModel.Type).
+const (
+	GrowthModelFixed     = "fixed"
+	GrowthModelLogNormal = "lognormal"
 )
 
 type GrowthModel struct {
@@ -46,11 +53,13 @@ type AccountGrowthModelInput struct {
 
 type GrowthModels []GrowthModel
 
-func (gms GrowthModels) ToFinance() finance.GrowthModel {
+// ToFinance is the growth the forecast applies. A stored growth model of an unknown type is an error
+// naming it.
+func (gms GrowthModels) ToFinance() (finance.GrowthModel, error) {
 	fgms := make([]finance.GrowthModel, 0, len(gms))
 	for _, gm := range gms {
 		switch gm.Type {
-		case "fixed":
+		case GrowthModelFixed:
 			fgms = append(fgms, &finance.FixedGrowth{
 				TimeFrameGrowth: finance.TimeFrameGrowth{
 					StartDate: gm.StartDate,
@@ -58,7 +67,7 @@ func (gms GrowthModels) ToFinance() finance.GrowthModel {
 				},
 				AnnualRate: gm.AnnualRate,
 			})
-		case "lognormal":
+		case GrowthModelLogNormal:
 			fgms = append(fgms, &finance.LogNormalGrowth{
 				TimeFrameGrowth: finance.TimeFrameGrowth{
 					StartDate: gm.StartDate,
@@ -67,9 +76,11 @@ func (gms GrowthModels) ToFinance() finance.GrowthModel {
 				AnnualRate:       gm.AnnualRate,
 				AnnualVolatility: gm.AnnualVolatility,
 			})
+		default:
+			return nil, fmt.Errorf("growth model %s has unknown type %q", gm.ID, gm.Type)
 		}
 	}
-	return finance.NewGrowthCombined(fgms...)
+	return finance.NewGrowthCombined(fgms...), nil
 }
 
 func growthModelFromDB(g pdb.GrowthModel) (GrowthModel, error) {
@@ -97,6 +108,12 @@ func growthModelFromDB(g pdb.GrowthModel) (GrowthModel, error) {
 }
 
 func (s *Service) UpsertAccountGrowthModel(ctx context.Context, inp AccountGrowthModelInput) (GrowthModel, error) {
+	if err := errors.Join(checkRequired("account", inp.AccountID), checkRequired("start date", inp.StartDate)); err != nil {
+		return GrowthModel{}, err
+	}
+	if err := checkOneOf("growth model type", inp.Type, GrowthModelFixed, GrowthModelLogNormal); err != nil {
+		return GrowthModel{}, err
+	}
 	if err := checkEndDate(inp.StartDate, inp.EndDate); err != nil {
 		return GrowthModel{}, err
 	}
@@ -107,11 +124,11 @@ func (s *Service) UpsertAccountGrowthModel(ctx context.Context, inp AccountGrowt
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
-	annualRate, err := inp.AnnualRate.Encode()
+	annualRate, err := orZero(inp.AnnualRate).Encode()
 	if err != nil {
 		return GrowthModel{}, fmt.Errorf("encoding annual rate: %w", err)
 	}
-	annualVolatility, err := inp.AnnualVolatility.Encode()
+	annualVolatility, err := orZero(inp.AnnualVolatility).Encode()
 	if err != nil {
 		return GrowthModel{}, fmt.Errorf("encoding annual volatility: %w", err)
 	}

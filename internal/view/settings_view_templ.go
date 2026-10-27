@@ -789,41 +789,106 @@ func settingsTabForecast(view *SettingsPageView) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var28 string
-		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", view.ForecastSamples))
+		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", view.ForecastSettings.Samples))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 335, Col: 125}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 335, Col: 134}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "\" min=\"100\" max=\"100000\" step=\"100\"> <label class=\"label\"><span class=\"label-text-alt text-base-content/60\">Higher values give more accurate results but take longer to compute</span></label></div><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text font-medium\">Forecast interval</span></label> <input type=\"text\" name=\"snapshot_interval\" class=\"input input-bordered w-full\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "\" placeholder=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var29 string
-		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(view.ForecastSnapshotInterval)
+		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", DefaultForecastSamples))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 340, Col: 123}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 335, Col: 192}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "\" placeholder=\"*-01-01\"> <label class=\"label\"><span class=\"label-text-alt text-base-content/60\">Date pattern: *-01-01 (yearly), *-*/6-01 (6 months), *-*-01 (monthly)</span></label></div><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text font-medium\">Forecast starts on</span></label> <input type=\"text\" name=\"start_days\" class=\"input input-bordered w-full\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "\" min=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var30 string
-		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(view.ForecastStartDays)
+		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", MinForecastSamples))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 345, Col: 109}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 335, Col: 238}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "\" placeholder=\"*-*-*\"><p class=\"text-xs text-base-content/60 mt-1\">Date pattern. The Forecast starts on the first matching day on or after the latest Snapshot; Transfers before then are taken to be in the Snapshots. *-*-* starts on the Snapshot's day; *-*-28 suits Snapshots recorded after the 25th–27th Transfers.</p></div><div class=\"mt-4\"><button type=\"submit\" class=\"btn btn-primary w-full\">Save</button></div></div></div></form></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "\" max=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var31 string
+		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", MaxForecastSamples))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 335, Col: 284}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "\" step=\"100\"> <label class=\"label\"><span class=\"label-text-alt text-base-content/60\">Higher values give more accurate results but take longer to compute</span></label></div><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text font-medium\">Forecast interval</span></label> <input type=\"text\" name=\"snapshot_interval\" class=\"input input-bordered w-full\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var32 string
+		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(string(view.ForecastSettings.Interval))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 340, Col: 132}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "\" placeholder=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var33 string
+		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(string(DefaultForecastInterval))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 340, Col: 180}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "\"> <label class=\"label\"><span class=\"label-text-alt text-base-content/60\">Date pattern: *-01-01 (yearly), *-*/6-01 (6 months), *-*-01 (monthly)</span></label></div><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text font-medium\">Forecast starts on</span></label> <input type=\"text\" name=\"start_days\" class=\"input input-bordered w-full\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var34 string
+		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(string(view.ForecastSettings.StartDays))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 345, Col: 126}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "\" placeholder=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var35 string
+		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(string(DefaultForecastStartDays))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/settings_view.templ`, Line: 345, Col: 175}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 81, "\"><p class=\"text-xs text-base-content/60 mt-1\">Date pattern. The Forecast starts on the first matching day on or after the latest Snapshot; Transfers before then are taken to be in the Snapshots. *-*-* starts on the Snapshot's day; *-*-28 suits Snapshots recorded after the 25th–27th Transfers.</p></div><div class=\"mt-4\"><button type=\"submit\" class=\"btn btn-primary w-full\">Save</button></div></div></div></form></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

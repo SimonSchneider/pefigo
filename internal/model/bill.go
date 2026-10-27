@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -42,18 +43,24 @@ func (b *Bill) SetCurrencyConverter(defaultCurrency string, getRate func(from, t
 	b.getRate = getRate
 }
 
+// The Bill Amount periods (BillAmount.Period).
+const (
+	BillPeriodMonthly = "monthly"
+	BillPeriodYearly  = "yearly"
+)
+
 type BillAmount struct {
 	ID        string
 	BillID    string
 	Amount    uncertain.Value
-	Period    string // "monthly" or "yearly"
-	Currency  string // ISO 4217 code; empty means default currency
+	Period    string // BillPeriodMonthly or BillPeriodYearly; saving it empty saves BillPeriodMonthly
+	Currency  string // a supported ISO 4217 code; empty means default currency
 	StartDate date.Date
 	EndDate   *date.Date
 }
 
 func (ba BillAmount) MonthlyAmountValue() uncertain.Value {
-	if ba.Period == "yearly" {
+	if ba.Period == BillPeriodYearly {
 		v := ba.Amount
 		return uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
 			return v.Sample(cfg) / 12
@@ -63,7 +70,7 @@ func (ba BillAmount) MonthlyAmountValue() uncertain.Value {
 }
 
 func (ba BillAmount) YearlyAmountValue() uncertain.Value {
-	if ba.Period == "yearly" {
+	if ba.Period == BillPeriodYearly {
 		return ba.Amount
 	}
 	v := ba.Amount
@@ -116,8 +123,8 @@ func (b Bill) currentBillAmount() *BillAmount {
 
 func (b Bill) CurrentPeriod() string {
 	amt := b.currentBillAmount()
-	if amt == nil || amt.Period == "" {
-		return "monthly"
+	if amt == nil {
+		return BillPeriodMonthly
 	}
 	return amt.Period
 }
@@ -185,10 +192,11 @@ func (b Bill) GenerateTransferTemplates(ba BillAccount) []TransferTemplate {
 	}
 
 	source := TransferTemplateSource{
-		Type:     "bill",
-		EntityID: b.ID,
-		Label:    b.Name,
-		EditURL:  "/bills/" + ba.ID + "/edit",
+		Type:          "bill",
+		EntityID:      b.ID,
+		Label:         b.Name,
+		EditURL:       "/bills/" + ba.ID + "/edit",
+		recurrenceRow: "bill account " + ba.ID,
 	}
 
 	enabled := ba.Enabled && b.Enabled
@@ -217,7 +225,7 @@ func (b Bill) GenerateTransferTemplates(ba BillAccount) []TransferTemplate {
 			Name:             b.Name,
 			FromAccountID:    ba.FromAccountID,
 			ToAccountID:      "",
-			AmountType:       "fixed",
+			AmountType:       TransferAmountFixed,
 			AmountFixed:      monthlyAmt,
 			Priority:         ba.Priority,
 			Recurrence:       ba.Recurrence,
@@ -265,15 +273,11 @@ func billAmountFromDB(a pdb.BillAmount) (BillAmount, error) {
 		d := date.Date(*a.EndDate)
 		endDate = &d
 	}
-	period := a.Period
-	if period == "" {
-		period = "monthly"
-	}
 	return BillAmount{
 		ID:        a.ID,
 		BillID:    a.BillID,
 		Amount:    amount,
-		Period:    period,
+		Period:    a.Period,
 		Currency:  a.Currency,
 		StartDate: date.Date(a.StartDate),
 		EndDate:   endDate,
@@ -297,7 +301,17 @@ func (s *Service) applyCurrencyConverter(ctx context.Context, bills []Bill) {
 	}
 }
 
+// DefaultBillAccountRecurrence is the recurrence of a Bill account saved without one: the 1st of every
+// month.
+const DefaultBillAccountRecurrence date.Cron = "*-*-01"
+
 func (s *Service) UpsertBillAccount(ctx context.Context, inp BillAccount) (BillAccount, error) {
+	if inp.Recurrence == "" {
+		inp.Recurrence = DefaultBillAccountRecurrence
+	}
+	if err := errors.Join(checkRequired("name", inp.Name), checkDatePattern("bill account recurrence", inp.Recurrence)); err != nil {
+		return BillAccount{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
@@ -346,6 +360,9 @@ func (s *Service) DeleteBillAccount(ctx context.Context, id string) error {
 }
 
 func (s *Service) UpsertBill(ctx context.Context, inp Bill) (Bill, error) {
+	if err := errors.Join(checkRequired("bill account", inp.BillAccountID), checkRequired("name", inp.Name)); err != nil {
+		return Bill{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
@@ -395,13 +412,27 @@ func (s *Service) DeleteBill(ctx context.Context, id string) error {
 }
 
 func (s *Service) UpsertBillAmount(ctx context.Context, inp BillAmount) (BillAmount, error) {
+	if err := errors.Join(checkRequired("bill", inp.BillID), checkRequired("start date", inp.StartDate)); err != nil {
+		return BillAmount{}, err
+	}
+	if inp.Period == "" {
+		inp.Period = BillPeriodMonthly
+	}
+	if err := checkOneOf("bill amount period", inp.Period, BillPeriodMonthly, BillPeriodYearly); err != nil {
+		return BillAmount{}, err
+	}
+	if inp.Currency != "" {
+		if err := checkSupportedCurrency("bill amount currency", inp.Currency); err != nil {
+			return BillAmount{}, err
+		}
+	}
 	if err := checkEndDate(inp.StartDate, inp.EndDate); err != nil {
 		return BillAmount{}, err
 	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
-	encoded, err := inp.Amount.Encode()
+	encoded, err := orZero(inp.Amount).Encode()
 	if err != nil {
 		return BillAmount{}, fmt.Errorf("encoding bill amount: %w", err)
 	}
@@ -411,15 +442,11 @@ func (s *Service) UpsertBillAmount(ctx context.Context, inp BillAmount) (BillAmo
 		endDate = &d
 	}
 	now := time.Now().Unix()
-	period := inp.Period
-	if period == "" {
-		period = "monthly"
-	}
 	a, err := s.q.UpsertBillAmount(ctx, pdb.UpsertBillAmountParams{
 		ID:        inp.ID,
 		BillID:    inp.BillID,
 		Amount:    encoded,
-		Period:    period,
+		Period:    inp.Period,
 		Currency:  inp.Currency,
 		StartDate: int64(inp.StartDate),
 		EndDate:   endDate,

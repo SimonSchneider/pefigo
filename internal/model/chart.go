@@ -3,6 +3,7 @@ package model
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -13,16 +14,20 @@ import (
 	"github.com/SimonSchneider/pefigo/pkg/uncertain"
 )
 
+// PredictionParams are the parameters of a Forecast. A parameter that isn't given (nil, or "") gets
+// its default, the one the chart page shows: see WithDefaults.
 type PredictionParams struct {
 	// Duration is how long the Forecast runs from the Forecast Start.
-	Duration date.Duration
+	Duration *date.Duration
 	// Through, when set, is the last day of the Forecast instead of Duration. The Forecast is empty
 	// when it is on or before the Forecast Start.
 	Through date.Date
-	Samples int64
-	// Quantile is the share of outcomes between each point's lower and upper bound. Without it, no
-	// bounds are calculated.
-	Quantile         float64
+	// Samples is how many outcomes of every uncertain value the Forecast draws.
+	Samples *int64
+	// Quantile is the share of outcomes between each point's lower and upper bound. At 0, no bounds
+	// are calculated.
+	Quantile *float64
+	// SnapshotInterval is the Forecast Interval: the days with a point.
 	SnapshotInterval date.Cron
 	GroupBy          GroupBy
 }
@@ -35,17 +40,42 @@ const (
 	GroupByTotal GroupBy = "total"
 )
 
-func ParseGroupBy(val string) (GroupBy, error) {
-	switch val {
-	case "none":
-		return GroupByNone, nil
-	case "type":
-		return GroupByType, nil
-	case "total":
-		return GroupByTotal, nil
-	default:
-		return GroupByNone, fmt.Errorf("invalid group by: %s", val)
+// The prediction parameters a Forecast runs with when they aren't given.
+const (
+	defaultPredictionDuration       = date.Year
+	defaultPredictionSamples  int64 = 2000
+	defaultPredictionQuantile       = 0.8
+	defaultPredictionInterval       = date.Cron("*-*-28")
+	defaultPredictionGroupBy        = GroupByType
+)
+
+// WithDefaults is p with every parameter that isn't given set to its default: a year, 2000 samples,
+// bounds around 80% of outcomes, a point on the 28th of every month, grouped by Account Type. It is
+// what RunPrediction runs and the chart page shows. It rejects a Forecast Interval that isn't a date
+// pattern and an unknown GroupBy.
+func (p PredictionParams) WithDefaults() (PredictionParams, error) {
+	if p.Duration == nil {
+		p.Duration = ptr(defaultPredictionDuration)
 	}
+	if p.Samples == nil {
+		p.Samples = ptr(defaultPredictionSamples)
+	}
+	if p.Quantile == nil {
+		p.Quantile = ptr(defaultPredictionQuantile)
+	}
+	if p.SnapshotInterval == "" {
+		p.SnapshotInterval = defaultPredictionInterval
+	}
+	if p.GroupBy == "" {
+		p.GroupBy = defaultPredictionGroupBy
+	}
+	if err := errors.Join(
+		checkDatePattern("forecast interval", p.SnapshotInterval),
+		checkOneOf("group by", string(p.GroupBy), string(GroupByNone), string(GroupByType), string(GroupByTotal)),
+	); err != nil {
+		return PredictionParams{}, err
+	}
+	return p, nil
 }
 
 type PredictionBalanceSnapshot struct {
@@ -100,8 +130,13 @@ type PredictionEventHandler interface {
 }
 
 // RunPrediction runs the Forecast from the Forecast Start and sends it to eventHandler, grouped by
-// params.GroupBy. Without a Forecast Start it sends the setup and closes without points.
+// params.GroupBy. Without a Forecast Start it sends the setup and closes without points. Parameters
+// that aren't given get their defaults, and invalid ones are rejected before anything is sent.
 func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEventHandler, params PredictionParams) error {
+	params, err := params.WithDefaults()
+	if err != nil {
+		return err
+	}
 	f, err := s.loadForecast(ctx)
 	if err != nil {
 		return fmt.Errorf("loading the Forecast: %w", err)
@@ -114,21 +149,22 @@ func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEven
 	if err != nil {
 		return fmt.Errorf("listing special dates for Prediction: %w", err)
 	}
-	ucfg := uncertain.NewConfig(time.Now().UnixMilli(), params.Samples)
+	ucfg := uncertain.NewConfig(time.Now().UnixMilli(), *params.Samples)
+	quantile := *params.Quantile
 	fold := &forecastFold{
 		eventHandler: eventHandler,
 		ucfg:         ucfg,
 		groups:       forecastGroups(params.GroupBy, f.accounts, accountTypes),
-		bounds:       params.Quantile != 0,
-		q1:           (1 - params.Quantile) / 2,
-		q2:           (1 + params.Quantile) / 2,
+		bounds:       quantile != 0,
+		q1:           (1 - quantile) / 2,
+		q2:           (1 + quantile) / 2,
 	}
 	// The Forecast runs from the Forecast Start up to, but not on, end.
 	var end date.Date
 	switch {
 	case !f.hasStart:
 	case params.Through.IsZero():
-		end = f.start.Add(params.Duration)
+		end = f.start.Add(*params.Duration)
 	case params.Through.After(f.start):
 		end = params.Through.Add(date.Day)
 	default:

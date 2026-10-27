@@ -1,6 +1,10 @@
 package view;
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/SimonSchneider/pefigo/pkg/ui"
+)
 
 templ PageChart(p PredictionParams) {
 	@Layout("/chart", ChartContent(p))
@@ -17,6 +21,7 @@ templ ChartContent(p PredictionParams) {
 	</main>
 }
 
+// ChartControls shows the prediction parameters p, with their defaults (PredictionParams.WithDefaults).
 templ ChartControls(p PredictionParams) {
 	<form method="GET" class="flex items-center gap-4">
 		<div class="form-control">
@@ -51,7 +56,7 @@ templ ChartControls(p PredictionParams) {
 			<input
 				type="text"
 				name="duration"
-				value={ p.Duration.String() }
+				value={ ui.OrDefault(p.Duration).String() }
 				placeholder="e.g., 365"
 				class="input input-bordered w-24"
 			/>
@@ -63,7 +68,7 @@ templ ChartControls(p PredictionParams) {
 			<input
 				type="text"
 				name="samples"
-				value={ fmt.Sprintf("%d", p.Samples) }
+				value={ fmt.Sprintf("%d", ui.OrDefault(p.Samples)) }
 				min="1"
 				class="input input-bordered w-24"
 			/>
@@ -75,7 +80,7 @@ templ ChartControls(p PredictionParams) {
 			<input
 				type="number"
 				name="quantile"
-				value={ fmt.Sprintf("%.1f", p.Quantile) }
+				value={ fmt.Sprintf("%.1f", ui.OrDefault(p.Quantile)) }
 				min="0"
 				max="1"
 				step="0.1"

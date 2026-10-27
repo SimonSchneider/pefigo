@@ -56,7 +56,7 @@ func forecastInputMutations() []forecastInputMutation {
 			return discard(svc.UpsertAccount(ctx, model.AccountInput{Name: "Savings"}))
 		}},
 		{"UpsertAccountWithStartupShares", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return discard(svc.UpsertAccountWithStartupShares(ctx, model.AccountInput{Name: "Startup"}, &model.StartupShareAccountInput{TaxRate: 0.3, ValuationDiscountFactor: 1}))
+			return discard(svc.UpsertAccountWithStartupShares(ctx, model.AccountInput{Name: "Startup"}, &model.StartupShareAccountInput{TaxRate: ptr(0.3), ValuationDiscountFactor: ptr(1.0)}))
 		}},
 		{"DeleteAccount", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.DeleteAccount(ctx, ids.account)
@@ -135,14 +135,8 @@ func forecastInputMutations() []forecastInputMutation {
 		{"SetDefaultCurrency", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.SetDefaultCurrency(ctx, "EUR")
 		}},
-		{"SetForecastSamples", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return svc.SetForecastSamples(ctx, 500)
-		}},
-		{"SetForecastSnapshotInterval", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return svc.SetForecastSnapshotInterval(ctx, "*-*-01")
-		}},
-		{"SetForecastStartDays", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return svc.SetForecastStartDays(ctx, "*-*-28")
+		{"SetForecastSettings", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return svc.SetForecastSettings(ctx, model.ForecastSettingsInput{Samples: ptr[int64](500), Interval: "*-*-01", StartDays: "*-*-28"})
 		}},
 		// snapshot.go
 		{"UpsertAccountSnapshot", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
@@ -169,7 +163,7 @@ func forecastInputMutations() []forecastInputMutation {
 		}},
 		// startup_shares.go
 		{"UpsertStartupShareAccount", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return discard(svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: ids.account, TaxRate: 0.25, ValuationDiscountFactor: 0.8}))
+			return discard(svc.UpsertStartupShareAccount(ctx, model.StartupShareAccountInput{AccountID: ids.account, TaxRate: ptr(0.25), ValuationDiscountFactor: ptr(0.8)}))
 		}},
 		{"DeleteStartupShareAccount", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.DeleteStartupShareAccount(ctx, ids.account)
@@ -282,8 +276,8 @@ func TestForecastInputWriteMarksDashboardForecastStale(t *testing.T) {
 		t.Fatalf("expected no Forecast Run scheduled after the first one, got %d", n)
 	}
 
-	if err := svc.SetForecastSamples(ctx, 100); err != nil {
-		t.Fatalf("set forecast samples: %v", err)
+	if err := svc.SetForecastSettings(ctx, model.ForecastSettingsInput{Samples: ptr[int64](100)}); err != nil {
+		t.Fatalf("set forecast settings: %v", err)
 	}
 	if n := timers.pending(); n != 1 {
 		t.Fatalf("expected a Forecast Input write to schedule one Forecast Run, got %d", n)
@@ -388,7 +382,7 @@ func seedForecastInputs(t *testing.T, svc *model.Service) forecastInputIDs {
 	must("account type", err)
 	ids.accountType = at.ID
 
-	acc, err := svc.UpsertAccountWithStartupShares(ctx, model.AccountInput{Name: "Checking", TypeID: at.ID}, &model.StartupShareAccountInput{TaxRate: 0.3, ValuationDiscountFactor: 1})
+	acc, err := svc.UpsertAccountWithStartupShares(ctx, model.AccountInput{Name: "Checking", TypeID: at.ID}, &model.StartupShareAccountInput{TaxRate: ptr(0.3), ValuationDiscountFactor: ptr(1.0)})
 	must("account", err)
 	ids.account = acc.ID
 

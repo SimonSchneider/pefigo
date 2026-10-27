@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -370,22 +371,19 @@ func TestDashboardForecastRunForecastsThroughTheLastSpecialDate(t *testing.T) {
 			t.Fatalf("create special date: %v", err)
 		}
 	}
-	if err := svc.SetForecastSamples(ctx, 123); err != nil {
-		t.Fatalf("set forecast samples: %v", err)
-	}
-	if err := svc.SetForecastSnapshotInterval(ctx, "*-*-15"); err != nil {
-		t.Fatalf("set forecast interval: %v", err)
-	}
+	mustForecastSettings(t, svc, model.ForecastSettingsInput{Samples: ptr[int64](123), Interval: "*-*-15"})
 	startForecast(svc)
 	timers.fire()
 
+	// Without lower and upper bounds: a Quantile of 0.
 	want := model.PredictionParams{
 		Through:          last,
-		Samples:          123,
+		Samples:          ptr[int64](123),
+		Quantile:         ptr(0.0),
 		SnapshotInterval: date.Cron("*-*-15"),
 		GroupBy:          model.GroupByType,
 	}
-	if len(got) != 1 || got[0] != want {
+	if len(got) != 1 || !reflect.DeepEqual(got[0], want) {
 		t.Fatalf("expected one Forecast with %+v, got %+v", want, got)
 	}
 }
@@ -429,9 +427,7 @@ func TestDashboardForecastRunWithOnlySpecialDatesOnOrBeforeTheForecastStartClear
 	ctx := t.Context()
 	start := mustParseDate("2026-01-01")
 	mustSnapshot(t, svc, mustAccount(t, svc, "Checking").ID, start, 1000)
-	if err := svc.SetForecastSnapshotInterval(ctx, "*-*-01"); err != nil {
-		t.Fatalf("set forecast interval: %v", err)
-	}
+	mustForecastSettings(t, svc, model.ForecastSettingsInput{Interval: "*-*-01"})
 	sd, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{Name: "Retirement", Date: mustParseDate("2027-01-01")})
 	if err != nil {
 		t.Fatalf("create special date: %v", err)
@@ -534,9 +530,7 @@ func TestDashboardForecastRunPaysInterestIntoAnAccountWithoutASnapshot(t *testin
 	}); err != nil {
 		t.Fatalf("create growth model: %v", err)
 	}
-	if err := svc.SetForecastSnapshotInterval(ctx, "*-*-02"); err != nil {
-		t.Fatalf("set forecast interval: %v", err)
-	}
+	mustForecastSettings(t, svc, model.ForecastSettingsInput{Interval: "*-*-02"})
 	if _, err := svc.UpsertSpecialDate(ctx, model.SpecialDateInput{Name: "Retirement", Date: mustParseDate("2026-02-02")}); err != nil {
 		t.Fatalf("create special date: %v", err)
 	}
@@ -674,9 +668,7 @@ func TestDashboardForecastSchedulesNothingAfterStop(t *testing.T) {
 	}
 
 	svc.DashboardForecast().MarkStale()
-	if err := svc.SetForecastSamples(t.Context(), 100); err != nil {
-		t.Fatalf("set forecast samples: %v", err)
-	}
+	mustForecastSettings(t, svc, model.ForecastSettingsInput{Samples: ptr[int64](100)})
 	if n := timers.pending(); n != 0 {
 		t.Fatalf("expected nothing scheduled after Stop, got %d", n)
 	}
@@ -878,9 +870,7 @@ func TestMigratingTheDashboardForecastToDaysClearsItAndTheConfidenceSetting(t *t
 	if _, err := old.DB().ExecContext(ctx, `INSERT INTO app_setting (key, value) VALUES ('forecast_confidence', '0.9')`); err != nil {
 		t.Fatalf("store the forecast confidence: %v", err)
 	}
-	if err := old.SetForecastSamples(ctx, 500); err != nil {
-		t.Fatalf("set forecast samples: %v", err)
-	}
+	mustForecastSettings(t, old, model.ForecastSettingsInput{Samples: ptr[int64](500)})
 	old.DB().Close()
 
 	svc, err := model.Open(ctx, pefigo.StaticEmbeddedFS, "static/migrations", conn)
@@ -896,7 +886,7 @@ func TestMigratingTheDashboardForecastToDaysClearsItAndTheConfidenceSetting(t *t
 	if err := svc.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM app_setting WHERE key = 'forecast_confidence'`).Scan(&confidence); err != nil || confidence != 0 {
 		t.Fatalf("expected the forecast confidence setting to be deleted, got %d (%v)", confidence, err)
 	}
-	if samples, err := svc.GetForecastSamples(ctx); err != nil || samples != 500 {
-		t.Fatalf("expected the other forecast settings to be kept, got %d samples (%v)", samples, err)
+	if samples := mustGetForecastSettings(t, svc).Samples; samples != 500 {
+		t.Fatalf("expected the other forecast settings to be kept, got %d samples", samples)
 	}
 }

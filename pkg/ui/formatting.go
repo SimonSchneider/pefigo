@@ -3,6 +3,7 @@ package ui
 import (
 	"math"
 	"strconv"
+	"strings"
 )
 
 func FormatWithThousands(val float64) string {
@@ -36,4 +37,19 @@ func FormatWithThousands(val float64) string {
 		return "-" + string(out)
 	}
 	return string(out)
+}
+
+// percentDecimals is how many decimals FormatPercent keeps: enough for any percentage typed, few
+// enough to drop the float noise of scaling a fraction by 100.
+const percentDecimals = 10
+
+// FormatPercent formats a fraction as the percentage ParsePercent reads back: 0.15 is "15", and 0.07
+// is "7" rather than "7.000000000000001".
+func FormatPercent(fraction float64) string {
+	s := strconv.FormatFloat(fraction*100, 'f', percentDecimals, 64)
+	s = strings.TrimSuffix(strings.TrimRight(s, "0"), ".")
+	if s == "-0" {
+		return "0"
+	}
+	return s
 }

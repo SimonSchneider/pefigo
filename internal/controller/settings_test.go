@@ -65,14 +65,71 @@ func TestSavingTheForecastSettings(t *testing.T) {
 		t.Fatalf("expected a redirect, got %d", resp.StatusCode)
 	}
 
-	if samples, err := svc.GetForecastSamples(t.Context()); err != nil || samples != 500 {
-		t.Fatalf("expected 500 samples, got %d (%v)", samples, err)
+	want := model.ForecastSettings{Samples: 500, Interval: "*-*-01", StartDays: "*-*-28"}
+	if settings, err := svc.GetForecastSettings(t.Context()); err != nil || settings != want {
+		t.Fatalf("expected the Forecast Settings %+v, got %+v (%v)", want, settings, err)
 	}
-	if interval, err := svc.GetForecastSnapshotInterval(t.Context()); err != nil || interval != "*-*-01" {
-		t.Fatalf("expected the snapshot interval *-*-01, got %q (%v)", interval, err)
+}
+
+func TestSavingBlankForecastSettingsSavesTheirDefaults(t *testing.T) {
+	svc, srv := newSettingsServer(t)
+	samples := int64(500)
+	if err := svc.SetForecastSettings(t.Context(), model.ForecastSettingsInput{Samples: &samples, Interval: "*-*-01", StartDays: "*-*-28"}); err != nil {
+		t.Fatalf("set forecast settings: %v", err)
 	}
-	if days, err := svc.GetForecastStartDays(t.Context()); err != nil || days != "*-*-28" {
-		t.Fatalf("expected the Forecast Start Days *-*-28, got %q (%v)", days, err)
+
+	postForm(t, srv, "/settings/forecast", url.Values{"samples": {""}, "snapshot_interval": {""}, "start_days": {""}})
+
+	want := model.ForecastSettings{Samples: 10000, Interval: "*-01-01", StartDays: "*-*-*"}
+	if settings, err := svc.GetForecastSettings(t.Context()); err != nil || settings != want {
+		t.Fatalf("expected the default Forecast Settings %+v, got %+v (%v)", want, settings, err)
+	}
+}
+
+func TestSavingForecastSettingsWithOneInvalidSettingIsABadRequest(t *testing.T) {
+	for _, tc := range []struct{ field, value, named string }{
+		{"samples", "50", "samples 50"},
+		{"snapshot_interval", "28", `Forecast Interval "28"`},
+		{"start_days", "*-*", `Forecast Start Days "*-*"`},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			svc, srv := newSettingsServer(t)
+			form := url.Values{"samples": {"500"}, "snapshot_interval": {"*-*-01"}, "start_days": {"*-*-28"}}
+			form.Set(tc.field, tc.value)
+
+			resp, err := srv.Client().PostForm(srv.URL+"/settings/forecast", form)
+			if err != nil {
+				t.Fatalf("save forecast settings: %v", err)
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read response: %v", err)
+			}
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", resp.StatusCode, body)
+			}
+			if !strings.Contains(string(body), tc.named) {
+				t.Errorf("expected the response to name the %s, got %q", tc.named, body)
+			}
+			want := model.ForecastSettings{Samples: 10000, Interval: "*-01-01", StartDays: "*-*-*"}
+			if settings, err := svc.GetForecastSettings(t.Context()); err != nil || settings != want {
+				t.Fatalf("expected no Forecast Setting saved, got %+v (%v)", settings, err)
+			}
+		})
+	}
+}
+
+func TestTheForecastSettingsShowAStoredInvalidForecastIntervalToBeFixed(t *testing.T) {
+	svc, srv := newSettingsServer(t)
+	if _, err := svc.DB().ExecContext(t.Context(), `INSERT INTO app_setting (key, value) VALUES ('forecast_snapshot_interval', '*-13x-01')`); err != nil {
+		t.Fatalf("store an invalid Forecast Interval: %v", err)
+	}
+
+	page := getPage(t, srv, "/settings?tab=forecast")
+
+	if input := inputNamed(page, "snapshot_interval"); !strings.Contains(input, `value="*-13x-01"`) {
+		t.Fatalf("expected the Forecast Interval field to show the stored *-13x-01, got %s", input)
 	}
 }
 
@@ -105,8 +162,8 @@ func TestTheForecastIntervalIsLabelledForecastInterval(t *testing.T) {
 
 func TestTheForecastSettingsShowTheForecastStartDaysAsForecastStartsOn(t *testing.T) {
 	svc, srv := newSettingsServer(t)
-	if err := svc.SetForecastStartDays(t.Context(), "*-*-28"); err != nil {
-		t.Fatalf("set forecast start days: %v", err)
+	if err := svc.SetForecastSettings(t.Context(), model.ForecastSettingsInput{StartDays: "*-*-28"}); err != nil {
+		t.Fatalf("set forecast settings: %v", err)
 	}
 
 	resp, err := srv.Client().Get(srv.URL + "/settings?tab=forecast")
@@ -125,5 +182,28 @@ func TestTheForecastSettingsShowTheForecastStartDaysAsForecastStartsOn(t *testin
 		if !strings.Contains(string(body), want) {
 			t.Errorf("expected the Forecast settings to contain %s", want)
 		}
+	}
+}
+
+func TestSavingAnUnsupportedDefaultCurrencyIsABadRequest(t *testing.T) {
+	svc, srv := newSettingsServer(t)
+
+	resp, err := srv.Client().PostForm(srv.URL+"/settings/currency", url.Values{"currency": {"XYZ"}})
+	if err != nil {
+		t.Fatalf("save currency settings: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"XYZ"`) {
+		t.Errorf("expected the response to name the currency, got %q", body)
+	}
+	if code, err := svc.GetDefaultCurrency(t.Context()); err != nil || code != "SEK" {
+		t.Fatalf("expected the default currency to stay SEK, got %q (%v)", code, err)
 	}
 }

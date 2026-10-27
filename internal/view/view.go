@@ -142,6 +142,36 @@ type (
 	BillEditView                     = model.BillEditView
 )
 
+// The recurrences a new Salary and Bill account are pre-filled with, the ones the Service saves when
+// none is given.
+const (
+	DefaultSalaryRecurrence      = model.DefaultSalaryRecurrence
+	DefaultBillAccountRecurrence = model.DefaultBillAccountRecurrence
+)
+
+// The Forecast Settings a blank field saves.
+const (
+	DefaultForecastSamples   = model.DefaultForecastSamples
+	DefaultForecastInterval  = model.DefaultForecastInterval
+	DefaultForecastStartDays = model.DefaultForecastStartDays
+)
+
+// The range the Forecast Samples must be within.
+const (
+	MinForecastSamples = model.MinForecastSamples
+	MaxForecastSamples = model.MaxForecastSamples
+)
+
+// The closed sets of Growth Model types, Transfer Template amount types and Bill Amount periods.
+const (
+	GrowthModelFixed      = model.GrowthModelFixed
+	GrowthModelLogNormal  = model.GrowthModelLogNormal
+	TransferAmountFixed   = model.TransferAmountFixed
+	TransferAmountPercent = model.TransferAmountPercent
+	BillPeriodMonthly     = model.BillPeriodMonthly
+	BillPeriodYearly      = model.BillPeriodYearly
+)
+
 const (
 	BalanceUnchanged BalanceChange = model.BalanceUnchanged
 	BalanceIncreased BalanceChange = model.BalanceIncreased

@@ -332,17 +332,17 @@ templ settingsTabForecast(view *SettingsPageView) {
 					</p>
 					<div class="form-control mb-4">
 						<label class="label"><span class="label-text font-medium">Sample Count</span></label>
-						<input type="number" name="samples" class="input input-bordered w-full" value={ fmt.Sprintf("%d", view.ForecastSamples) } min="100" max="100000" step="100"/>
+						<input type="number" name="samples" class="input input-bordered w-full" value={ fmt.Sprintf("%d", view.ForecastSettings.Samples) } placeholder={ fmt.Sprintf("%d", DefaultForecastSamples) } min={ fmt.Sprintf("%d", MinForecastSamples) } max={ fmt.Sprintf("%d", MaxForecastSamples) } step="100"/>
 						<label class="label"><span class="label-text-alt text-base-content/60">Higher values give more accurate results but take longer to compute</span></label>
 					</div>
 					<div class="form-control mb-4">
 						<label class="label"><span class="label-text font-medium">Forecast interval</span></label>
-						<input type="text" name="snapshot_interval" class="input input-bordered w-full" value={ view.ForecastSnapshotInterval } placeholder="*-01-01"/>
+						<input type="text" name="snapshot_interval" class="input input-bordered w-full" value={ string(view.ForecastSettings.Interval) } placeholder={ string(DefaultForecastInterval) }/>
 						<label class="label"><span class="label-text-alt text-base-content/60">Date pattern: *-01-01 (yearly), *-*/6-01 (6 months), *-*-01 (monthly)</span></label>
 					</div>
 					<div class="form-control mb-4">
 						<label class="label"><span class="label-text font-medium">Forecast starts on</span></label>
-						<input type="text" name="start_days" class="input input-bordered w-full" value={ view.ForecastStartDays } placeholder="*-*-*"/>
+						<input type="text" name="start_days" class="input input-bordered w-full" value={ string(view.ForecastSettings.StartDays) } placeholder={ string(DefaultForecastStartDays) }/>
 						<p class="text-xs text-base-content/60 mt-1">
 							Date pattern. The Forecast starts on the first matching day on or after the latest Snapshot; Transfers before then are taken to be in the Snapshots. *-*-* starts on the Snapshot's day; *-*-28 suits Snapshots recorded after the 25th–27th Transfers.
 						</p>

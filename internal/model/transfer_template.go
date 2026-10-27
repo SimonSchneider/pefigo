@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -19,11 +20,30 @@ type TransferTemplateSource struct {
 	EntityID string
 	Label    string
 	EditURL  string
+
+	// recurrenceRow names the stored row a generated Transfer Template's recurrence is from, such as
+	// its Bill account, for an error about it.
+	recurrenceRow string
 }
 
 func (s TransferTemplateSource) IsGenerated() bool {
 	return s.Type != ""
 }
+
+// recurrenceRow names the stored row t's recurrence is from: t itself, or the Salary or Bill account
+// it is generated from.
+func (t TransferTemplate) recurrenceRow() string {
+	if t.Source.recurrenceRow != "" {
+		return t.Source.recurrenceRow
+	}
+	return "transfer template " + t.ID
+}
+
+// The Transfer Template amount types (TransferTemplate.AmountType).
+const (
+	TransferAmountFixed   = "fixed"
+	TransferAmountPercent = "percent"
+)
 
 type TransferTemplate struct {
 	ID            string
@@ -109,6 +129,15 @@ type TransferTemplateInput struct {
 }
 
 func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTemplate) (TransferTemplate, error) {
+	if err := errors.Join(checkRequired("name", inp.Name), checkRequired("start date", inp.StartDate)); err != nil {
+		return TransferTemplate{}, err
+	}
+	if err := checkOneOf("transfer template amount type", inp.AmountType, TransferAmountFixed, TransferAmountPercent); err != nil {
+		return TransferTemplate{}, err
+	}
+	if err := checkDatePattern("transfer template recurrence", inp.Recurrence); err != nil {
+		return TransferTemplate{}, err
+	}
 	if err := checkEndDate(inp.StartDate, inp.EndDate); err != nil {
 		return TransferTemplate{}, err
 	}
@@ -117,7 +146,7 @@ func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTempla
 		d := int64(*inp.EndDate)
 		endDate = &d
 	}
-	amountFixed, err := inp.AmountFixed.Encode()
+	amountFixed, err := orZero(inp.AmountFixed).Encode()
 	if err != nil {
 		return TransferTemplate{}, fmt.Errorf("encoding amount fixed: %w", err)
 	}

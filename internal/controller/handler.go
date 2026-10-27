@@ -3,10 +3,10 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/SimonSchneider/goslu/date"
@@ -21,8 +21,20 @@ type Handler struct {
 	svc *model.Service
 }
 
-func deleteHandler(deleteFn func(ctx context.Context, id string) error, redirectURL string) http.Handler {
+// errHandler serves h, answering an error that rejects the input (model.ErrInvalidInput) with
+// 400 Bad Request and every other error with 500.
+func errHandler(h srvu.HandlerFunc) http.Handler {
 	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		err := h(ctx, w, r)
+		if errors.Is(err, model.ErrInvalidInput) {
+			return srvu.Err(http.StatusBadRequest, err)
+		}
+		return err
+	})
+}
+
+func deleteHandler(deleteFn func(ctx context.Context, id string) error, redirectURL string) http.Handler {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		if err := deleteFn(ctx, r.PathValue("id")); err != nil {
 			return err
 		}
@@ -32,7 +44,7 @@ func deleteHandler(deleteFn func(ctx context.Context, id string) error, redirect
 }
 
 func deleteWithLookupHandler[T any](getFn func(ctx context.Context, id string) (T, error), deleteFn func(ctx context.Context, id string) error, redirectFn func(T) string) http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		id := r.PathValue("id")
 		entity, err := getFn(ctx, id)
 		if err != nil {
@@ -44,6 +56,50 @@ func deleteWithLookupHandler[T any](getFn func(ctx context.Context, id string) (
 		shttp.RedirectToNext(w, r, redirectFn(entity))
 		return nil
 	})
+}
+
+// upsertHandler decodes the form F, saves it with upsertFn and redirects to next, falling back to
+// the URL redirectFn gives for the saved entity. what names the entity in an error.
+func upsertHandler[F, T any](what string, upsertFn func(ctx context.Context, form F) (T, error), redirectFn func(T) string) http.Handler {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		var form F
+		if err := srvu.Decode(r, &form, false); err != nil {
+			return fmt.Errorf("decoding input: %w", err)
+		}
+		saved, err := upsertFn(ctx, form)
+		if err != nil {
+			return fmt.Errorf("upserting %s: %w", what, err)
+		}
+		shttp.RedirectToNext(w, r, redirectFn(saved))
+		return nil
+	})
+}
+
+// accountEditURL is the edit page of the account accountID, where everything that belongs to an
+// account is edited.
+func accountEditURL(accountID string) string {
+	return fmt.Sprintf("/accounts/%s/edit", accountID)
+}
+
+// salaryEditURL is the edit page of the salary salaryID, where everything that belongs to a salary
+// is edited.
+func salaryEditURL(salaryID string) string {
+	return fmt.Sprintf("/salaries/%s/edit", salaryID)
+}
+
+// billAccountEditURL is the edit page of the bill account billAccountID, which lists its bills.
+func billAccountEditURL(billAccountID string) string {
+	return fmt.Sprintf("/bills/%s/edit", billAccountID)
+}
+
+// billEditURL is the edit page of the bill billID, where its amounts are edited.
+func billEditURL(billID string) string {
+	return fmt.Sprintf("/bill-items/%s/edit", billID)
+}
+
+// transferTemplateEditURL is the edit page of the transfer template transferTemplateID.
+func transferTemplateEditURL(transferTemplateID string) string {
+	return fmt.Sprintf("/transfer-templates/%s/edit", transferTemplateID)
 }
 
 func NewHandler(svc *model.Service, public fs.FS) http.Handler {
@@ -146,7 +202,7 @@ func NewHandler(svc *model.Service, public fs.FS) http.Handler {
 	mux.Handle("POST /transfer-template-categories/{$}", h.transferTemplateCategoryUpsert())
 	mux.Handle("POST /transfer-template-categories/{id}/delete", h.transferTemplateCategoryDelete())
 
-	mux.Handle("POST /sleep/{$}", srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	mux.Handle("POST /sleep/{$}", errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		time.Sleep(1 * time.Second)
 		w.WriteHeader(200)
 		return nil
@@ -158,7 +214,7 @@ func NewHandler(svc *model.Service, public fs.FS) http.Handler {
 // ---- Dashboard ----
 
 func (h *Handler) dashboardPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		data, err := h.svc.GetDashboardData(ctx)
 		if err != nil {
 			return fmt.Errorf("computing dashboard view: %w", err)
@@ -170,7 +226,7 @@ func (h *Handler) dashboardPage() http.Handler {
 // ---- Budget ----
 
 func (h *Handler) budgetPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		data, err := h.svc.GetBudgetData(ctx)
 		if err != nil {
 			return fmt.Errorf("computing budget view: %w", err)
@@ -182,7 +238,7 @@ func (h *Handler) budgetPage() http.Handler {
 // ---- Accounts ----
 
 func (h *Handler) accountsPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		data, err := h.svc.GetAccountsPageData(ctx, extractExcludedTypeIDs(r))
 		if err != nil {
 			return fmt.Errorf("getting accounts page data: %w", err)
@@ -192,7 +248,7 @@ func (h *Handler) accountsPage() http.Handler {
 }
 
 func (h *Handler) accountNewPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		data, err := h.svc.GetAccountNewPageData(ctx, extractExcludedTypeIDs(r))
 		if err != nil {
 			return fmt.Errorf("getting account new page data: %w", err)
@@ -202,7 +258,7 @@ func (h *Handler) accountNewPage() http.Handler {
 }
 
 func (h *Handler) accountEditPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		data, err := h.svc.GetAccountEditPageData(ctx, r.PathValue("id"), extractExcludedTypeIDs(r))
 		if err != nil {
 			return fmt.Errorf("getting account edit page data: %w", err)
@@ -212,144 +268,89 @@ func (h *Handler) accountEditPage() http.Handler {
 }
 
 func (h *Handler) accountUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp accountInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		var startupShares *model.StartupShareAccountInput
-		if r.FormValue("account_form_mode") == "startup" {
-			var ssaInp startupShareAccountInputForm
-			if err := srvu.Decode(r, &ssaInp, false); err != nil {
-				return fmt.Errorf("decoding startup share account input: %w", err)
-			}
-			startupShares = &ssaInp.StartupShareAccountInput
-		}
-		acc, err := h.svc.UpsertAccountWithStartupShares(ctx, inp.AccountInput, startupShares)
-		if err != nil {
-			return fmt.Errorf("upserting account: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/accounts/%s", acc.ID))
-		return nil
+	return upsertHandler("account", func(ctx context.Context, f accountInputForm) (model.Account, error) {
+		return h.svc.UpsertAccountWithStartupShares(ctx, f.AccountInput, f.StartupShares)
+	}, func(acc model.Account) string {
+		return accountEditURL(acc.ID)
 	})
 }
 
 func (h *Handler) accountDelete() http.Handler {
-	return deleteHandler(h.svc.DeleteAccount, "/accounts/")
+	return deleteHandler(h.svc.DeleteAccount, "/accounts")
 }
 
 // ---- Account Growth Models ----
 
 func (h *Handler) accountGrowthModelUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp accountGrowthModelInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		_, err := h.svc.UpsertAccountGrowthModel(ctx, inp.AccountGrowthModelInput)
-		if err != nil {
-			return fmt.Errorf("upserting account growth model: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/accounts/%s", inp.AccountID))
-		return nil
+	return upsertHandler("account growth model", func(ctx context.Context, f accountGrowthModelInputForm) (model.GrowthModel, error) {
+		return h.svc.UpsertAccountGrowthModel(ctx, f.AccountGrowthModelInput)
+	}, func(gm model.GrowthModel) string {
+		return accountEditURL(gm.AccountID)
 	})
 }
 
 func (h *Handler) accountGrowthModelDelete() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		id := r.PathValue("id")
-		if err := h.svc.DeleteAccountGrowthModel(ctx, id); err != nil {
-			return err
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/accounts/%s", id))
-		return nil
+	return deleteWithLookupHandler(h.svc.GetGrowthModel, h.svc.DeleteAccountGrowthModel, func(gm model.GrowthModel) string {
+		return accountEditURL(gm.AccountID)
 	})
 }
 
 // ---- Startup Shares ----
 
 func (h *Handler) startupShareAccountUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp startupShareAccountInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		_, err := h.svc.UpsertStartupShareAccount(ctx, inp.StartupShareAccountInput)
-		if err != nil {
-			return fmt.Errorf("upserting startup share account: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/accounts/%s/edit", inp.AccountID))
-		return nil
+	return upsertHandler("startup share account", func(ctx context.Context, f startupShareAccountInputForm) (model.StartupShareAccount, error) {
+		return h.svc.UpsertStartupShareAccount(ctx, f.StartupShareAccountInput)
+	}, func(ssa model.StartupShareAccount) string {
+		return accountEditURL(ssa.AccountID)
 	})
 }
 
 func (h *Handler) investmentRoundUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp investmentRoundInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		_, err := h.svc.UpsertInvestmentRound(ctx, inp.InvestmentRoundInput)
-		if err != nil {
-			return fmt.Errorf("upserting investment round: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/accounts/%s/edit", inp.AccountID))
-		return nil
+	return upsertHandler("investment round", func(ctx context.Context, f investmentRoundInputForm) (model.InvestmentRound, error) {
+		return h.svc.UpsertInvestmentRound(ctx, f.InvestmentRoundInput)
+	}, func(r model.InvestmentRound) string {
+		return accountEditURL(r.AccountID)
 	})
 }
 
 func (h *Handler) investmentRoundDelete() http.Handler {
 	return deleteWithLookupHandler(h.svc.GetInvestmentRound, h.svc.DeleteInvestmentRound, func(r model.InvestmentRound) string {
-		return fmt.Sprintf("/accounts/%s/edit", r.AccountID)
+		return accountEditURL(r.AccountID)
 	})
 }
 
 func (h *Handler) shareChangeUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp shareChangeInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		_, err := h.svc.UpsertShareChange(ctx, inp.ShareChangeInput)
-		if err != nil {
-			return fmt.Errorf("upserting share change: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/accounts/%s/edit", inp.AccountID))
-		return nil
+	return upsertHandler("share change", func(ctx context.Context, f shareChangeInputForm) (model.ShareChange, error) {
+		return h.svc.UpsertShareChange(ctx, f.ShareChangeInput)
+	}, func(sc model.ShareChange) string {
+		return accountEditURL(sc.AccountID)
 	})
 }
 
 func (h *Handler) shareChangeDelete() http.Handler {
 	return deleteWithLookupHandler(h.svc.GetShareChange, h.svc.DeleteShareChange, func(sc model.ShareChange) string {
-		return fmt.Sprintf("/accounts/%s/edit", sc.AccountID)
+		return accountEditURL(sc.AccountID)
 	})
 }
 
 func (h *Handler) startupShareOptionUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp startupShareOptionInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		_, err := h.svc.UpsertStartupShareOption(ctx, inp.StartupShareOptionInput)
-		if err != nil {
-			return fmt.Errorf("upserting startup share option: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/accounts/%s/edit", inp.AccountID))
-		return nil
+	return upsertHandler("startup share option", func(ctx context.Context, f startupShareOptionInputForm) (model.StartupShareOption, error) {
+		return h.svc.UpsertStartupShareOption(ctx, f.StartupShareOptionInput)
+	}, func(o model.StartupShareOption) string {
+		return accountEditURL(o.AccountID)
 	})
 }
 
 func (h *Handler) startupShareOptionDelete() http.Handler {
 	return deleteWithLookupHandler(h.svc.GetStartupShareOption, h.svc.DeleteStartupShareOption, func(o model.StartupShareOption) string {
-		return fmt.Sprintf("/accounts/%s/edit", o.AccountID)
+		return accountEditURL(o.AccountID)
 	})
 }
 
 // ---- Salaries ----
 
 func (h *Handler) salariesPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		salaries, err := h.svc.GetSalariesPageData(ctx)
 		if err != nil {
 			return fmt.Errorf("getting salaries page data: %w", err)
@@ -359,7 +360,7 @@ func (h *Handler) salariesPage() http.Handler {
 }
 
 func (h *Handler) salaryNewPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		data, err := h.svc.GetSalaryNewPageData(ctx)
 		if err != nil {
 			return fmt.Errorf("getting salary new page data: %w", err)
@@ -369,7 +370,7 @@ func (h *Handler) salaryNewPage() http.Handler {
 }
 
 func (h *Handler) salaryEditPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		id := r.PathValue("id")
 		data, err := h.svc.GetSalaryEditPageData(ctx, id)
 		if err != nil {
@@ -385,17 +386,10 @@ func (h *Handler) salaryEditPage() http.Handler {
 }
 
 func (h *Handler) salaryUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp salaryInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		sal, err := h.svc.UpsertSalary(ctx, inp.Salary)
-		if err != nil {
-			return fmt.Errorf("upserting salary: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/salaries/%s/edit", sal.ID))
-		return nil
+	return upsertHandler("salary", func(ctx context.Context, f salaryInputForm) (model.Salary, error) {
+		return h.svc.UpsertSalary(ctx, f.Salary)
+	}, func(s model.Salary) string {
+		return salaryEditURL(s.ID)
 	})
 }
 
@@ -404,17 +398,10 @@ func (h *Handler) salaryDelete() http.Handler {
 }
 
 func (h *Handler) salaryAmountUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp salaryAmountInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		_, err := h.svc.UpsertSalaryAmount(ctx, inp.SalaryAmount)
-		if err != nil {
-			return fmt.Errorf("upserting salary amount: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/salaries/%s/edit", inp.SalaryID))
-		return nil
+	return upsertHandler("salary amount", func(ctx context.Context, f salaryAmountInputForm) (model.SalaryAmount, error) {
+		return h.svc.UpsertSalaryAmount(ctx, f.SalaryAmount)
+	}, func(a model.SalaryAmount) string {
+		return salaryEditURL(a.SalaryID)
 	})
 }
 
@@ -423,17 +410,10 @@ func (h *Handler) salaryAmountDelete() http.Handler {
 }
 
 func (h *Handler) salaryAdjustmentUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp salaryAdjustmentInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		_, err := h.svc.UpsertSalaryAdjustment(ctx, inp.SalaryAdjustment)
-		if err != nil {
-			return fmt.Errorf("upserting salary adjustment: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/salaries/%s/edit", inp.SalaryID))
-		return nil
+	return upsertHandler("salary adjustment", func(ctx context.Context, f salaryAdjustmentInputForm) (model.SalaryAdjustment, error) {
+		return h.svc.UpsertSalaryAdjustment(ctx, f.SalaryAdjustment)
+	}, func(a model.SalaryAdjustment) string {
+		return salaryEditURL(a.SalaryID)
 	})
 }
 
@@ -442,17 +422,10 @@ func (h *Handler) salaryAdjustmentDelete() http.Handler {
 }
 
 func (h *Handler) partialParentalLeaveUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp partialParentalLeaveInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		_, err := h.svc.UpsertPartialParentalLeave(ctx, inp.PartialParentalLeave)
-		if err != nil {
-			return fmt.Errorf("upserting partial parental leave: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/salaries/%s/edit", inp.SalaryID))
-		return nil
+	return upsertHandler("partial parental leave", func(ctx context.Context, f partialParentalLeaveInputForm) (model.PartialParentalLeave, error) {
+		return h.svc.UpsertPartialParentalLeave(ctx, f.PartialParentalLeave)
+	}, func(l model.PartialParentalLeave) string {
+		return salaryEditURL(l.SalaryID)
 	})
 }
 
@@ -461,17 +434,10 @@ func (h *Handler) partialParentalLeaveDelete() http.Handler {
 }
 
 func (h *Handler) fullParentalLeaveUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp fullParentalLeaveInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		_, err := h.svc.UpsertFullParentalLeave(ctx, inp.FullParentalLeave)
-		if err != nil {
-			return fmt.Errorf("upserting full parental leave: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/salaries/%s/edit", inp.SalaryID))
-		return nil
+	return upsertHandler("full parental leave", func(ctx context.Context, f fullParentalLeaveInputForm) (model.FullParentalLeave, error) {
+		return h.svc.UpsertFullParentalLeave(ctx, f.FullParentalLeave)
+	}, func(l model.FullParentalLeave) string {
+		return salaryEditURL(l.SalaryID)
 	})
 }
 
@@ -482,7 +448,7 @@ func (h *Handler) fullParentalLeaveDelete() http.Handler {
 // ---- Bills ----
 
 func (h *Handler) billsPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		pageData, err := h.svc.GetBillAccountsPageData(ctx)
 		if err != nil {
 			return fmt.Errorf("getting bills page data: %w", err)
@@ -492,7 +458,7 @@ func (h *Handler) billsPage() http.Handler {
 }
 
 func (h *Handler) billAccountNewPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		data, err := h.svc.GetBillAccountNewPageData(ctx)
 		if err != nil {
 			return fmt.Errorf("getting bill account new page data: %w", err)
@@ -502,7 +468,7 @@ func (h *Handler) billAccountNewPage() http.Handler {
 }
 
 func (h *Handler) billAccountEditPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		data, err := h.svc.GetBillAccountEditPageData(ctx, r.PathValue("id"))
 		if err != nil {
 			return fmt.Errorf("getting bill account edit page data: %w", err)
@@ -512,17 +478,10 @@ func (h *Handler) billAccountEditPage() http.Handler {
 }
 
 func (h *Handler) billAccountUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp billAccountInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		ba, err := h.svc.UpsertBillAccount(ctx, inp.BillAccount)
-		if err != nil {
-			return fmt.Errorf("upserting bill account: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/bills/%s/edit", ba.ID))
-		return nil
+	return upsertHandler("bill account", func(ctx context.Context, f billAccountInputForm) (model.BillAccount, error) {
+		return h.svc.UpsertBillAccount(ctx, f.BillAccount)
+	}, func(ba model.BillAccount) string {
+		return billAccountEditURL(ba.ID)
 	})
 }
 
@@ -531,7 +490,7 @@ func (h *Handler) billAccountDelete() http.Handler {
 }
 
 func (h *Handler) billEditPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		data, err := h.svc.GetBillEditPageData(ctx, r.PathValue("id"))
 		if err != nil {
 			return fmt.Errorf("getting bill edit page data: %w", err)
@@ -541,38 +500,24 @@ func (h *Handler) billEditPage() http.Handler {
 }
 
 func (h *Handler) billUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp billInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		bill, err := h.svc.UpsertBill(ctx, inp.Bill)
-		if err != nil {
-			return fmt.Errorf("upserting bill: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/bill-items/%s/edit", bill.ID))
-		return nil
+	return upsertHandler("bill", func(ctx context.Context, f billInputForm) (model.Bill, error) {
+		return h.svc.UpsertBill(ctx, f.Bill)
+	}, func(b model.Bill) string {
+		return billEditURL(b.ID)
 	})
 }
 
 func (h *Handler) billDelete() http.Handler {
 	return deleteWithLookupHandler(h.svc.GetBill, h.svc.DeleteBill, func(b model.Bill) string {
-		return fmt.Sprintf("/bills/%s/edit", b.BillAccountID)
+		return billAccountEditURL(b.BillAccountID)
 	})
 }
 
 func (h *Handler) billAmountUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp billAmountInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		_, err := h.svc.UpsertBillAmount(ctx, inp.BillAmount)
-		if err != nil {
-			return fmt.Errorf("upserting bill amount: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/bill-items/%s/edit", inp.BillID))
-		return nil
+	return upsertHandler("bill amount", func(ctx context.Context, f billAmountInputForm) (model.BillAmount, error) {
+		return h.svc.UpsertBillAmount(ctx, f.BillAmount)
+	}, func(a model.BillAmount) string {
+		return billEditURL(a.BillID)
 	})
 }
 
@@ -581,7 +526,7 @@ func (h *Handler) billAmountDelete() http.Handler {
 }
 
 func (h *Handler) faviconHandler() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		domain := r.PathValue("domain")
 		data, contentType, err := h.svc.GetOrFetchFavicon(ctx, domain)
 		if err != nil {
@@ -595,7 +540,7 @@ func (h *Handler) faviconHandler() http.Handler {
 }
 
 func (h *Handler) salaryKommuner() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		year := r.URL.Query().Get("year")
 		if year == "" {
 			year = fmt.Sprintf("%d", time.Now().Year())
@@ -610,7 +555,7 @@ func (h *Handler) salaryKommuner() http.Handler {
 }
 
 func (h *Handler) salaryForsamlingar() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		kommun := r.URL.Query().Get("kommun")
 		year := r.URL.Query().Get("year")
 		if year == "" {
@@ -631,7 +576,7 @@ func (h *Handler) salaryForsamlingar() http.Handler {
 // ---- Transfer Templates ----
 
 func (h *Handler) transferTemplatesPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		data, err := h.svc.GetTransferTemplatesPageData(ctx)
 		if err != nil {
 			return fmt.Errorf("getting transfer templates page data: %w", err)
@@ -641,7 +586,7 @@ func (h *Handler) transferTemplatesPage() http.Handler {
 }
 
 func (h *Handler) transferTemplatesNewPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		data, err := h.svc.GetTransferTemplateNewPageData(ctx)
 		if err != nil {
 			return fmt.Errorf("getting transfer template new page data: %w", err)
@@ -651,7 +596,7 @@ func (h *Handler) transferTemplatesNewPage() http.Handler {
 }
 
 func (h *Handler) transferTemplatesEditPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		data, err := h.svc.GetTransferTemplateEditPageData(ctx, r.PathValue("id"))
 		if err != nil {
 			return fmt.Errorf("getting transfer template edit page data: %w", err)
@@ -661,30 +606,20 @@ func (h *Handler) transferTemplatesEditPage() http.Handler {
 }
 
 func (h *Handler) transferTemplateUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		if err := r.ParseForm(); err != nil {
-			return fmt.Errorf("parsing form: %w", err)
-		}
-		var inp transferTemplateForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		t, err := h.svc.UpsertTransferTemplate(ctx, inp.TransferTemplate)
-		if err != nil {
-			return fmt.Errorf("upserting transfer template: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/transfer-templates/%s/edit", t.ID))
-		return nil
+	return upsertHandler("transfer template", func(ctx context.Context, f transferTemplateForm) (model.TransferTemplate, error) {
+		return h.svc.UpsertTransferTemplate(ctx, f.TransferTemplate)
+	}, func(t model.TransferTemplate) string {
+		return transferTemplateEditURL(t.ID)
 	})
 }
 
 func (h *Handler) transferTemplateDuplicate() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		tr, err := h.svc.DuplicateTransferTemplate(ctx, r.PathValue("id"))
 		if err != nil {
 			return fmt.Errorf("duplicating transfer template: %w", err)
 		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/transfer-templates/%s/edit", tr.ID))
+		shttp.RedirectToNext(w, r, transferTemplateEditURL(tr.ID))
 		return nil
 	})
 }
@@ -704,7 +639,7 @@ var validTabs = map[string]bool{
 }
 
 func (h *Handler) settingsPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		tab := r.URL.Query().Get("tab")
 		if !validTabs[tab] {
 			tab = "categories"
@@ -720,13 +655,13 @@ func (h *Handler) settingsPage() http.Handler {
 // ---- Transfer Template Categories ----
 
 func (h *Handler) transferTemplateCategoryNewPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		return view.NewView(ctx, w, r).Render(view.Page("Transfer Template Categories", view.PageEditTransferTemplateCategory(&view.TransferTemplateCategoryEditView{})))
 	})
 }
 
 func (h *Handler) transferTemplateCategoryEditPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		c, err := h.svc.GetCategory(ctx, r.PathValue("id"))
 		if err != nil {
 			return fmt.Errorf("getting category: %w", err)
@@ -738,16 +673,10 @@ func (h *Handler) transferTemplateCategoryEditPage() http.Handler {
 }
 
 func (h *Handler) transferTemplateCategoryUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp transferTemplateCategoryInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		if _, err := h.svc.UpsertCategory(ctx, inp.TransferTemplateCategoryInput); err != nil {
-			return fmt.Errorf("upserting category: %w", err)
-		}
-		shttp.RedirectToNext(w, r, "/settings?tab=categories")
-		return nil
+	return upsertHandler("category", func(ctx context.Context, f transferTemplateCategoryInputForm) (model.TransferTemplateCategory, error) {
+		return h.svc.UpsertCategory(ctx, f.TransferTemplateCategoryInput)
+	}, func(model.TransferTemplateCategory) string {
+		return "/settings?tab=categories"
 	})
 }
 
@@ -758,13 +687,13 @@ func (h *Handler) transferTemplateCategoryDelete() http.Handler {
 // ---- Account Types ----
 
 func (h *Handler) accountTypeNewPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		return view.NewView(ctx, w, r).Render(view.Page("Account Types", view.PageEditAccountType(view.AccountTypeEditView(view.AccountType{}))))
 	})
 }
 
 func (h *Handler) accountTypeEditPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		at, err := h.svc.GetAccountType(ctx, r.PathValue("id"))
 		if err != nil {
 			return fmt.Errorf("getting account type: %w", err)
@@ -774,17 +703,10 @@ func (h *Handler) accountTypeEditPage() http.Handler {
 }
 
 func (h *Handler) accountTypeUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp accountTypeInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		_, err := h.svc.UpsertAccountType(ctx, inp.AccountTypeInput)
-		if err != nil {
-			return fmt.Errorf("upserting account type: %w", err)
-		}
-		shttp.RedirectToNext(w, r, "/settings?tab=categories")
-		return nil
+	return upsertHandler("account type", func(ctx context.Context, f accountTypeInputForm) (model.AccountType, error) {
+		return h.svc.UpsertAccountType(ctx, f.AccountTypeInput)
+	}, func(model.AccountType) string {
+		return "/settings?tab=categories"
 	})
 }
 
@@ -795,13 +717,13 @@ func (h *Handler) accountTypeDelete() http.Handler {
 // ---- Special Dates ----
 
 func (h *Handler) specialDateNewPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		return view.NewView(ctx, w, r).Render(view.Page("Special Dates", view.PageEditSpecialDate(view.SpecialDateEditView(view.SpecialDate{}))))
 	})
 }
 
 func (h *Handler) specialDateEditPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		sd, err := h.svc.GetSpecialDate(ctx, r.PathValue("id"))
 		if err != nil {
 			return fmt.Errorf("getting special date: %w", err)
@@ -811,17 +733,10 @@ func (h *Handler) specialDateEditPage() http.Handler {
 }
 
 func (h *Handler) specialDateUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp specialDateInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		_, err := h.svc.UpsertSpecialDate(ctx, inp.SpecialDateInput)
-		if err != nil {
-			return fmt.Errorf("upserting special date: %w", err)
-		}
-		shttp.RedirectToNext(w, r, "/settings?tab=special-dates")
-		return nil
+	return upsertHandler("special date", func(ctx context.Context, f specialDateInputForm) (model.SpecialDate, error) {
+		return h.svc.UpsertSpecialDate(ctx, f.SpecialDateInput)
+	}, func(model.SpecialDate) string {
+		return "/settings?tab=special-dates"
 	})
 }
 
@@ -832,7 +747,7 @@ func (h *Handler) specialDateDelete() http.Handler {
 // ---- Snapshots Table ----
 
 func (h *Handler) snapshotsTablePage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		data, err := h.svc.GetSnapshotsTablePageData(ctx, extractExcludedTypeIDs(r))
 		if err != nil {
 			return fmt.Errorf("getting snapshots table page data: %w", err)
@@ -842,7 +757,7 @@ func (h *Handler) snapshotsTablePage() http.Handler {
 }
 
 func (h *Handler) snapshotsTableModifyDate() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		var inp dateInputForm
 		if err := srvu.Decode(r, &inp, false); err != nil {
 			return fmt.Errorf("decoding input: %w", err)
@@ -856,7 +771,7 @@ func (h *Handler) snapshotsTableModifyDate() http.Handler {
 }
 
 func (h *Handler) snapshotsTableEmptyRow() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		row, err := h.svc.GetEmptySnapshotRow(ctx)
 		if err != nil {
 			return fmt.Errorf("getting empty snapshot row: %w", err)
@@ -866,7 +781,7 @@ func (h *Handler) snapshotsTableEmptyRow() http.Handler {
 }
 
 func (h *Handler) accountSnapshotUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		var inp accountSnapshotInputForm
 		if err := srvu.Decode(r, &inp, false); err != nil {
 			return fmt.Errorf("decoding input: %w", err)
@@ -879,7 +794,7 @@ func (h *Handler) accountSnapshotUpsert() http.Handler {
 		if r.Header.Get("HX-Request") == "true" {
 			return view.NewView(ctx, w, r).Render(view.SnapshotCell(accID, inp.Date, snap))
 		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/accounts/%s", accID))
+		shttp.RedirectToNext(w, r, accountEditURL(accID))
 		return nil
 	})
 }
@@ -887,7 +802,7 @@ func (h *Handler) accountSnapshotUpsert() http.Handler {
 // ---- Transfers ----
 
 func (h *Handler) transfersPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		var day date.Date
 		if err := shttp.Parse(&day, date.ParseDate, r.FormValue("day"), date.Today()); err != nil {
 			return fmt.Errorf("parsing day: %w", err)
@@ -912,7 +827,7 @@ func (h *Handler) transfersPage() http.Handler {
 }
 
 func (h *Handler) transferChartPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		var groupBy view.TransferChartGroupBy
 		if err := shttp.Parse(&groupBy, model.ParseTransferChartGroupBy, r.FormValue("group_by"), model.GroupByAccount); err != nil {
 			return fmt.Errorf("parsing group_by: %w", err)
@@ -922,7 +837,7 @@ func (h *Handler) transferChartPage() http.Handler {
 }
 
 func (h *Handler) transferChartData() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		var groupBy view.TransferChartGroupBy
 		if err := shttp.Parse(&groupBy, model.ParseTransferChartGroupBy, r.FormValue("group_by"), model.GroupByAccount); err != nil {
 			return fmt.Errorf("parsing group_by: %w", err)
@@ -941,36 +856,50 @@ func (h *Handler) transferChartData() http.Handler {
 // ---- Chart ----
 
 func (h *Handler) chartPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var p predictionParamsForm
-		if err := srvu.Decode(r, &p, false); err != nil {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		var inp predictionParamsForm
+		if err := srvu.Decode(r, &inp, false); err != nil {
 			return fmt.Errorf("decoding input: %w", err)
 		}
-		return view.NewView(ctx, w, r).Render(view.Page("Chart", view.PageChart(p.PredictionParams)))
+		params, err := inp.WithDefaults()
+		if err != nil {
+			return err
+		}
+		return view.NewView(ctx, w, r).Render(view.Page("Chart", view.PageChart(params)))
 	})
 }
 
+// ssePredictionEventHandler streams a Forecast as server-sent events. The stream starts with the first
+// event, so an error before it, such as invalid parameters, is still answered with its own status.
 type ssePredictionEventHandler struct {
-	w *srvu.SSESender
+	w      http.ResponseWriter
+	stream *srvu.SSESender
+}
+
+func (s *ssePredictionEventHandler) sender() *srvu.SSESender {
+	if s.stream == nil {
+		s.stream = srvu.SSEResponse(s.w)
+	}
+	return s.stream
 }
 
 func (s *ssePredictionEventHandler) Setup(e model.PredictionSetupEvent) error {
-	return s.w.SendNamedJson("setup", e)
+	return s.sender().SendNamedJson("setup", e)
 }
 func (s *ssePredictionEventHandler) Snapshot(e model.PredictionBalanceSnapshot) error {
-	return s.w.SendNamedJson("balanceSnapshot", e)
+	return s.sender().SendNamedJson("balanceSnapshot", e)
 }
 func (s *ssePredictionEventHandler) Close() error {
-	return s.w.SendEventWithoutData("close")
+	return s.sender().SendEventWithoutData("close")
 }
 
 func (h *Handler) chartsDataStream() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		var params predictionParamsForm
 		if err := srvu.Decode(r, &params, false); err != nil {
 			return fmt.Errorf("decoding input: %w", err)
 		}
-		if err := h.svc.RunPrediction(ctx, &ssePredictionEventHandler{w: srvu.SSEResponse(w)}, params.PredictionParams); err != nil {
+		if err := h.svc.RunPrediction(ctx, &ssePredictionEventHandler{w: w}, params.PredictionParams); err != nil {
 			return fmt.Errorf("running prediction: %w", err)
 		}
 		return nil
@@ -978,13 +907,13 @@ func (h *Handler) chartsDataStream() http.Handler {
 }
 
 func (h *Handler) sweYearlyParamsNewPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		return view.NewView(ctx, w, r).Render(view.Page("New SWE Yearly Params", view.SweYearlyParamsEditPage(view.SweYearlyParams{}, false)))
 	})
 }
 
 func (h *Handler) sweYearlyParamsEditPage() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		p, err := h.svc.GetSweYearlyParams(ctx, r.PathValue("id"))
 		if err != nil {
 			return fmt.Errorf("getting swe yearly params: %w", err)
@@ -994,17 +923,10 @@ func (h *Handler) sweYearlyParamsEditPage() http.Handler {
 }
 
 func (h *Handler) sweYearlyParamsUpsert() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var inp sweYearlyParamsInputForm
-		if err := srvu.Decode(r, &inp, false); err != nil {
-			return fmt.Errorf("decoding input: %w", err)
-		}
-		p, err := h.svc.UpsertSweYearlyParams(ctx, inp.SweYearlyParams)
-		if err != nil {
-			return fmt.Errorf("upserting swe yearly params: %w", err)
-		}
-		shttp.RedirectToNext(w, r, fmt.Sprintf("/settings/swe-yearly-params/%s/edit", p.ID))
-		return nil
+	return upsertHandler("swe yearly params", func(ctx context.Context, f sweYearlyParamsInputForm) (model.SweYearlyParams, error) {
+		return h.svc.UpsertSweYearlyParams(ctx, f.SweYearlyParams)
+	}, func(p model.SweYearlyParams) string {
+		return fmt.Sprintf("/settings/swe-yearly-params/%s/edit", p.ID)
 	})
 }
 
@@ -1013,15 +935,11 @@ func (h *Handler) sweYearlyParamsDelete() http.Handler {
 }
 
 func (h *Handler) currencySettingsSave() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		if err := r.ParseForm(); err != nil {
 			return fmt.Errorf("parsing form: %w", err)
 		}
-		code := r.FormValue("currency")
-		if code == "" {
-			return fmt.Errorf("currency code is required")
-		}
-		if err := h.svc.SetDefaultCurrency(ctx, code); err != nil {
+		if err := h.svc.SetDefaultCurrency(ctx, r.FormValue("currency")); err != nil {
 			return fmt.Errorf("setting default currency: %w", err)
 		}
 		shttp.RedirectToNext(w, r, "/settings?tab=currency")
@@ -1030,31 +948,13 @@ func (h *Handler) currencySettingsSave() http.Handler {
 }
 
 func (h *Handler) forecastSettingsSave() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		if err := r.ParseForm(); err != nil {
-			return fmt.Errorf("parsing form: %w", err)
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		var inp forecastSettingsInputForm
+		if err := srvu.Decode(r, &inp, false); err != nil {
+			return fmt.Errorf("decoding input: %w", err)
 		}
-		samplesStr := r.FormValue("samples")
-		if samplesStr != "" {
-			samples, err := strconv.ParseInt(samplesStr, 10, 64)
-			if err != nil {
-				return fmt.Errorf("parsing samples: %w", err)
-			}
-			if err := h.svc.SetForecastSamples(ctx, samples); err != nil {
-				return fmt.Errorf("setting forecast samples: %w", err)
-			}
-		}
-		snapshotInterval := r.FormValue("snapshot_interval")
-		if snapshotInterval != "" {
-			if err := h.svc.SetForecastSnapshotInterval(ctx, snapshotInterval); err != nil {
-				return fmt.Errorf("setting forecast snapshot interval: %w", err)
-			}
-		}
-		startDays := r.FormValue("start_days")
-		if startDays != "" {
-			if err := h.svc.SetForecastStartDays(ctx, startDays); err != nil {
-				return fmt.Errorf("setting forecast start days: %w", err)
-			}
+		if err := h.svc.SetForecastSettings(ctx, inp.ForecastSettingsInput); err != nil {
+			return fmt.Errorf("setting forecast settings: %w", err)
 		}
 		shttp.RedirectToNext(w, r, "/settings?tab=forecast")
 		return nil
@@ -1064,7 +964,7 @@ func (h *Handler) forecastSettingsSave() http.Handler {
 // dashboardForecastStream streams the Dashboard Forecast: the history and marklines, then the
 // stored forecast as the events that would have built it, then every change as it happens.
 func (h *Handler) dashboardForecastStream() http.Handler {
-	return srvu.ErrHandlerFunc(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		sub, err := h.svc.DashboardForecast().Subscribe(ctx)
 		if err != nil {
 			return fmt.Errorf("subscribing to the dashboard forecast: %w", err)

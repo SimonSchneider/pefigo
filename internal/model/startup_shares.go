@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/SimonSchneider/goslu/sid"
 	"github.com/SimonSchneider/pefigo/internal/pdb"
 	"github.com/SimonSchneider/pefigo/pkg/finance"
+	"github.com/SimonSchneider/pefigo/pkg/ui"
 	"github.com/SimonSchneider/pefigo/pkg/uncertain"
 )
 
@@ -136,10 +138,44 @@ func (opt StartupShareOption) GetEndDateString() string {
 	return opt.EndDate.String()
 }
 
+// The Tax Rate and Valuation Discount a Startup Share Account gets when they aren't given.
+const (
+	DefaultStartupShareTaxRate = 0.15
+	DefaultValuationDiscount   = 0.50
+)
+
+// StartupShareAccountInput holds the Tax Rate and Valuation Discount as fractions: 0.15 is 15%. A nil
+// one is not given, and gets its default.
 type StartupShareAccountInput struct {
 	AccountID               string
-	TaxRate                 float64
-	ValuationDiscountFactor float64
+	TaxRate                 *float64
+	ValuationDiscountFactor *float64
+}
+
+// startupShareAccount is the Startup Share Account inp saves, with its defaults applied. It rejects a
+// Tax Rate or Valuation Discount outside 0–100%.
+func (inp StartupShareAccountInput) startupShareAccount() (StartupShareAccount, error) {
+	taxRate, err := fractionOrDefault("tax rate", inp.TaxRate, DefaultStartupShareTaxRate)
+	if err != nil {
+		return StartupShareAccount{}, err
+	}
+	discount, err := fractionOrDefault("valuation discount", inp.ValuationDiscountFactor, DefaultValuationDiscount)
+	if err != nil {
+		return StartupShareAccount{}, err
+	}
+	return StartupShareAccount{AccountID: inp.AccountID, TaxRate: taxRate, ValuationDiscountFactor: discount}, nil
+}
+
+// fractionOrDefault is the given fraction, or def when it isn't given. It rejects a given fraction
+// outside 0–100%, naming field.
+func fractionOrDefault(field string, given *float64, def float64) (float64, error) {
+	if given == nil {
+		return def, nil
+	}
+	if !(*given >= 0 && *given <= 1) {
+		return 0, fmt.Errorf("%w: %s %s%% is not within 0–100%%", ErrInvalidInput, field, ui.FormatPercent(*given))
+	}
+	return *given, nil
 }
 
 type InvestmentRoundInput struct {
@@ -223,15 +259,24 @@ func startupShareOptionFromDB(o pdb.StartupShareOption) StartupShareOption {
 }
 
 func (s *Service) UpsertStartupShareAccount(ctx context.Context, inp StartupShareAccountInput) (StartupShareAccount, error) {
-	ssa, err := s.q.UpsertStartupShareAccount(ctx, pdb.UpsertStartupShareAccountParams{
-		AccountID:               inp.AccountID,
-		TaxRate:                 inp.TaxRate,
-		ValuationDiscountFactor: inp.ValuationDiscountFactor,
+	// The account is checked here, not in startupShareAccount: UpsertAccountWithStartupShares checks
+	// the rest before the account it is for is saved.
+	if err := checkRequired("account", inp.AccountID); err != nil {
+		return StartupShareAccount{}, err
+	}
+	ssa, err := inp.startupShareAccount()
+	if err != nil {
+		return StartupShareAccount{}, err
+	}
+	saved, err := s.q.UpsertStartupShareAccount(ctx, pdb.UpsertStartupShareAccountParams{
+		AccountID:               ssa.AccountID,
+		TaxRate:                 ssa.TaxRate,
+		ValuationDiscountFactor: ssa.ValuationDiscountFactor,
 	})
 	if err != nil {
 		return StartupShareAccount{}, fmt.Errorf("failed to upsert startup share account: %w", err)
 	}
-	return startupShareAccountFromDB(ssa), nil
+	return startupShareAccountFromDB(saved), nil
 }
 
 func (s *Service) GetStartupShareAccount(ctx context.Context, accountID string) (StartupShareAccount, error) {
@@ -250,6 +295,9 @@ func (s *Service) DeleteStartupShareAccount(ctx context.Context, accountID strin
 }
 
 func (s *Service) UpsertInvestmentRound(ctx context.Context, inp InvestmentRoundInput) (InvestmentRound, error) {
+	if err := errors.Join(checkRequired("account", inp.AccountID), checkRequired("date", inp.Date)); err != nil {
+		return InvestmentRound{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
@@ -311,6 +359,9 @@ func (s *Service) DeleteInvestmentRound(ctx context.Context, id string) error {
 }
 
 func (s *Service) UpsertShareChange(ctx context.Context, inp ShareChangeInput) (ShareChange, error) {
+	if err := errors.Join(checkRequired("account", inp.AccountID), checkRequired("date", inp.Date)); err != nil {
+		return ShareChange{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
@@ -388,6 +439,14 @@ func PostMoneyValuationAndShares(preMoneyValuation, preMoneyShares, investment f
 }
 
 func (s *Service) UpsertStartupShareOption(ctx context.Context, inp StartupShareOptionInput) (StartupShareOption, error) {
+	if err := errors.Join(
+		checkRequired("account", inp.AccountID),
+		checkRequired("source account", inp.SourceAccountID),
+		checkRequired("grant date", inp.GrantDate),
+		checkRequired("expiry date", inp.EndDate),
+	); err != nil {
+		return StartupShareOption{}, err
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}

@@ -122,8 +122,12 @@ func TestSavingAnEndDateOnOrBeforeItsStartDateFails(t *testing.T) {
 				return discard(svc.UpsertFullParentalLeave(ctx, model.FullParentalLeave{SalaryID: salary.ID, StartDate: start, EndDate: end}))
 			},
 		} {
-			if err := save(); !errors.Is(err, model.ErrEndDateNotAfterStartDate) {
+			err := save()
+			if !errors.Is(err, model.ErrEndDateNotAfterStartDate) {
 				t.Errorf("%s from %s to %s: expected ErrEndDateNotAfterStartDate, got %v", entry, start, end, err)
+			}
+			if !errors.Is(err, model.ErrInvalidInput) {
+				t.Errorf("%s from %s to %s: expected ErrInvalidInput, got %v", entry, start, end, err)
 			}
 		}
 	}

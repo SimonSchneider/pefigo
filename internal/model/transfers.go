@@ -41,7 +41,7 @@ func (s *Service) ComputeTransfersView(ctx context.Context, day date.Date, amoun
 	}
 	view.TransfersReady = false
 	for _, t := range f.schedule.On(day).Charged() {
-		if t.AmountType == "fixed" && t.AmountFixed.Distribution != uncertain.DistFixed {
+		if t.AmountType == TransferAmountFixed && t.AmountFixed.Distribution != uncertain.DistFixed {
 			amount, ok := amounts[t.ID]
 			if ok {
 				view.TransfersReady = true

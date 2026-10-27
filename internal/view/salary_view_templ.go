@@ -2176,7 +2176,7 @@ func breakdownFullParentalLeave(bd SalaryBreakdown) templ.Component {
 
 func salaryRecurrenceValue(s Salary) string {
 	if s.ID == "" {
-		return "*-*-25"
+		return string(DefaultSalaryRecurrence)
 	}
 	return string(s.Recurrence)
 }
