@@ -15,25 +15,27 @@ import (
 
 // forecastInputIDs holds the IDs of one stored row of every Forecast Input, for mutations to change.
 type forecastInputIDs struct {
-	accountType          string
-	account              string
-	category             string
-	snapshotDate         date.Date
-	growthModel          string
-	specialDate          string
-	transferTemplate     string
-	salary               string
-	salaryAmount         string
-	salaryAdjustment     string
-	partialParentalLeave string
-	fullParentalLeave    string
-	billAccount          string
-	bill                 string
-	billAmount           string
-	investmentRound      string
-	shareChange          string
-	startupShareOption   string
-	sweYearlyParams      string
+	accountType           string
+	account               string
+	category              string
+	snapshotDate          date.Date
+	growthModel           string
+	specialDate           string
+	transferTemplate      string
+	salary                string
+	salaryAmount          string
+	salaryAdjustment      string
+	partialParentalLeave  string
+	fullParentalLeave     string
+	billAccount           string
+	bill                  string
+	billAmount            string
+	investmentRound       string
+	shareChange           string
+	startupShareOption    string
+	sweYearlyParams       string
+	event                 string
+	eventTransferTemplate string // a Transfer Template in event
 }
 
 type forecastInputMutation struct {
@@ -86,6 +88,25 @@ func forecastInputMutations() []forecastInputMutation {
 		}},
 		{"DeleteCategory", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.DeleteCategory(ctx, ids.category)
+		}},
+		// event.go
+		{"UpsertEvent", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return discard(svc.UpsertEvent(ctx, model.EventInput{Name: "Sabbatical", Date: mustParseDate("2029-01-01")}))
+		}},
+		{"DeleteEvent", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return svc.DeleteEvent(ctx, ids.event)
+		}},
+		{"AddToEvent", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return svc.AddToEvent(ctx, ids.event, model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: ids.transferTemplate})
+		}},
+		{"RemoveFromEvent", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return svc.RemoveFromEvent(ctx, model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: ids.eventTransferTemplate})
+		}},
+		{"UpsertEventEnd", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return svc.UpsertEventEnd(ctx, model.EventEndInput{EventID: ids.event, Entry: model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: ids.transferTemplate}})
+		}},
+		{"DeleteEventEnd", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return svc.DeleteEventEnd(ctx, ids.event, model.EventEntry{Kind: model.EventEntryGrowthModel, ID: ids.growthModel})
 		}},
 		// growth_model.go
 		{"UpsertAccountGrowthModel", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
@@ -453,6 +474,16 @@ func seedForecastInputs(t *testing.T, svc *model.Service) forecastInputIDs {
 	swe, err := svc.UpsertSweYearlyParams(ctx, model.SweYearlyParams{Amount: 76200, Prisbasbelopp: 57300, ValidFrom: mustParseDate("2025-01-01")})
 	must("swe yearly params", err)
 	ids.sweYearlyParams = swe.ID
+
+	ev, err := svc.UpsertEvent(ctx, model.EventInput{Name: "Apartment", Date: mustParseDate("2028-03-01")})
+	must("event", err)
+	ids.event = ev.ID
+	ett, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
+		Name: "Amortization", FromAccountID: acc.ID, AmountType: "fixed", AmountFixed: newFixedValue(5000), Recurrence: "*-*-25", Enabled: true, EventID: ev.ID,
+	})
+	must("event transfer template", err)
+	ids.eventTransferTemplate = ett.ID
+	must("event end", svc.UpsertEventEnd(ctx, model.EventEndInput{EventID: ev.ID, Entry: model.EventEntry{Kind: model.EventEntryGrowthModel, ID: gm.ID}}))
 
 	return ids
 }

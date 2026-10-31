@@ -20,11 +20,12 @@ INSERT INTO account (
     type_id,
     budget_category_id,
     is_isk,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, name, owner_id, created_at, updated_at, balance_upper_limit, cash_flow_frequency, cash_flow_destination_id, type_id, budget_category_id, is_isk
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, name, owner_id, created_at, updated_at, balance_upper_limit, cash_flow_frequency, cash_flow_destination_id, type_id, budget_category_id, is_isk, event_id
 `
 
 type CreateAccountParams struct {
@@ -36,6 +37,7 @@ type CreateAccountParams struct {
 	TypeID                *string
 	BudgetCategoryID      *string
 	IsIsk                 int64
+	EventID               *string
 	CreatedAt             int64
 	UpdatedAt             int64
 }
@@ -50,6 +52,7 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (A
 		arg.TypeID,
 		arg.BudgetCategoryID,
 		arg.IsIsk,
+		arg.EventID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -66,6 +69,7 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (A
 		&i.TypeID,
 		&i.BudgetCategoryID,
 		&i.IsIsk,
+		&i.EventID,
 	)
 	return i, err
 }
@@ -73,7 +77,7 @@ func (q *Queries) CreateAccount(ctx context.Context, arg CreateAccountParams) (A
 const deleteAccount = `-- name: DeleteAccount :one
 DELETE FROM account
 WHERE id = ?
-RETURNING id, name, owner_id, created_at, updated_at, balance_upper_limit, cash_flow_frequency, cash_flow_destination_id, type_id, budget_category_id, is_isk
+RETURNING id, name, owner_id, created_at, updated_at, balance_upper_limit, cash_flow_frequency, cash_flow_destination_id, type_id, budget_category_id, is_isk, event_id
 `
 
 func (q *Queries) DeleteAccount(ctx context.Context, id string) (Account, error) {
@@ -91,6 +95,7 @@ func (q *Queries) DeleteAccount(ctx context.Context, id string) (Account, error)
 		&i.TypeID,
 		&i.BudgetCategoryID,
 		&i.IsIsk,
+		&i.EventID,
 	)
 	return i, err
 }
@@ -202,7 +207,7 @@ func (q *Queries) DeleteTransferTemplateCategory(ctx context.Context, id string)
 }
 
 const getAccount = `-- name: GetAccount :one
-SELECT id, name, owner_id, created_at, updated_at, balance_upper_limit, cash_flow_frequency, cash_flow_destination_id, type_id, budget_category_id, is_isk
+SELECT id, name, owner_id, created_at, updated_at, balance_upper_limit, cash_flow_frequency, cash_flow_destination_id, type_id, budget_category_id, is_isk, event_id
 FROM account
 WHERE id = ?
 `
@@ -222,6 +227,7 @@ func (q *Queries) GetAccount(ctx context.Context, id string) (Account, error) {
 		&i.TypeID,
 		&i.BudgetCategoryID,
 		&i.IsIsk,
+		&i.EventID,
 	)
 	return i, err
 }
@@ -239,51 +245,8 @@ func (q *Queries) GetAccountType(ctx context.Context, id string) (AccountType, e
 	return i, err
 }
 
-const getBudgetAccounts = `-- name: GetBudgetAccounts :many
-SELECT id, name, owner_id, created_at, updated_at, balance_upper_limit, cash_flow_frequency, cash_flow_destination_id, type_id, budget_category_id, is_isk
-FROM account
-WHERE budget_category_id IS NOT NULL
-ORDER BY name,
-  id
-`
-
-func (q *Queries) GetBudgetAccounts(ctx context.Context) ([]Account, error) {
-	rows, err := q.db.QueryContext(ctx, getBudgetAccounts)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Account
-	for rows.Next() {
-		var i Account
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.OwnerID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.BalanceUpperLimit,
-			&i.CashFlowFrequency,
-			&i.CashFlowDestinationID,
-			&i.TypeID,
-			&i.BudgetCategoryID,
-			&i.IsIsk,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const getGrowthModel = `-- name: GetGrowthModel :one
-SELECT id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at
+SELECT id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at, event_id
 FROM growth_model
 WHERE id = ?
 `
@@ -301,12 +264,13 @@ func (q *Queries) GetGrowthModel(ctx context.Context, id string) (GrowthModel, e
 		&i.EndDate,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EventID,
 	)
 	return i, err
 }
 
 const getGrowthModelsByAccount = `-- name: GetGrowthModelsByAccount :many
-SELECT id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at
+SELECT id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at, event_id
 FROM growth_model
 WHERE account_id = ?
 ORDER BY start_date, id
@@ -331,6 +295,7 @@ func (q *Queries) GetGrowthModelsByAccount(ctx context.Context, accountID string
 			&i.EndDate,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -579,7 +544,7 @@ func (q *Queries) GetStartupShareOption(ctx context.Context, id string) (Startup
 }
 
 const getTransferTemplate = `-- name: GetTransferTemplate :one
-SELECT id, name, from_account_id, to_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, end_date, enabled, created_at, updated_at, budget_category_id
+SELECT id, name, from_account_id, to_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, end_date, enabled, created_at, updated_at, budget_category_id, event_id
 FROM transfer_template
 WHERE id = ?
 `
@@ -603,6 +568,7 @@ func (q *Queries) GetTransferTemplate(ctx context.Context, id string) (TransferT
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.BudgetCategoryID,
+		&i.EventID,
 	)
 	return i, err
 }
@@ -627,7 +593,7 @@ func (q *Queries) GetTransferTemplateCategory(ctx context.Context, id string) (T
 }
 
 const getTransferTemplates = `-- name: GetTransferTemplates :many
-SELECT id, name, from_account_id, to_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, end_date, enabled, created_at, updated_at, budget_category_id
+SELECT id, name, from_account_id, to_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, end_date, enabled, created_at, updated_at, budget_category_id, event_id
 FROM transfer_template
 ORDER BY recurrence,
   priority,
@@ -662,6 +628,7 @@ func (q *Queries) GetTransferTemplates(ctx context.Context) ([]TransferTemplate,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.BudgetCategoryID,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -707,7 +674,7 @@ func (q *Queries) ListAccountTypes(ctx context.Context) ([]AccountType, error) {
 }
 
 const listAccounts = `-- name: ListAccounts :many
-SELECT id, name, owner_id, created_at, updated_at, balance_upper_limit, cash_flow_frequency, cash_flow_destination_id, type_id, budget_category_id, is_isk
+SELECT id, name, owner_id, created_at, updated_at, balance_upper_limit, cash_flow_frequency, cash_flow_destination_id, type_id, budget_category_id, is_isk, event_id
 FROM account
 ORDER BY name,
   id
@@ -734,6 +701,7 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]Account, error) {
 			&i.TypeID,
 			&i.BudgetCategoryID,
 			&i.IsIsk,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -869,7 +837,7 @@ func (q *Queries) ListAllStartupShareOptions(ctx context.Context) ([]StartupShar
 }
 
 const listGrowthModels = `-- name: ListGrowthModels :many
-SELECT id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at
+SELECT id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at, event_id
 FROM growth_model
 ORDER BY start_date, id
 `
@@ -893,6 +861,7 @@ func (q *Queries) ListGrowthModels(ctx context.Context) ([]GrowthModel, error) {
 			&i.EndDate,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -985,7 +954,12 @@ func (q *Queries) ListLatestSnapshotPerAccount(ctx context.Context) ([]AccountSn
 const listProjectedAccountTypeIDs = `-- name: ListProjectedAccountTypeIDs :many
 SELECT DISTINCT COALESCE(a.type_id, '') AS type_id
 FROM account a
-WHERE EXISTS (
+  LEFT JOIN event e ON e.id = a.event_id
+WHERE (
+    a.event_id IS NULL
+    OR e.planned
+  )
+  AND EXISTS (
     SELECT 1
     FROM account_snapshot s
     WHERE s.account_id NOT IN (
@@ -996,8 +970,9 @@ WHERE EXISTS (
 ORDER BY type_id
 `
 
-// Returns the type_id of every account when there is a Forecast, which projects every account: when
-// an account other than a Startup Share account has a snapshot. Accounts without a type have ”.
+// Returns the type_id of every account of the Baseline when there is a Forecast, which projects every
+// such account: when an account other than a Startup Share account has a snapshot. An account of an
+// unplanned Event isn't in the Baseline. Accounts without a type have ”.
 func (q *Queries) ListProjectedAccountTypeIDs(ctx context.Context) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listProjectedAccountTypeIDs)
 	if err != nil {
@@ -1315,9 +1290,10 @@ SET name = ?,
   cash_flow_destination_id = ?,
   type_id = ?,
   budget_category_id = ?,
-  is_isk = ?
+  is_isk = ?,
+  event_id = ?
 WHERE id = ?
-RETURNING id, name, owner_id, created_at, updated_at, balance_upper_limit, cash_flow_frequency, cash_flow_destination_id, type_id, budget_category_id, is_isk
+RETURNING id, name, owner_id, created_at, updated_at, balance_upper_limit, cash_flow_frequency, cash_flow_destination_id, type_id, budget_category_id, is_isk, event_id
 `
 
 type UpdateAccountParams struct {
@@ -1329,6 +1305,7 @@ type UpdateAccountParams struct {
 	TypeID                *string
 	BudgetCategoryID      *string
 	IsIsk                 int64
+	EventID               *string
 	ID                    string
 }
 
@@ -1342,6 +1319,7 @@ func (q *Queries) UpdateAccount(ctx context.Context, arg UpdateAccountParams) (A
 		arg.TypeID,
 		arg.BudgetCategoryID,
 		arg.IsIsk,
+		arg.EventID,
 		arg.ID,
 	)
 	var i Account
@@ -1357,6 +1335,7 @@ func (q *Queries) UpdateAccount(ctx context.Context, arg UpdateAccountParams) (A
 		&i.TypeID,
 		&i.BudgetCategoryID,
 		&i.IsIsk,
+		&i.EventID,
 	)
 	return i, err
 }
@@ -1427,18 +1406,20 @@ INSERT INTO growth_model (
     annual_volatility,
     start_date,
     end_date,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET model_type = EXCLUDED.model_type,
   annual_growth_rate = EXCLUDED.annual_growth_rate,
   annual_volatility = EXCLUDED.annual_volatility,
   start_date = EXCLUDED.start_date,
   end_date = EXCLUDED.end_date,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
-RETURNING id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at
+RETURNING id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at, event_id
 `
 
 type UpsertGrowthModelParams struct {
@@ -1449,6 +1430,7 @@ type UpsertGrowthModelParams struct {
 	AnnualVolatility string
 	StartDate        int64
 	EndDate          *int64
+	EventID          *string
 	CreatedAt        int64
 	UpdatedAt        int64
 }
@@ -1462,6 +1444,7 @@ func (q *Queries) UpsertGrowthModel(ctx context.Context, arg UpsertGrowthModelPa
 		arg.AnnualVolatility,
 		arg.StartDate,
 		arg.EndDate,
+		arg.EventID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -1476,6 +1459,7 @@ func (q *Queries) UpsertGrowthModel(ctx context.Context, arg UpsertGrowthModelPa
 		&i.EndDate,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EventID,
 	)
 	return i, err
 }
@@ -1744,10 +1728,11 @@ INSERT INTO transfer_template (
     end_date,
     enabled,
     budget_category_id,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET name = EXCLUDED.name,
   from_account_id = EXCLUDED.from_account_id,
@@ -1761,8 +1746,9 @@ SET name = EXCLUDED.name,
   end_date = EXCLUDED.end_date,
   enabled = EXCLUDED.enabled,
   budget_category_id = EXCLUDED.budget_category_id,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
-RETURNING id, name, from_account_id, to_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, end_date, enabled, created_at, updated_at, budget_category_id
+RETURNING id, name, from_account_id, to_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, end_date, enabled, created_at, updated_at, budget_category_id, event_id
 `
 
 type UpsertTransferTemplateParams struct {
@@ -1779,6 +1765,7 @@ type UpsertTransferTemplateParams struct {
 	EndDate          *int64
 	Enabled          bool
 	BudgetCategoryID *string
+	EventID          *string
 	CreatedAt        int64
 	UpdatedAt        int64
 }
@@ -1798,6 +1785,7 @@ func (q *Queries) UpsertTransferTemplate(ctx context.Context, arg UpsertTransfer
 		arg.EndDate,
 		arg.Enabled,
 		arg.BudgetCategoryID,
+		arg.EventID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -1818,6 +1806,7 @@ func (q *Queries) UpsertTransferTemplate(ctx context.Context, arg UpsertTransfer
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.BudgetCategoryID,
+		&i.EventID,
 	)
 	return i, err
 }

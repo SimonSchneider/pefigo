@@ -30,6 +30,9 @@ type PredictionParams struct {
 	// SnapshotInterval is the Forecast Interval: the days with a point.
 	SnapshotInterval date.Cron
 	GroupBy          GroupBy
+	// Placements place Events differently from the Baseline, as a Scenario does. Without them the
+	// Forecast is the Baseline's.
+	Placements EventPlacements
 }
 
 type GroupBy string
@@ -100,12 +103,19 @@ type Markline struct {
 	Name  string    `json:"name"`
 }
 
-// dateLines are the date lines of a forecast chart: today and every Special Date, by date.
-func dateLines(specialDates []SpecialDate, today date.Date) []Markline {
-	lines := make([]Markline, 0, len(specialDates)+1)
+// eventMarklineColor is the color of an Event's date line.
+const eventMarklineColor = "#7c3aed"
+
+// dateLines are the date lines of a forecast chart: today, every Special Date and every placed Event
+// at the date it is placed at, by date.
+func dateLines(specialDates []SpecialDate, events []Event, today date.Date) []Markline {
+	lines := make([]Markline, 0, len(specialDates)+len(events)+1)
 	lines = append(lines, Markline{Date: today, Name: "Today"})
 	for _, sd := range specialDates {
 		lines = append(lines, Markline{Date: sd.Date, Color: sd.Color, Name: sd.Name})
+	}
+	for _, ev := range events {
+		lines = append(lines, Markline{Date: ev.Date, Color: eventMarklineColor, Name: ev.Name})
 	}
 	slices.SortStableFunc(lines, func(a, b Markline) int { return cmp.Compare(a.Date, b.Date) })
 	return lines
@@ -137,7 +147,7 @@ func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEven
 	if err != nil {
 		return err
 	}
-	f, err := s.loadForecast(ctx)
+	f, err := s.loadForecast(ctx, params.Placements)
 	if err != nil {
 		return fmt.Errorf("loading the Forecast: %w", err)
 	}
@@ -171,7 +181,7 @@ func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEven
 		end = f.start
 	}
 	today := date.Today()
-	marklines := dateLines(specialDates, today)
+	marklines := dateLines(specialDates, f.events, today)
 	chartEnd := end
 	if !f.hasStart {
 		chartEnd = marklines[len(marklines)-1].Date

@@ -16,6 +16,7 @@ type Account struct {
 	TypeID                *string
 	BudgetCategoryID      *string
 	IsIsk                 int64
+	EventID               *string
 }
 
 type AccountSnapshot struct {
@@ -76,6 +77,27 @@ type BillAmount struct {
 	Currency  string
 }
 
+type Event struct {
+	ID        string
+	Name      string
+	Date      int64
+	Planned   bool
+	CreatedAt int64
+	UpdatedAt int64
+}
+
+type EventGrowthModelEnd struct {
+	EventID       string
+	GrowthModelID string
+	EndOffset     int64
+}
+
+type EventTransferTemplateEnd struct {
+	EventID            string
+	TransferTemplateID string
+	EndOffset          int64
+}
+
 type FaviconCache struct {
 	Domain      string
 	IconData    []byte
@@ -109,6 +131,7 @@ type GrowthModel struct {
 	EndDate          *int64
 	CreatedAt        int64
 	UpdatedAt        int64
+	EventID          *string
 }
 
 type InvestmentRound struct {
@@ -234,6 +257,7 @@ type TransferTemplate struct {
 	CreatedAt        int64
 	UpdatedAt        int64
 	BudgetCategoryID *string
+	EventID          *string
 }
 
 type TransferTemplateCategory struct {

@@ -40,22 +40,34 @@ func TestMigratingToExclusiveEndDatesKeepsChargingOnTheOldEndDate(t *testing.T) 
 	if err != nil {
 		t.Fatalf("open database before exclusive End Dates: %v", err)
 	}
-	checking := mustAccount(t, old, "Checking")
-	lastDay := mustParseDate("2025-12-01")
-	tt := mustTransferTemplate(t, old, model.TransferTemplate{
-		Name: "Gym", FromAccountID: checking.ID, AmountType: "fixed", AmountFixed: newFixedValue(300),
-		Recurrence: "*-*-01", StartDate: mustParseDate("2025-01-01"), EndDate: &lastDay, Enabled: true,
-	})
-	mustBill(t, old, checking.ID, "*-*-01", model.Bill{Name: "Music"},
-		model.BillAmount{Amount: newFixedValue(100), StartDate: mustParseDate("2025-01-01"), EndDate: &lastDay},
-	)
-	gm, err := old.UpsertAccountGrowthModel(ctx, model.AccountGrowthModelInput{
-		AccountID: checking.ID, Type: "fixed", AnnualRate: newFixedValue(0.05), AnnualVolatility: newFixedValue(0),
-		StartDate: mustParseDate("2025-01-01"), EndDate: &lastDay,
-	})
-	if err != nil {
-		t.Fatalf("create growth model: %v", err)
+	// The rows are stored as the schema before exclusive End Dates holds them.
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := old.DB().ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("seed the database before exclusive End Dates: %v", err)
+		}
 	}
+	encoded := func(v float64) string {
+		t.Helper()
+		s, err := newFixedValue(v).Encode()
+		if err != nil {
+			t.Fatalf("encode %v: %v", v, err)
+		}
+		return s
+	}
+	lastDay := mustParseDate("2025-12-01")
+	start := mustParseDate("2025-01-01")
+	checking := model.Account{ID: "checking"}
+	exec(`INSERT INTO account (id, name, created_at, updated_at) VALUES (?, 'Checking', 0, 0)`, checking.ID)
+	tt := model.TransferTemplate{ID: "gym"}
+	exec(`INSERT INTO transfer_template (id, name, from_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, end_date, enabled, created_at, updated_at)
+		VALUES (?, 'Gym', ?, 'fixed', ?, 0, 0, '*-*-01', ?, ?, TRUE, 0, 0)`, tt.ID, checking.ID, encoded(300), int64(start), int64(lastDay))
+	mustBill(t, old, checking.ID, "*-*-01", model.Bill{Name: "Music"},
+		model.BillAmount{Amount: newFixedValue(100), StartDate: start, EndDate: &lastDay},
+	)
+	gm := model.GrowthModel{ID: "growth"}
+	exec(`INSERT INTO growth_model (id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at)
+		VALUES (?, ?, 'fixed', ?, ?, ?, ?, 0, 0)`, gm.ID, checking.ID, encoded(0.05), encoded(0), int64(start), int64(lastDay))
 	old.DB().Close()
 
 	svc, err := model.Open(ctx, pefigo.StaticEmbeddedFS, "static/migrations", conn)

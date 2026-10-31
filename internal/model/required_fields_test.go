@@ -153,6 +153,14 @@ var requiredFields = map[string][]requiredField{
 			"date": func(s *model.SpecialDateInput) { s.Date = 0 },
 		},
 	),
+	"UpsertEvent": requiredFieldsOf(saved((*model.Service).UpsertEvent),
+		listedAll((*model.Service).ListEvents),
+		func(parentRows) model.EventInput { return model.EventInput{Name: "Apartment", Date: requiredDay} },
+		map[string]func(*model.EventInput){
+			"name": func(e *model.EventInput) { e.Name = "" },
+			"date": func(e *model.EventInput) { e.Date = 0 },
+		},
+	),
 	"UpsertAccountGrowthModel": requiredFieldsOf(saved((*model.Service).UpsertAccountGrowthModel),
 		listed((*model.Service).ListAccountGrowthModels, ofAccount),
 		func(p parentRows) model.AccountGrowthModelInput {

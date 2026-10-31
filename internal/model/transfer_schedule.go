@@ -12,18 +12,29 @@ import (
 	"github.com/SimonSchneider/pefigo/pkg/finance"
 )
 
-// TransferSchedule is every Transfer Template: the stored ones and those generated from Salaries and
-// Bills. It decides which of them apply on a day and for how much, so its callers never compare a day
-// against a Start Date or End Date, or check Enabled or a recurrence, themselves. See ADR 0003.
+// TransferSchedule is every Transfer Template of the plans for the future with the Events placed: the
+// stored ones and those generated from Salaries and Bills. It decides which of them apply on a day and
+// for how much, so its callers never compare a day against a Start Date or End Date, or check Enabled
+// or a recurrence, themselves. See ADR 0003.
 type TransferSchedule struct {
 	templates []TransferTemplate // sorted by recurrence, priority, name and Start Date
+	// leftOut are the Transfer Templates the Events leave out: those of a left-out Event, at its own
+	// date, and those that use one of its Accounts.
+	leftOut []TransferTemplate
 }
 
+// TransferSchedule is the Baseline's Transfer Schedule.
 func (s *Service) TransferSchedule(ctx context.Context) (*TransferSchedule, error) {
-	templates, err := s.ListTransferTemplates(ctx)
+	p, err := s.placeEvents(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("listing DB transfer templates: %w", err)
+		return nil, fmt.Errorf("placing the events: %w", err)
 	}
+	return s.transferSchedule(ctx, p)
+}
+
+// transferSchedule is the Transfer Schedule of p: its Transfer Templates with those generated from
+// Salaries and Bills, but those that use an Account p leaves out.
+func (s *Service) transferSchedule(ctx context.Context, p *plans) (*TransferSchedule, error) {
 	salaryTemplates, err := s.generateSalaryTransferTemplates(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("generating salary transfer templates: %w", err)
@@ -32,10 +43,26 @@ func (s *Service) TransferSchedule(ctx context.Context) (*TransferSchedule, erro
 	if err != nil {
 		return nil, fmt.Errorf("generating bill transfer templates: %w", err)
 	}
-	all := append(templates, salaryTemplates...)
-	all = append(all, billTemplates...)
-	sortTransferTemplates(all)
-	return &TransferSchedule{templates: all}, nil
+	ts := &TransferSchedule{
+		templates: slices.Clone(p.transferTemplates),
+		leftOut:   slices.Clone(p.leftOutTransferTemplates),
+	}
+	for _, t := range append(salaryTemplates, billTemplates...) {
+		if p.usesLeftOutAccount(t) {
+			ts.leftOut = append(ts.leftOut, t)
+		} else {
+			ts.templates = append(ts.templates, t)
+		}
+	}
+	sortTransferTemplates(ts.templates)
+	sortTransferTemplates(ts.leftOut)
+	return ts, nil
+}
+
+// LeftOut returns the Transfer Templates the Events leave out of the schedule, sorted as the
+// schedule is.
+func (ts *TransferSchedule) LeftOut() []TransferTemplate {
+	return ts.leftOut
 }
 
 // checkRecurrences fails on the first Transfer Template whose recurrence isn't a valid date pattern,
@@ -283,6 +310,7 @@ func groupRow(members []ScheduledTransfer) TransferScheduleRow {
 			StartDate:        first.StartDate,
 			EndDate:          first.EndDate,
 			BudgetCategoryID: first.BudgetCategoryID,
+			EventID:          first.EventID,
 			Source:           first.Source,
 		},
 		state: TransferDisabled,
