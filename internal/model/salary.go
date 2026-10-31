@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
-	"strings"
+	"strconv"
 	"time"
 
 	"github.com/SimonSchneider/goslu/date"
@@ -15,18 +16,6 @@ import (
 	"github.com/SimonSchneider/pefigo/pkg/ui"
 	"github.com/SimonSchneider/pefigo/pkg/uncertain"
 )
-
-type PensionSegment struct {
-	StartDate date.Date
-	EndDate   *date.Date
-	Pension   uncertain.Value
-}
-
-type NetSalarySegment struct {
-	StartDate date.Date
-	EndDate   *date.Date
-	Net       uncertain.Value
-}
 
 type Salary struct {
 	ID                    string
@@ -45,12 +34,47 @@ type Salary struct {
 	Adjustments           []SalaryAdjustment
 	PartialParentalLeaves []PartialParentalLeave
 	FullParentalLeaves    []FullParentalLeave
-	// NetSegments is populated by the service layer when IsGross is true.
-	// Segments are split at the union of salary-amount, adjustment, and PBB change dates.
-	NetSegments []NetSalarySegment
-	// PensionSegments is populated by the service layer when IsGross is true.
-	// Segments are split at the union of salary-amount and IBB change dates.
-	PensionSegments []PensionSegment
+
+	// segments are a loaded Gross Salary's Salary Segments, unless segmentsErr kept them from being
+	// computed. See Service.loadSalaries.
+	segments    []SalarySegment
+	segmentsErr error
+}
+
+// SalarySegment is a Salary Segment of a Gross Salary: from its Start Date up to its End Date, the
+// Gross Salary pays its Net Salary and its Pension Contribution on each recurrence.
+type SalarySegment struct {
+	StartDate date.Date
+	EndDate   *date.Date
+	NetSalary uncertain.Value
+	// PensionContribution is nil in a segment without an income base amount: it pays none.
+	PensionContribution *uncertain.Value
+	// Breakdown is the Salary Breakdown of the segment's mean Salary Amount.
+	Breakdown SalaryBreakdown
+}
+
+// SalaryBreakdown itemizes a Salary Segment's mean Salary Amount down to its Net Salary, and gives its
+// Pension Contribution: nil when the segment pays none.
+type SalaryBreakdown struct {
+	swe.SalaryBreakdown
+	PensionContribution *float64
+}
+
+// Segments returns a loaded Gross Salary's Salary Segments, or the error that kept them from being
+// computed. A net Salary has none.
+func (s Salary) Segments() ([]SalarySegment, error) {
+	return s.segments, s.segmentsErr
+}
+
+// CurrentSegment is the Salary Segment of a loaded Gross Salary that today is in, or nil without one.
+func (s Salary) CurrentSegment() *SalarySegment {
+	today := date.Today()
+	for i, seg := range s.segments {
+		if seg.StartDate <= today && (seg.EndDate == nil || today < *seg.EndDate) {
+			return &s.segments[i]
+		}
+	}
+	return nil
 }
 
 type SalaryAmount struct {
@@ -88,7 +112,10 @@ type FullParentalLeave struct {
 	SjukDaysPerWeek float64
 }
 
-func (s Salary) GenerateTransferTemplates() []TransferTemplate {
+// GenerateTransferTemplates returns what the Salary pays: each Salary Amount of a net Salary, and each
+// Salary Segment's Net Salary and Pension Contribution of a Gross Salary, which only a Salary the
+// Service loaded has. It fails on a Gross Salary whose Net Salary is unknown.
+func (s Salary) GenerateTransferTemplates() ([]TransferTemplate, error) {
 	source := TransferTemplateSource{
 		Type:          "salary",
 		EntityID:      s.ID,
@@ -96,28 +123,26 @@ func (s Salary) GenerateTransferTemplates() []TransferTemplate {
 		EditURL:       "/salaries/" + s.ID + "/edit",
 		recurrenceRow: "salary " + s.ID,
 	}
+	template := func(id, name, toAccountID string, amount uncertain.Value, startDate date.Date, endDate *date.Date) TransferTemplate {
+		return TransferTemplate{
+			ID:               id,
+			Name:             name,
+			FromAccountID:    "",
+			ToAccountID:      toAccountID,
+			AmountType:       TransferAmountFixed,
+			AmountFixed:      amount,
+			Priority:         s.Priority,
+			Recurrence:       s.Recurrence,
+			StartDate:        startDate,
+			EndDate:          endDate,
+			Enabled:          s.Enabled,
+			BudgetCategoryID: s.BudgetCategoryID,
+			Source:           source,
+		}
+	}
 
 	var templates []TransferTemplate
-
-	if s.IsGross && len(s.NetSegments) > 0 {
-		for i, seg := range s.NetSegments {
-			templates = append(templates, TransferTemplate{
-				ID:               fmt.Sprintf("salary:%s:%d", s.ID, i),
-				Name:             s.Name,
-				FromAccountID:    "",
-				ToAccountID:      s.ToAccountID,
-				AmountType:       TransferAmountFixed,
-				AmountFixed:      seg.Net,
-				Priority:         s.Priority,
-				Recurrence:       s.Recurrence,
-				StartDate:        seg.StartDate,
-				EndDate:          seg.EndDate,
-				Enabled:          s.Enabled,
-				BudgetCategoryID: s.BudgetCategoryID,
-				Source:           source,
-			})
-		}
-	} else {
+	if !s.IsGross {
 		sorted := make([]SalaryAmount, len(s.Amounts))
 		copy(sorted, s.Amounts)
 		sort.Slice(sorted, func(i, j int) bool {
@@ -129,46 +154,29 @@ func (s Salary) GenerateTransferTemplates() []TransferTemplate {
 				ed := sorted[i+1].StartDate
 				endDate = &ed
 			}
-			templates = append(templates, TransferTemplate{
-				ID:               "salary:" + amt.ID,
-				Name:             s.Name,
-				FromAccountID:    "",
-				ToAccountID:      s.ToAccountID,
-				AmountType:       TransferAmountFixed,
-				AmountFixed:      amt.Amount,
-				Priority:         s.Priority,
-				Recurrence:       s.Recurrence,
-				StartDate:        amt.StartDate,
-				EndDate:          endDate,
-				Enabled:          s.Enabled,
-				BudgetCategoryID: s.BudgetCategoryID,
-				Source:           source,
-			})
+			templates = append(templates, template("salary:"+amt.ID, s.Name, s.ToAccountID, amt.Amount, amt.StartDate, endDate))
 		}
+		return templates, nil
 	}
 
-	// Pension TTs: split at both salary-amount and IBB change boundaries
-	if s.IsGross && s.PensionAccountID != "" {
-		for i, seg := range s.PensionSegments {
-			templates = append(templates, TransferTemplate{
-				ID:               fmt.Sprintf("salary-pension:%s:%d", s.ID, i),
-				Name:             s.Name + " (pension)",
-				FromAccountID:    "",
-				ToAccountID:      s.PensionAccountID,
-				AmountType:       TransferAmountFixed,
-				AmountFixed:      seg.Pension,
-				Priority:         s.Priority,
-				Recurrence:       s.Recurrence,
-				StartDate:        seg.StartDate,
-				EndDate:          seg.EndDate,
-				Enabled:          s.Enabled,
-				BudgetCategoryID: s.BudgetCategoryID,
-				Source:           source,
-			})
+	if s.segmentsErr != nil {
+		return nil, fmt.Errorf("salary %q: %w", s.Name, s.segmentsErr)
+	}
+	// A loaded Gross Salary with a Salary Amount has a Salary Segment from its Start Date.
+	if len(s.segments) == 0 && len(s.Amounts) > 0 {
+		return nil, fmt.Errorf("salary %q is not loaded: it has no Salary Segments", s.Name)
+	}
+	for i, seg := range s.segments {
+		templates = append(templates, template(fmt.Sprintf("salary:%s:%d", s.ID, i), s.Name, s.ToAccountID, seg.NetSalary, seg.StartDate, seg.EndDate))
+	}
+	if s.PensionAccountID != "" {
+		for i, seg := range s.segments {
+			if seg.PensionContribution != nil {
+				templates = append(templates, template(fmt.Sprintf("salary-pension:%s:%d", s.ID, i), s.Name+" (pension)", s.PensionAccountID, *seg.PensionContribution, seg.StartDate, seg.EndDate))
+			}
 		}
 	}
-
-	return templates
+	return templates, nil
 }
 
 func salaryFromDB(s pdb.Salary) Salary {
@@ -208,7 +216,11 @@ func (s *Service) UpsertSalary(ctx context.Context, inp Salary) (Salary, error) 
 	if inp.Recurrence == "" {
 		inp.Recurrence = DefaultSalaryRecurrence
 	}
-	if err := errors.Join(checkRequired("name", inp.Name), checkDatePattern("salary recurrence", inp.Recurrence)); err != nil {
+	var taxedBy error
+	if inp.IsGross {
+		taxedBy = errors.Join(checkRequired("kommun", inp.Kommun), checkRequired("församling", inp.Forsamling))
+	}
+	if err := errors.Join(checkRequired("name", inp.Name), checkDatePattern("salary recurrence", inp.Recurrence), taxedBy); err != nil {
 		return Salary{}, err
 	}
 	if inp.ID == "" {
@@ -237,45 +249,96 @@ func (s *Service) UpsertSalary(ctx context.Context, inp Salary) (Salary, error) 
 	return salaryFromDB(sal), nil
 }
 
+// ListSalaries returns every Salary, loaded as loadSalaries loads it.
 func (s *Service) ListSalaries(ctx context.Context) ([]Salary, error) {
-	rows, err := s.q.ListSalaries(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing salaries: %w", err)
-	}
-	salaries := make([]Salary, 0, len(rows))
-	for _, r := range rows {
-		salaries = append(salaries, salaryFromDB(r))
-	}
-	return salaries, nil
+	return s.loadSalaries(ctx, "")
 }
 
+// GetSalary returns the Salary id, loaded as loadSalaries loads it.
 func (s *Service) GetSalary(ctx context.Context, id string) (Salary, error) {
-	sal, err := s.q.GetSalary(ctx, id)
+	salaries, err := s.loadSalaries(ctx, id)
 	if err != nil {
-		return Salary{}, fmt.Errorf("getting salary: %w", err)
+		return Salary{}, err
 	}
-	result := salaryFromDB(sal)
-	amounts, err := s.ListSalaryAmounts(ctx, id)
+	return salaries[0], nil
+}
+
+// loadSalaries returns every Salary, or only the Salary id when id isn't empty, with everything it is
+// paid by: its Salary Amounts, adjustments and parental leaves, and a Gross Salary its Salary Segments,
+// segmented once, or the error that kept them from being computed.
+func (s *Service) loadSalaries(ctx context.Context, id string) ([]Salary, error) {
+	var rows []pdb.Salary
+	if id == "" {
+		var err error
+		if rows, err = s.q.ListSalaries(ctx); err != nil {
+			return nil, fmt.Errorf("listing salaries: %w", err)
+		}
+	} else {
+		row, err := s.q.GetSalary(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("getting salary: %w", err)
+		}
+		rows = []pdb.Salary{row}
+	}
+
+	allAmounts, err := s.q.ListAllSalaryAmounts(ctx)
 	if err != nil {
-		return Salary{}, fmt.Errorf("listing salary amounts: %w", err)
+		return nil, fmt.Errorf("listing salary amounts: %w", err)
 	}
-	result.Amounts = amounts
-	adjustments, err := s.ListSalaryAdjustments(ctx, id)
+	amountsBySalary := make(map[string][]SalaryAmount)
+	for _, a := range allAmounts {
+		parsed, err := salaryAmountFromDB(a)
+		if err != nil {
+			return nil, err
+		}
+		amountsBySalary[a.SalaryID] = append(amountsBySalary[a.SalaryID], parsed)
+	}
+
+	allAdjustments, err := s.q.ListAllSalaryAdjustments(ctx)
 	if err != nil {
-		return Salary{}, fmt.Errorf("listing salary adjustments: %w", err)
+		return nil, fmt.Errorf("listing salary adjustments: %w", err)
 	}
-	result.Adjustments = adjustments
-	partialPLs, err := s.ListPartialParentalLeaves(ctx, id)
+	adjustmentsBySalary := make(map[string][]SalaryAdjustment)
+	for _, a := range allAdjustments {
+		adjustmentsBySalary[a.SalaryID] = append(adjustmentsBySalary[a.SalaryID], salaryAdjustmentFromDB(a))
+	}
+
+	allPartialPLs, err := s.q.ListAllPartialParentalLeaves(ctx)
 	if err != nil {
-		return Salary{}, fmt.Errorf("listing partial parental leaves: %w", err)
+		return nil, fmt.Errorf("listing partial parental leaves: %w", err)
 	}
-	result.PartialParentalLeaves = partialPLs
-	fullPLs, err := s.ListFullParentalLeaves(ctx, id)
+	partialPLsBySalary := make(map[string][]PartialParentalLeave)
+	for _, a := range allPartialPLs {
+		partialPLsBySalary[a.SalaryID] = append(partialPLsBySalary[a.SalaryID], partialParentalLeaveFromDB(a))
+	}
+
+	allFullPLs, err := s.q.ListAllFullParentalLeaves(ctx)
 	if err != nil {
-		return Salary{}, fmt.Errorf("listing full parental leaves: %w", err)
+		return nil, fmt.Errorf("listing full parental leaves: %w", err)
 	}
-	result.FullParentalLeaves = fullPLs
-	return result, nil
+	fullPLsBySalary := make(map[string][]FullParentalLeave)
+	for _, a := range allFullPLs {
+		fullPLsBySalary[a.SalaryID] = append(fullPLsBySalary[a.SalaryID], fullParentalLeaveFromDB(a))
+	}
+
+	params, err := s.ListSweYearlyParams(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing swe yearly params: %w", err)
+	}
+
+	salaries := make([]Salary, 0, len(rows))
+	for _, row := range rows {
+		salary := salaryFromDB(row)
+		salary.Amounts = amountsBySalary[salary.ID]
+		salary.Adjustments = adjustmentsBySalary[salary.ID]
+		salary.PartialParentalLeaves = partialPLsBySalary[salary.ID]
+		salary.FullParentalLeaves = fullPLsBySalary[salary.ID]
+		if salary.IsGross {
+			salary.segments, salary.segmentsErr = s.segment(ctx, salary, params)
+		}
+		salaries = append(salaries, salary)
+	}
+	return salaries, nil
 }
 
 func (s *Service) DeleteSalary(ctx context.Context, id string) error {
@@ -604,7 +667,6 @@ type SalaryEditView struct {
 	Salary     Salary
 	Accounts   []Account
 	Categories []TransferTemplateCategory
-	Breakdowns []NetSalarySegmentBreakdown
 }
 
 func (v SalaryEditView) IsEdit() bool {
@@ -612,26 +674,7 @@ func (v SalaryEditView) IsEdit() bool {
 }
 
 func (s *Service) GetSalariesPageData(ctx context.Context) ([]Salary, error) {
-	salaries, err := s.ListSalaries(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing salaries: %w", err)
-	}
-	allAmounts, err := s.q.ListAllSalaryAmounts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing salary amounts: %w", err)
-	}
-	amountsBySalary := make(map[string][]SalaryAmount)
-	for _, a := range allAmounts {
-		parsed, err := salaryAmountFromDB(a)
-		if err != nil {
-			return nil, err
-		}
-		amountsBySalary[a.SalaryID] = append(amountsBySalary[a.SalaryID], parsed)
-	}
-	for i := range salaries {
-		salaries[i].Amounts = amountsBySalary[salaries[i].ID]
-	}
-	return salaries, nil
+	return s.ListSalaries(ctx)
 }
 
 func (s *Service) GetSalaryNewPageData(ctx context.Context) (*SalaryEditView, error) {
@@ -670,84 +713,32 @@ func (s *Service) GetSalaryEditPageData(ctx context.Context, id string) (*Salary
 }
 
 func (s *Service) generateSalaryTransferTemplates(ctx context.Context) ([]TransferTemplate, error) {
-	salaries, err := s.q.ListSalaries(ctx)
+	salaries, err := s.ListSalaries(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("listing salaries: %w", err)
+		return nil, err
 	}
-	allAmounts, err := s.q.ListAllSalaryAmounts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing salary amounts: %w", err)
-	}
-	amountsBySalary := make(map[string][]SalaryAmount)
-	for _, a := range allAmounts {
-		parsed, err := salaryAmountFromDB(a)
+	var templates []TransferTemplate
+	for _, salary := range salaries {
+		salaryTemplates, err := salary.GenerateTransferTemplates()
 		if err != nil {
 			return nil, err
 		}
-		amountsBySalary[a.SalaryID] = append(amountsBySalary[a.SalaryID], parsed)
-	}
-
-	allAdjustments, err := s.q.ListAllSalaryAdjustments(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing salary adjustments: %w", err)
-	}
-	adjustmentsBySalary := make(map[string][]SalaryAdjustment)
-	for _, a := range allAdjustments {
-		adjustmentsBySalary[a.SalaryID] = append(adjustmentsBySalary[a.SalaryID], salaryAdjustmentFromDB(a))
-	}
-
-	allPartialPLs, err := s.q.ListAllPartialParentalLeaves(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing partial parental leaves: %w", err)
-	}
-	partialPLsBySalary := make(map[string][]PartialParentalLeave)
-	for _, a := range allPartialPLs {
-		partialPLsBySalary[a.SalaryID] = append(partialPLsBySalary[a.SalaryID], partialParentalLeaveFromDB(a))
-	}
-
-	allFullPLs, err := s.q.ListAllFullParentalLeaves(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing full parental leaves: %w", err)
-	}
-	fullPLsBySalary := make(map[string][]FullParentalLeave)
-	for _, a := range allFullPLs {
-		fullPLsBySalary[a.SalaryID] = append(fullPLsBySalary[a.SalaryID], fullParentalLeaveFromDB(a))
-	}
-
-	ibbs, err := s.ListSweYearlyParams(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing swe yearly params: %w", err)
-	}
-
-	var templates []TransferTemplate
-	for _, sal := range salaries {
-		salary := salaryFromDB(sal)
-		salary.Amounts = amountsBySalary[salary.ID]
-		salary.Adjustments = adjustmentsBySalary[salary.ID]
-		salary.PartialParentalLeaves = partialPLsBySalary[salary.ID]
-		salary.FullParentalLeaves = fullPLsBySalary[salary.ID]
-
-		if salary.IsGross && salary.Kommun != "" && salary.Forsamling != "" {
-			netSegs, err := s.computeNetSegments(ctx, salary, ibbs)
-			if err != nil {
-				return nil, fmt.Errorf("computing net segments: %w", err)
-			}
-			salary.NetSegments = netSegs
-			salary.PensionSegments = s.computePensionSegments(ctx, salary, ibbs)
-		}
-
-		templates = append(templates, salary.GenerateTransferTemplates()...)
+		templates = append(templates, salaryTemplates...)
 	}
 	return templates, nil
 }
 
-// computeNetSegments builds net salary segments split at the union of
-// salary-amount, adjustment, and PBB change-point dates. Each segment's Net
-// is a mapped uncertain.Value that derives net salary from the gross amount
-// via salary adjustments and tax computation.
-func (s *Service) computeNetSegments(ctx context.Context, sal Salary, ibbs []SweYearlyParams) ([]NetSalarySegment, error) {
-	if len(sal.Amounts) == 0 {
+// segment splits a Gross Salary into its Salary Segments, from its first Salary Amount's Start Date.
+// Each segment's Net Salary, Pension Contribution and Salary Breakdown come from the same Salary
+// Amount, adjustment, parental leave, Swedish yearly parameters and Tax Table. It fails without a kommun
+// and församling to look up the tax in, or without tax data for a segment's year or the year before.
+func (s *Service) segment(ctx context.Context, sal Salary, params []SweYearlyParams) ([]SalarySegment, error) {
+	dates := sal.segmentStartDates(params)
+	if len(dates) == 0 {
 		return nil, nil
+	}
+	if sal.Kommun == "" || sal.Forsamling == "" {
+		return nil, errors.New("no kommun and församling to look up its tax in")
 	}
 
 	sorted := make([]SalaryAmount, len(sal.Amounts))
@@ -756,314 +747,119 @@ func (s *Service) computeNetSegments(ctx context.Context, sal Salary, ibbs []Swe
 		return sorted[i].StartDate < sorted[j].StartDate
 	})
 
-	dateSet := make(map[date.Date]struct{})
-	for _, amt := range sorted {
-		dateSet[amt.StartDate] = struct{}{}
-	}
-	for _, adj := range sal.Adjustments {
-		if adj.ValidFrom >= sorted[0].StartDate {
-			dateSet[adj.ValidFrom] = struct{}{}
-		}
-	}
-	for _, ppl := range sal.PartialParentalLeaves {
-		if ppl.StartDate >= sorted[0].StartDate {
-			dateSet[ppl.StartDate] = struct{}{}
-		}
-		if ppl.EndDate >= sorted[0].StartDate {
-			dateSet[ppl.EndDate] = struct{}{}
-		}
-	}
-	for _, fpl := range sal.FullParentalLeaves {
-		if fpl.StartDate >= sorted[0].StartDate {
-			dateSet[fpl.StartDate] = struct{}{}
-		}
-		if fpl.EndDate >= sorted[0].StartDate {
-			dateSet[fpl.EndDate] = struct{}{}
-		}
-	}
-	for _, ibb := range ibbs {
-		if ibb.ValidFrom >= sorted[0].StartDate {
-			dateSet[ibb.ValidFrom] = struct{}{}
-		}
-	}
-
-	dates := make([]date.Date, 0, len(dateSet))
-	for d := range dateSet {
-		dates = append(dates, d)
-	}
-	sort.Slice(dates, func(i, j int) bool { return dates[i] < dates[j] })
-
-	var segments []NetSalarySegment
+	calculators := make(map[int]func(float64) swe.NetSalaryResult)
+	segments := make([]SalarySegment, 0, len(dates))
 	for i, d := range dates {
-		grossAmount := activeSalaryAmountAt(sorted, d)
-		if grossAmount == nil {
-			continue
-		}
-
-		year := strings.SplitN(d.String(), "-", 2)[0]
-		calculator, err := s.sweClient.NetSalaryCalculator(ctx, swe.GrossSalaryInput{
-			Kommun:       sal.Kommun,
-			Forsamling:   sal.Forsamling,
-			Year:         year,
-			ChurchMember: sal.ChurchMember,
-			Column:       1,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("creating net salary calculator: %w", err)
-		}
-
-		adj := activeSalaryAdjustmentAt(sal.Adjustments, d)
-		pbb := activePBBAt(ibbs, d)
-		ppl := activePartialParentalLeaveAt(sal.PartialParentalLeaves, d)
-		fpl := activeFullParentalLeaveAt(sal.FullParentalLeaves, d)
-
-		gross := *grossAmount
-		calc := calculator
-		adjParams := swe.SalaryAdjustmentParams{
-			YearlyVacationDays:   adj.VacationDaysPerYear,
-			SickDaysPerOccasion:  adj.SickDaysPerOccasion,
-			SickOccasionsPerYear: adj.SickOccasionsPerYear,
-			VABDaysPerYear:       adj.VABDaysPerYear,
-			Prisbasbelopp:        pbb,
-		}
-		fplActive := fpl
-		pbbVal := pbb
-		var pplSjuk, pplLagsta, pplSkipped float64
-		if ppl != nil {
-			pplSjuk = ppl.SjukDaysPerYear
-			pplLagsta = ppl.LagstaDaysPerYear
-			pplSkipped = ppl.SkippedWorkDaysPerYear
-		}
-
-		var net uncertain.Value
-		if fplActive != nil {
-			net = uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
-				return swe.CalculateFullParentalLeaveCompensation(gross.Sample(cfg), fplActive.SjukDaysPerWeek, pbbVal)
-			})
-		} else {
-			net = uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
-				sampled := gross.Sample(cfg)
-				adjusted := swe.AdjustGrossSalary(sampled, adjParams)
-				adjusted -= swe.CalculatePartialParentalLeaveDeduction(sampled, pplSjuk, pplLagsta, pplSkipped, pbbVal)
-				res, err := calc(adjusted)
-				if err != nil {
-					return adjusted
-				}
-				return res.NetMonthly
-			})
-		}
-
-		var endDate *date.Date
-		if i+1 < len(dates) {
-			ed := dates[i+1]
-			endDate = &ed
-		}
-
-		segments = append(segments, NetSalarySegment{
-			StartDate: d,
-			EndDate:   endDate,
-			Net:       net,
-		})
-	}
-	return segments, nil
-}
-
-type NetSalarySegmentBreakdown struct {
-	StartDate date.Date
-	EndDate   *date.Date
-	Breakdown swe.SalaryBreakdown
-}
-
-// ComputeSalaryBreakdowns returns an itemized breakdown for each net salary
-// segment of the given gross salary. Returns nil for non-gross salaries.
-func (s *Service) ComputeSalaryBreakdowns(ctx context.Context, salaryID string) ([]NetSalarySegmentBreakdown, error) {
-	sal, err := s.GetSalary(ctx, salaryID)
-	if err != nil {
-		return nil, fmt.Errorf("getting salary: %w", err)
-	}
-	if !sal.IsGross || sal.Kommun == "" || sal.Forsamling == "" || len(sal.Amounts) == 0 {
-		return nil, nil
-	}
-
-	ibbs, err := s.ListSweYearlyParams(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing swe yearly params: %w", err)
-	}
-
-	return s.computeBreakdownSegments(ctx, sal, ibbs)
-}
-
-func (s *Service) computeBreakdownSegments(ctx context.Context, sal Salary, ibbs []SweYearlyParams) ([]NetSalarySegmentBreakdown, error) {
-	sorted := make([]SalaryAmount, len(sal.Amounts))
-	copy(sorted, sal.Amounts)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].StartDate < sorted[j].StartDate
-	})
-
-	dateSet := make(map[date.Date]struct{})
-	for _, amt := range sorted {
-		dateSet[amt.StartDate] = struct{}{}
-	}
-	for _, adj := range sal.Adjustments {
-		if adj.ValidFrom >= sorted[0].StartDate {
-			dateSet[adj.ValidFrom] = struct{}{}
-		}
-	}
-	for _, ppl := range sal.PartialParentalLeaves {
-		if ppl.StartDate >= sorted[0].StartDate {
-			dateSet[ppl.StartDate] = struct{}{}
-		}
-		if ppl.EndDate >= sorted[0].StartDate {
-			dateSet[ppl.EndDate] = struct{}{}
-		}
-	}
-	for _, fpl := range sal.FullParentalLeaves {
-		if fpl.StartDate >= sorted[0].StartDate {
-			dateSet[fpl.StartDate] = struct{}{}
-		}
-		if fpl.EndDate >= sorted[0].StartDate {
-			dateSet[fpl.EndDate] = struct{}{}
-		}
-	}
-	for _, ibb := range ibbs {
-		if ibb.ValidFrom >= sorted[0].StartDate {
-			dateSet[ibb.ValidFrom] = struct{}{}
-		}
-	}
-
-	dates := make([]date.Date, 0, len(dateSet))
-	for d := range dateSet {
-		dates = append(dates, d)
-	}
-	sort.Slice(dates, func(i, j int) bool { return dates[i] < dates[j] })
-
-	var segments []NetSalarySegmentBreakdown
-	for i, d := range dates {
-		grossAmount := activeSalaryAmountAt(sorted, d)
-		if grossAmount == nil {
-			continue
-		}
-		grossMean := grossAmount.Mean()
-
-		fpl := activeFullParentalLeaveAt(sal.FullParentalLeaves, d)
-		pbb := activePBBAt(ibbs, d)
-
-		var bd swe.SalaryBreakdown
-		if fpl != nil {
-			bd = swe.CalculateFullParentalLeaveBreakdown(grossMean, fpl.SjukDaysPerWeek, pbb)
-		} else {
-			adj := activeSalaryAdjustmentAt(sal.Adjustments, d)
-			adjParams := swe.SalaryAdjustmentParams{
-				YearlyVacationDays:   adj.VacationDaysPerYear,
-				SickDaysPerOccasion:  adj.SickDaysPerOccasion,
-				SickOccasionsPerYear: adj.SickOccasionsPerYear,
-				VABDaysPerYear:       adj.VABDaysPerYear,
-				Prisbasbelopp:        pbb,
-			}
-			ppl := activePartialParentalLeaveAt(sal.PartialParentalLeaves, d)
-			var pplSjuk, pplLagsta, pplSkipped float64
-			if ppl != nil {
-				pplSjuk = ppl.SjukDaysPerYear
-				pplLagsta = ppl.LagstaDaysPerYear
-				pplSkipped = ppl.SkippedWorkDaysPerYear
-			}
-
-			year := strings.SplitN(d.String(), "-", 2)[0]
-			calculator, err := s.sweClient.NetSalaryCalculator(ctx, swe.GrossSalaryInput{
+		calculate, ok := calculators[d.Year()]
+		if !ok {
+			var err error
+			calculate, err = s.sweClient.NetSalaryCalculator(ctx, swe.GrossSalaryInput{
 				Kommun:       sal.Kommun,
 				Forsamling:   sal.Forsamling,
-				Year:         year,
+				Year:         strconv.Itoa(d.Year()),
 				ChurchMember: sal.ChurchMember,
-				Column:       1,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("creating net salary calculator: %w", err)
+				return nil, err
 			}
-			taxFunc := func(adjustedGross float64) (float64, error) {
-				res, err := calculator(adjustedGross)
-				if err != nil {
-					return 0, err
-				}
-				return res.Tax, nil
-			}
-			bd = swe.CalculateSalaryBreakdown(grossMean, adjParams, pplSjuk, pplLagsta, pplSkipped, pbb, taxFunc)
+			calculators[d.Year()] = calculate
 		}
+		breakdown := sal.breakdownOn(d, params, func(adjustedGross float64) float64 { return calculate(adjustedGross).Tax })
+		gross := *activeSalaryAmountAt(sorted, d)
 
-		var endDate *date.Date
+		seg := SalarySegment{
+			StartDate: d,
+			NetSalary: uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
+				return breakdown(gross.Sample(cfg)).NetMonthly
+			}),
+			Breakdown: SalaryBreakdown{SalaryBreakdown: breakdown(gross.Mean())},
+		}
 		if i+1 < len(dates) {
 			ed := dates[i+1]
-			endDate = &ed
+			seg.EndDate = &ed
 		}
-
-		segments = append(segments, NetSalarySegmentBreakdown{
-			StartDate: d,
-			EndDate:   endDate,
-			Breakdown: bd,
-		})
+		if ibb := activeIBBAt(params, d); ibb != 0 {
+			pension := uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
+				return swe.CalculateITP1Pension(gross.Sample(cfg), ibb)
+			})
+			meanPension := swe.CalculateITP1Pension(gross.Mean(), ibb)
+			seg.PensionContribution = &pension
+			seg.Breakdown.PensionContribution = &meanPension
+		}
+		segments = append(segments, seg)
 	}
 	return segments, nil
 }
 
-// computePensionSegments builds pension segments split at the union of
-// salary-amount and IBB change-point dates. Each segment's Pension is a
-// mapped uncertain.Value that derives pension from the gross amount.
-func (s *Service) computePensionSegments(_ context.Context, sal Salary, ibbs []SweYearlyParams) []PensionSegment {
-	if len(sal.Amounts) == 0 {
+// segmentStartDates are the days the Salary's Salary Segments start on: its first Salary Amount's
+// Start Date and every later day its Salary Amount, adjustment, a parental leave or the Swedish yearly
+// parameters change.
+func (s Salary) segmentStartDates(params []SweYearlyParams) []date.Date {
+	if len(s.Amounts) == 0 {
 		return nil
 	}
-
-	sorted := make([]SalaryAmount, len(sal.Amounts))
-	copy(sorted, sal.Amounts)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].StartDate < sorted[j].StartDate
-	})
-
-	dateSet := make(map[date.Date]struct{})
-	for _, amt := range sorted {
-		dateSet[amt.StartDate] = struct{}{}
+	first := s.Amounts[0].StartDate
+	for _, amt := range s.Amounts {
+		first = min(first, amt.StartDate)
 	}
-	for _, ibb := range ibbs {
-		if ibb.ValidFrom >= sorted[0].StartDate {
-			dateSet[ibb.ValidFrom] = struct{}{}
+	dateSet := make(map[date.Date]struct{})
+	add := func(d date.Date) {
+		if d >= first {
+			dateSet[d] = struct{}{}
 		}
+	}
+	for _, amt := range s.Amounts {
+		add(amt.StartDate)
+	}
+	for _, adj := range s.Adjustments {
+		add(adj.ValidFrom)
+	}
+	for _, ppl := range s.PartialParentalLeaves {
+		add(ppl.StartDate)
+		add(ppl.EndDate)
+	}
+	for _, fpl := range s.FullParentalLeaves {
+		add(fpl.StartDate)
+		add(fpl.EndDate)
+	}
+	for _, p := range params {
+		add(p.ValidFrom)
 	}
 
 	dates := make([]date.Date, 0, len(dateSet))
 	for d := range dateSet {
 		dates = append(dates, d)
 	}
-	sort.Slice(dates, func(i, j int) bool { return dates[i] < dates[j] })
+	slices.Sort(dates)
+	return dates
+}
 
-	var segments []PensionSegment
-	for i, d := range dates {
-		grossAmount := activeSalaryAmountAt(sorted, d)
-		if grossAmount == nil {
-			continue
+// breakdownOn returns the Salary Breakdown of a monthly gross in the Salary Segment starting on d, taxed
+// by tax: the compensation of a full parental leave, or otherwise the gross adjusted and taxed.
+func (s Salary) breakdownOn(d date.Date, params []SweYearlyParams, tax func(adjustedGross float64) float64) func(gross float64) swe.SalaryBreakdown {
+	pbb := activePBBAt(params, d)
+	if fpl := activeFullParentalLeaveAt(s.FullParentalLeaves, d); fpl != nil {
+		sjukDaysPerWeek := fpl.SjukDaysPerWeek
+		return func(gross float64) swe.SalaryBreakdown {
+			return swe.CalculateFullParentalLeaveBreakdown(gross, sjukDaysPerWeek, pbb)
 		}
-		ibb := activeIBBAt(ibbs, d)
-		if ibb == 0 {
-			continue
-		}
-
-		gross := *grossAmount
-		ibbVal := ibb
-		pension := uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
-			return swe.CalculateITP1Pension(gross.Sample(cfg), ibbVal)
-		})
-
-		var endDate *date.Date
-		if i+1 < len(dates) {
-			ed := dates[i+1]
-			endDate = &ed
-		}
-
-		segments = append(segments, PensionSegment{
-			StartDate: d,
-			EndDate:   endDate,
-			Pension:   pension,
-		})
 	}
-	return segments
+	adj := activeSalaryAdjustmentAt(s.Adjustments, d)
+	adjParams := swe.SalaryAdjustmentParams{
+		YearlyVacationDays:   adj.VacationDaysPerYear,
+		SickDaysPerOccasion:  adj.SickDaysPerOccasion,
+		SickOccasionsPerYear: adj.SickOccasionsPerYear,
+		VABDaysPerYear:       adj.VABDaysPerYear,
+		Prisbasbelopp:        pbb,
+	}
+	if ppl := activePartialParentalLeaveAt(s.PartialParentalLeaves, d); ppl != nil {
+		adjParams.ParentalSjukDaysPerYear = ppl.SjukDaysPerYear
+		adjParams.ParentalLagstaDaysPerYear = ppl.LagstaDaysPerYear
+		adjParams.ParentalSkippedWorkDaysPerYear = ppl.SkippedWorkDaysPerYear
+	}
+	return func(gross float64) swe.SalaryBreakdown {
+		return swe.CalculateSalaryBreakdown(gross, adjParams, tax)
+	}
 }
 
 // activeSalaryAmountAt returns the uncertain.Value gross salary active at a given date.

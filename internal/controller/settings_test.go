@@ -15,9 +15,9 @@ import (
 	"github.com/ncruces/go-sqlite3/vfs/memdb"
 )
 
-func newSettingsServer(t *testing.T) (*model.Service, *httptest.Server) {
+func newSettingsServer(t *testing.T, opts ...model.ServiceOption) (*model.Service, *httptest.Server) {
 	t.Helper()
-	svc, err := model.Open(t.Context(), pefigo.StaticEmbeddedFS, "static/migrations", memdb.TestDB(t))
+	svc, err := model.Open(t.Context(), pefigo.StaticEmbeddedFS, "static/migrations", memdb.TestDB(t), opts...)
 	if err != nil {
 		t.Fatalf("failed to create test db: %v", err)
 	}

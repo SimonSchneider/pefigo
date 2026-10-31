@@ -56,7 +56,7 @@ The occupational pension (ITP1) premium a Gross Salary pays into its pension acc
 _Avoid_: pension, ITP
 
 **Salary Breakdown**:
-The itemized steps from a Salary Segment's Salary Amount to its Net Salary.
+The itemized steps from a Salary Segment's Salary Amount to its Net Salary, with its Pension Contribution.
 
 **Tax Table**:
 Skatteverket's monthly withholding tax for every monthly income, for one table number and year: an amount for incomes up to the table's limit (80 000 kr in 2025), and a percentage of the whole income above it. No income has no tax.

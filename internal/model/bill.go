@@ -2,8 +2,10 @@ package model
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -33,14 +35,6 @@ type Bill struct {
 	Notes            string
 	URL              string
 	Amounts          []BillAmount
-
-	defaultCurrency string
-	getRate         func(from, to string) float64
-}
-
-func (b *Bill) SetCurrencyConverter(defaultCurrency string, getRate func(from, to string) float64) {
-	b.defaultCurrency = defaultCurrency
-	b.getRate = getRate
 }
 
 // The Bill Amount periods (BillAmount.Period).
@@ -57,52 +51,43 @@ type BillAmount struct {
 	Currency  string // a supported ISO 4217 code; empty means default currency
 	StartDate date.Date
 	EndDate   *date.Date
+
+	// rate converts Amount to the Default Currency: the Exchange Rate the Service loaded the Bill Amount
+	// at, or 0 for one in the Default Currency. See Service.loadBillAccounts.
+	rate float64
 }
 
-func (ba BillAmount) MonthlyAmountValue() uncertain.Value {
+// inDefaultCurrency is v, an amount in the Bill Amount's currency, in the Default Currency.
+func (ba BillAmount) inDefaultCurrency(v uncertain.Value) uncertain.Value {
+	if ba.rate == 0 {
+		return v
+	}
+	rate := ba.rate
+	return uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
+		return v.Sample(cfg) * rate
+	})
+}
+
+// monthlyAmount is the Bill Amount a month, in the Default Currency.
+func (ba BillAmount) monthlyAmount() uncertain.Value {
 	if ba.Period == BillPeriodYearly {
 		v := ba.Amount
-		return uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
+		return ba.inDefaultCurrency(uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
 			return v.Sample(cfg) / 12
-		})
+		}))
 	}
-	return ba.Amount
+	return ba.inDefaultCurrency(ba.Amount)
 }
 
-func (ba BillAmount) YearlyAmountValue() uncertain.Value {
+// yearlyAmount is the Bill Amount a year, in the Default Currency.
+func (ba BillAmount) yearlyAmount() uncertain.Value {
 	if ba.Period == BillPeriodYearly {
-		return ba.Amount
+		return ba.inDefaultCurrency(ba.Amount)
 	}
 	v := ba.Amount
-	return uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
+	return ba.inDefaultCurrency(uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
 		return v.Sample(cfg) * 12
-	})
-}
-
-func (ba BillAmount) needsConversion(defaultCurrency string) bool {
-	return ba.Currency != "" && ba.Currency != defaultCurrency
-}
-
-func (ba BillAmount) ConvertedMonthlyAmountValue(defaultCurrency string, getRate func(from, to string) float64) uncertain.Value {
-	monthly := ba.MonthlyAmountValue()
-	if !ba.needsConversion(defaultCurrency) {
-		return monthly
-	}
-	rate := getRate(ba.Currency, defaultCurrency)
-	return uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
-		return monthly.Sample(cfg) * rate
-	})
-}
-
-func (ba BillAmount) ConvertedYearlyAmountValue(defaultCurrency string, getRate func(from, to string) float64) uncertain.Value {
-	yearly := ba.YearlyAmountValue()
-	if !ba.needsConversion(defaultCurrency) {
-		return yearly
-	}
-	rate := getRate(ba.Currency, defaultCurrency)
-	return uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
-		return yearly.Sample(cfg) * rate
-	})
+	}))
 }
 
 func (b Bill) currentBillAmount() *BillAmount {
@@ -129,30 +114,26 @@ func (b Bill) CurrentPeriod() string {
 	return amt.Period
 }
 
+// MonthlyAmountValue is the current Bill Amount a month, in the Default Currency.
 func (b Bill) MonthlyAmountValue() uncertain.Value {
 	amt := b.currentBillAmount()
 	if amt == nil {
 		return uncertain.NewFixed(0)
 	}
-	if b.getRate != nil {
-		return amt.ConvertedMonthlyAmountValue(b.defaultCurrency, b.getRate)
-	}
-	return amt.MonthlyAmountValue()
+	return amt.monthlyAmount()
 }
 
 func (b Bill) CurrentAmount() float64 {
 	return b.MonthlyAmountValue().Mean()
 }
 
+// YearlyAmountValue is the current Bill Amount a year, in the Default Currency.
 func (b Bill) YearlyAmountValue() uncertain.Value {
 	amt := b.currentBillAmount()
 	if amt == nil {
 		return uncertain.NewFixed(0)
 	}
-	if b.getRate != nil {
-		return amt.ConvertedYearlyAmountValue(b.defaultCurrency, b.getRate)
-	}
-	return amt.YearlyAmountValue()
+	return amt.yearlyAmount()
 }
 
 func (b Bill) YearlyAmount() float64 {
@@ -216,17 +197,13 @@ func (b Bill) GenerateTransferTemplates(ba BillAccount) []TransferTemplate {
 				endDate = &nextStart
 			}
 		}
-		monthlyAmt := amt.MonthlyAmountValue()
-		if b.getRate != nil {
-			monthlyAmt = amt.ConvertedMonthlyAmountValue(b.defaultCurrency, b.getRate)
-		}
 		templates = append(templates, TransferTemplate{
 			ID:               fmt.Sprintf("bill:%s:%d", b.ID, i),
 			Name:             b.Name,
 			FromAccountID:    ba.FromAccountID,
 			ToAccountID:      "",
 			AmountType:       TransferAmountFixed,
-			AmountFixed:      monthlyAmt,
+			AmountFixed:      amt.monthlyAmount(),
 			Priority:         ba.Priority,
 			Recurrence:       ba.Recurrence,
 			StartDate:        amt.StartDate,
@@ -284,21 +261,56 @@ func billAmountFromDB(a pdb.BillAmount) (BillAmount, error) {
 	}, nil
 }
 
-func (s *Service) applyCurrencyConverter(ctx context.Context, bills []Bill) {
+// loadBillAccounts returns every Bill account with its Bills, and every Bill Amount with its amount in
+// the Default Currency: one in another currency converted at the latest Exchange Rate. It fails when
+// the Default Currency can't be read, or when no Exchange Rate needed was ever fetched.
+func (s *Service) loadBillAccounts(ctx context.Context) ([]BillAccount, error) {
 	defaultCurrency, err := s.GetDefaultCurrency(ctx)
-	if err != nil || s.currencyClient == nil {
-		return
+	if err != nil {
+		return nil, err
 	}
-	getRate := func(from, to string) float64 {
-		rate, err := s.currencyClient.GetRate(ctx, from, to)
+	accounts, err := s.ListBillAccounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	allBills, err := s.q.ListAllBills(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing all bills: %w", err)
+	}
+	allAmounts, err := s.q.ListAllBillAmounts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing all bill amounts: %w", err)
+	}
+
+	rates := make(map[string]float64)
+	amountsByBill := make(map[string][]BillAmount)
+	for _, a := range allAmounts {
+		amount, err := billAmountFromDB(a)
 		if err != nil {
-			return 1
+			return nil, err
 		}
-		return rate
+		if amount.Currency != "" && amount.Currency != defaultCurrency {
+			rate, ok := rates[amount.Currency]
+			if !ok {
+				if rate, err = s.currencyClient.GetRate(ctx, amount.Currency, defaultCurrency); err != nil {
+					return nil, fmt.Errorf("converting Bill Amounts in %s: %w", amount.Currency, err)
+				}
+				rates[amount.Currency] = rate
+			}
+			amount.rate = rate
+		}
+		amountsByBill[a.BillID] = append(amountsByBill[a.BillID], amount)
 	}
-	for i := range bills {
-		bills[i].SetCurrencyConverter(defaultCurrency, getRate)
+	billsByAccount := make(map[string][]Bill)
+	for _, b := range allBills {
+		bill := billFromDB(b)
+		bill.Amounts = amountsByBill[b.ID]
+		billsByAccount[b.BillAccountID] = append(billsByAccount[b.BillAccountID], bill)
 	}
+	for i := range accounts {
+		accounts[i].Bills = billsByAccount[accounts[i].ID]
+	}
+	return accounts, nil
 }
 
 // DefaultBillAccountRecurrence is the recurrence of a Bill account saved without one: the 1st of every
@@ -526,39 +538,15 @@ func (v BillEditView) IsEdit() bool {
 }
 
 func (s *Service) GetBillAccountsPageData(ctx context.Context) (*BillsPageData, error) {
-	accounts, err := s.ListBillAccounts(ctx)
+	accounts, err := s.loadBillAccounts(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("listing bill accounts: %w", err)
-	}
-	allBills, err := s.q.ListAllBills(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing all bills: %w", err)
-	}
-	allAmounts, err := s.q.ListAllBillAmounts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing all bill amounts: %w", err)
+		return nil, err
 	}
 	categories, err := s.ListCategories(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
-	amountsByBill := make(map[string][]BillAmount)
-	for _, a := range allAmounts {
-		parsed, err := billAmountFromDB(a)
-		if err != nil {
-			return nil, err
-		}
-		amountsByBill[a.BillID] = append(amountsByBill[a.BillID], parsed)
-	}
-	billsByAccount := make(map[string][]Bill)
-	for _, b := range allBills {
-		bill := billFromDB(b)
-		bill.Amounts = amountsByBill[b.ID]
-		billsByAccount[b.BillAccountID] = append(billsByAccount[b.BillAccountID], bill)
-	}
 	for i := range accounts {
-		accounts[i].Bills = billsByAccount[accounts[i].ID]
-		s.applyCurrencyConverter(ctx, accounts[i].Bills)
 		SortBillsByAmount(accounts[i].Bills)
 	}
 	return &BillsPageData{
@@ -583,31 +571,14 @@ func (s *Service) GetBillAccountNewPageData(ctx context.Context) (*BillAccountEd
 }
 
 func (s *Service) GetBillAccountEditPageData(ctx context.Context, id string) (*BillAccountEditView, error) {
-	ba, err := s.GetBillAccount(ctx, id)
+	accounts, err := s.loadBillAccounts(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("getting bill account: %w", err)
+		return nil, err
 	}
-	bills, err := s.ListBills(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("listing bills: %w", err)
+	i := slices.IndexFunc(accounts, func(ba BillAccount) bool { return ba.ID == id })
+	if i < 0 {
+		return nil, fmt.Errorf("getting bill account: %w", sql.ErrNoRows)
 	}
-	allAmounts, err := s.q.ListAllBillAmounts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing bill amounts: %w", err)
-	}
-	amountsByBill := make(map[string][]BillAmount)
-	for _, a := range allAmounts {
-		parsed, err := billAmountFromDB(a)
-		if err != nil {
-			return nil, err
-		}
-		amountsByBill[a.BillID] = append(amountsByBill[a.BillID], parsed)
-	}
-	for i := range bills {
-		bills[i].Amounts = amountsByBill[bills[i].ID]
-	}
-	s.applyCurrencyConverter(ctx, bills)
-	ba.Bills = bills
 	accs, err := s.ListAccounts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing accounts: %w", err)
@@ -617,83 +588,46 @@ func (s *Service) GetBillAccountEditPageData(ctx context.Context, id string) (*B
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
 	return &BillAccountEditView{
-		BillAccount: ba,
+		BillAccount: accounts[i],
 		Accounts:    accs,
 		Categories:  categories,
 	}, nil
 }
 
 func (s *Service) GetBillEditPageData(ctx context.Context, billID string) (*BillEditView, error) {
-	bill, err := s.GetBill(ctx, billID)
+	accounts, err := s.loadBillAccounts(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("getting bill: %w", err)
+		return nil, err
 	}
-	amounts, err := s.ListBillAmounts(ctx, billID)
-	if err != nil {
-		return nil, fmt.Errorf("listing bill amounts: %w", err)
+	for _, ba := range accounts {
+		for _, bill := range ba.Bills {
+			if bill.ID != billID {
+				continue
+			}
+			categories, err := s.ListCategories(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("listing categories: %w", err)
+			}
+			return &BillEditView{
+				Bill:         bill,
+				BillAccount:  ba,
+				BillAccounts: accounts,
+				Categories:   categories,
+			}, nil
+		}
 	}
-	bill.Amounts = amounts
-	s.applyCurrencyConverter(ctx, []Bill{bill})
-	ba, err := s.GetBillAccount(ctx, bill.BillAccountID)
-	if err != nil {
-		return nil, fmt.Errorf("getting bill account: %w", err)
-	}
-	billAccounts, err := s.ListBillAccounts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing bill accounts: %w", err)
-	}
-	categories, err := s.ListCategories(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing categories: %w", err)
-	}
-	return &BillEditView{
-		Bill:         bill,
-		BillAccount:  ba,
-		BillAccounts: billAccounts,
-		Categories:   categories,
-	}, nil
+	return nil, fmt.Errorf("getting bill: %w", sql.ErrNoRows)
 }
 
 func (s *Service) generateBillTransferTemplates(ctx context.Context) ([]TransferTemplate, error) {
-	billAccounts, err := s.q.ListBillAccounts(ctx)
+	accounts, err := s.loadBillAccounts(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("listing bill accounts: %w", err)
+		return nil, err
 	}
-	allBills, err := s.q.ListAllBills(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing all bills: %w", err)
-	}
-	allAmounts, err := s.q.ListAllBillAmounts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing all bill amounts: %w", err)
-	}
-
-	amountsByBill := make(map[string][]BillAmount)
-	for _, a := range allAmounts {
-		parsed, err := billAmountFromDB(a)
-		if err != nil {
-			return nil, err
-		}
-		amountsByBill[a.BillID] = append(amountsByBill[a.BillID], parsed)
-	}
-
-	billsByAccount := make(map[string][]Bill)
-	for _, b := range allBills {
-		bill := billFromDB(b)
-		bill.Amounts = amountsByBill[b.ID]
-		billsByAccount[b.BillAccountID] = append(billsByAccount[b.BillAccountID], bill)
-	}
-
-	for accountID, bills := range billsByAccount {
-		s.applyCurrencyConverter(ctx, bills)
-		billsByAccount[accountID] = bills
-	}
-
 	var templates []TransferTemplate
-	for _, ba := range billAccounts {
-		account := billAccountFromDB(ba)
-		for _, bill := range billsByAccount[ba.ID] {
-			templates = append(templates, bill.GenerateTransferTemplates(account)...)
+	for _, ba := range accounts {
+		for _, bill := range ba.Bills {
+			templates = append(templates, bill.GenerateTransferTemplates(ba)...)
 		}
 	}
 	return templates, nil

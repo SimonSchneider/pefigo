@@ -25,6 +25,8 @@ templ SalariesListView(salaries []Salary) {
 										<th class="font-semibold">Name</th>
 										<th class="font-semibold">Recurrence</th>
 										<th class="font-semibold">Current Amount</th>
+										<th class="font-semibold">Net Salary</th>
+										<th class="font-semibold">Pension Contribution</th>
 										<th class="font-semibold">Type</th>
 										<th class="font-semibold">Status</th>
 										<th class="font-semibold text-right">Actions</th>
@@ -33,7 +35,7 @@ templ SalariesListView(salaries []Salary) {
 								<tbody>
 									if len(salaries) == 0 {
 										<tr>
-											<td colspan="6" class="text-center py-8 text-base-content/70">
+											<td colspan="8" class="text-center py-8 text-base-content/70">
 												<div class="flex flex-col items-center gap-2">
 													@NoDataImg()
 													<p class="text-lg font-medium">No salaries yet</p>
@@ -49,6 +51,7 @@ templ SalariesListView(salaries []Salary) {
 												<td>
 													@BalanceBadge(sal.CurrentAmount(), false, "")
 												</td>
+												@salaryTodayCells(sal)
 												<td>
 													if sal.IsGross {
 														<span class="badge badge-info badge-sm">Gross (SE)</span>
@@ -83,6 +86,33 @@ templ SalariesListView(salaries []Salary) {
 	</main>
 }
 
+// salaryTodayCells are a Gross Salary's Net Salary and Pension Contribution today, from the Salary
+// Breakdown of its Salary Segment today: "–" without one, and why when they can't be computed.
+templ salaryTodayCells(sal Salary) {
+	{{ _, err := sal.Segments() }}
+	{{ today := sal.CurrentSegment() }}
+	if !sal.IsGross {
+		<td></td>
+		<td></td>
+	} else if err != nil {
+		<td colspan="2" class="text-error text-xs max-w-xs whitespace-normal">{ err.Error() }</td>
+	} else if today == nil {
+		<td>–</td>
+		<td>–</td>
+	} else {
+		<td>
+			@BalanceBadge(today.Breakdown.NetMonthly, false, "")
+		</td>
+		<td>
+			if today.Breakdown.PensionContribution != nil {
+				@BalanceBadge(*today.Breakdown.PensionContribution, false, "")
+			} else {
+				–
+			}
+		</td>
+	}
+}
+
 templ PageEditSalary(child templ.Component) {
 	@Layout("/salaries", child)
 }
@@ -94,13 +124,14 @@ templ SalaryEditContent(view *SalaryEditView) {
 		} else {
 			@Header("New Salary", BackButton("/salaries"))
 		}
-		if len(view.Breakdowns) > 0 {
+		{{ segments, segmentsErr := view.Salary.Segments() }}
+		if len(segments) > 0 || segmentsErr != nil {
 			<div class="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
 				<div class="flex-1 overflow-auto min-h-0">
 					@SalaryForm(view)
 				</div>
 				<aside class="lg:w-80 xl:w-96 border-t lg:border-t-0 lg:border-l border-base-300 overflow-y-auto min-h-0 bg-base-200/40">
-					@SalaryBreakdownPanel(view.Breakdowns)
+					@SalaryBreakdownPanel(segments, segmentsErr)
 				</aside>
 			</div>
 		} else {
@@ -512,12 +543,18 @@ templ SalaryForsamlingOptions(forsamlingar []string, selected string) {
 	}
 }
 
-templ SalaryBreakdownPanel(breakdowns []NetSalarySegmentBreakdown) {
+// SalaryBreakdownPanel shows the Salary Breakdown of each Salary Segment, or err, why there are none.
+templ SalaryBreakdownPanel(segments []SalarySegment, err error) {
 	<div class="p-4 space-y-3">
 		<div class="sticky top-0 z-10 bg-base-200/40 -mx-4 -mt-4 px-4 pt-4 pb-3 border-b border-base-300 backdrop-blur">
 			<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/60">Net Salary Breakdown</h3>
 		</div>
-		for _, seg := range breakdowns {
+		if err != nil {
+			<div role="alert" class="alert alert-error alert-soft text-sm">
+				<span>The Net Salary can't be computed: { err.Error() }</span>
+			</div>
+		}
+		for _, seg := range segments {
 			<div class="card bg-base-100 shadow-sm border border-base-300">
 				<div class="card-body p-4">
 					<div class="text-xs font-semibold text-base-content/60 mb-2">
@@ -582,8 +619,22 @@ templ breakdownNormal(bd SalaryBreakdown) {
 				<td class="font-semibold">Net</td>
 				<td class="text-right font-mono font-semibold">{ ui.FormatWithThousands(bd.NetMonthly) }</td>
 			</tr>
+			@breakdownPensionContribution(bd)
 		</tbody>
 	</table>
+}
+
+templ breakdownPensionContribution(bd SalaryBreakdown) {
+	<tr>
+		<td class="text-base-content/70">Pension contribution</td>
+		<td class="text-right font-mono">
+			if bd.PensionContribution != nil {
+				{ ui.FormatWithThousands(*bd.PensionContribution) }
+			} else {
+				–
+			}
+		</td>
+	</tr>
 }
 
 templ breakdownFullParentalLeave(bd SalaryBreakdown) {
@@ -602,6 +653,7 @@ templ breakdownFullParentalLeave(bd SalaryBreakdown) {
 				<td class="font-semibold">Compensation</td>
 				<td class="text-right font-mono font-semibold">{ ui.FormatWithThousands(bd.NetMonthly) }</td>
 			</tr>
+			@breakdownPensionContribution(bd)
 		</tbody>
 	</table>
 }

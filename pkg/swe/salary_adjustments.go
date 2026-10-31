@@ -50,19 +50,34 @@ func CalculateVABDeduction(monthlyGross, vabDaysPerYear, prisbasbelopp float64) 
 	return (annualSalaryLoss - annualFKCompensation) / 12
 }
 
+// SalaryAdjustmentParams are what adjusts a monthly gross salary: vacation, sick leave, VAB and the days
+// of a partial parental leave, all per year, and the prisbasbelopp the compensations are capped by.
 type SalaryAdjustmentParams struct {
-	YearlyVacationDays   float64
-	SickDaysPerOccasion  float64
-	SickOccasionsPerYear float64
-	VABDaysPerYear       float64
-	Prisbasbelopp        float64
+	YearlyVacationDays             float64
+	SickDaysPerOccasion            float64
+	SickOccasionsPerYear           float64
+	VABDaysPerYear                 float64
+	ParentalSjukDaysPerYear        float64
+	ParentalLagstaDaysPerYear      float64
+	ParentalSkippedWorkDaysPerYear float64
+	Prisbasbelopp                  float64
 }
 
-// AdjustGrossSalary applies vacation supplement, sick pay deduction, and VAB
-// deduction to a monthly gross salary, returning the adjusted monthly gross.
+// AdjustGrossSalary applies the vacation supplement and the sick pay, VAB and partial parental leave
+// deductions to a monthly gross salary, returning the adjusted monthly gross.
 func AdjustGrossSalary(monthlyGross float64, params SalaryAdjustmentParams) float64 {
-	vacation := CalculateVacationPaySupplement(monthlyGross, params.YearlyVacationDays)
-	sick := CalculateSickPayDeduction(monthlyGross, params.SickDaysPerOccasion, params.SickOccasionsPerYear, params.Prisbasbelopp)
-	vab := CalculateVABDeduction(monthlyGross, params.VABDaysPerYear, params.Prisbasbelopp)
-	return monthlyGross + vacation - sick - vab
+	return adjustGrossSalary(monthlyGross, params).AdjustedGross
+}
+
+// adjustGrossSalary itemizes the adjustments of a monthly gross salary up to its adjusted gross.
+func adjustGrossSalary(monthlyGross float64, params SalaryAdjustmentParams) SalaryBreakdown {
+	bd := SalaryBreakdown{
+		GrossMonthly:             monthlyGross,
+		VacationSupplement:       CalculateVacationPaySupplement(monthlyGross, params.YearlyVacationDays),
+		SickPayDeduction:         CalculateSickPayDeduction(monthlyGross, params.SickDaysPerOccasion, params.SickOccasionsPerYear, params.Prisbasbelopp),
+		VABDeduction:             CalculateVABDeduction(monthlyGross, params.VABDaysPerYear, params.Prisbasbelopp),
+		PartialParentalDeduction: CalculatePartialParentalLeaveDeduction(monthlyGross, params.ParentalSjukDaysPerYear, params.ParentalLagstaDaysPerYear, params.ParentalSkippedWorkDaysPerYear, params.Prisbasbelopp),
+	}
+	bd.AdjustedGross = monthlyGross + bd.VacationSupplement - bd.SickPayDeduction - bd.VABDeduction - bd.PartialParentalDeduction
+	return bd
 }

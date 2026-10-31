@@ -69,11 +69,15 @@ func ConvertAmount(amount, rate float64) float64 {
 	return amount * rate
 }
 
-// Cache provides TTL-aware key-value storage for exchange rate caching.
+// Cache provides TTL-aware key-value storage for exchange rate caching. Get returns the value set for
+// key no longer than maxAge ago, and an expired value is kept to be read with a longer one.
 type Cache interface {
 	Get(ctx context.Context, key string, maxAge time.Duration) (string, bool, error)
 	Set(ctx context.Context, key string, value string) error
 }
+
+// anyAge is the maxAge that reads a cached value however old.
+const anyAge = time.Duration(math.MaxInt64)
 
 const defaultBaseURL = "https://api.frankfurter.dev/v1"
 const defaultTTL = 24 * time.Hour
@@ -112,26 +116,56 @@ func NewClient(cache Cache, opts ...ClientOption) *Client {
 	return c
 }
 
+// GetRate returns the latest Exchange Rate from one currency to another: a rate fetched within the TTL,
+// a newly fetched one, or when that fetch fails the last one fetched, however old. It fails only when
+// no rate from one to the other was ever fetched.
 func (c *Client) GetRate(ctx context.Context, from, to string) (float64, error) {
 	cacheKey := fmt.Sprintf("exchange_rate:%s:%s", from, to)
 
-	if raw, ok, err := c.cache.Get(ctx, cacheKey, c.ttl); err != nil {
-		return 0, fmt.Errorf("cache get: %w", err)
-	} else if ok {
-		rates, err := ParseRatesResponse([]byte(raw))
-		if err != nil {
-			return 0, err
-		}
-		rate, ok := rates[to]
-		if !ok {
-			return 0, fmt.Errorf("cached response missing rate for %s", to)
+	if rate, ok, err := c.cachedRate(ctx, cacheKey, to, c.ttl); err != nil || ok {
+		return rate, err
+	}
+	body, rate, fetchErr := c.fetchRate(ctx, from, to)
+	if fetchErr == nil {
+		if err := c.cache.Set(ctx, cacheKey, string(body)); err != nil {
+			return 0, fmt.Errorf("cache set: %w", err)
 		}
 		return rate, nil
 	}
+	rate, ok, err := c.cachedRate(ctx, cacheKey, to, anyAge)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, fmt.Errorf("no exchange rate from %s to %s was ever fetched: %w", from, to, fetchErr)
+	}
+	return rate, nil
+}
 
+func (c *Client) cachedRate(ctx context.Context, cacheKey, to string, maxAge time.Duration) (float64, bool, error) {
+	raw, ok, err := c.cache.Get(ctx, cacheKey, maxAge)
+	if err != nil {
+		return 0, false, fmt.Errorf("cache get: %w", err)
+	}
+	if !ok {
+		return 0, false, nil
+	}
+	rates, err := ParseRatesResponse([]byte(raw))
+	if err != nil {
+		return 0, false, err
+	}
+	rate, ok := rates[to]
+	if !ok {
+		return 0, false, fmt.Errorf("cached response missing rate for %s", to)
+	}
+	return rate, true, nil
+}
+
+// fetchRate fetches the latest rate from the rate server, returning the response it is in.
+func (c *Client) fetchRate(ctx context.Context, from, to string) ([]byte, float64, error) {
 	u, err := url.Parse(c.baseURL + "/latest")
 	if err != nil {
-		return 0, fmt.Errorf("parsing URL: %w", err)
+		return nil, 0, fmt.Errorf("parsing URL: %w", err)
 	}
 	q := u.Query()
 	q.Set("base", from)
@@ -140,35 +174,31 @@ func (c *Client) GetRate(ctx context.Context, from, to string) (float64, error) 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return 0, fmt.Errorf("creating request: %w", err)
+		return nil, 0, fmt.Errorf("creating request: %w", err)
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("fetching exchange rate: %w", err)
+		return nil, 0, fmt.Errorf("fetching exchange rate: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("exchange rate API returned status %d", resp.StatusCode)
+		return nil, 0, fmt.Errorf("exchange rate API returned status %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, fmt.Errorf("reading response: %w", err)
-	}
-
-	if err := c.cache.Set(ctx, cacheKey, string(body)); err != nil {
-		return 0, fmt.Errorf("cache set: %w", err)
+		return nil, 0, fmt.Errorf("reading response: %w", err)
 	}
 
 	rates, err := ParseRatesResponse(body)
 	if err != nil {
-		return 0, err
+		return nil, 0, err
 	}
 	rate, ok := rates[to]
 	if !ok {
-		return 0, fmt.Errorf("response missing rate for %s", to)
+		return nil, 0, fmt.Errorf("response missing rate for %s", to)
 	}
-	return rate, nil
+	return body, rate, nil
 }

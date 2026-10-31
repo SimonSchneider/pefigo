@@ -1,12 +1,15 @@
 package swe
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +31,7 @@ type Client struct {
 	httpClient  *http.Client
 	taxRateURL  string
 	taxTableURL string
+	taxData     TaxData
 }
 
 type ClientOption func(*Client)
@@ -44,6 +48,11 @@ func WithHTTPClient(hc *http.Client) ClientOption {
 	return func(c *Client) { c.httpClient = hc }
 }
 
+// WithTaxData has the Client get its tax data from d instead of from Skatteverket.
+func WithTaxData(d TaxData) ClientOption {
+	return func(c *Client) { c.taxData = d }
+}
+
 func NewClient(cache Cache, opts ...ClientOption) *Client {
 	c := &Client{
 		cache:       cache,
@@ -53,6 +62,9 @@ func NewClient(cache Cache, opts ...ClientOption) *Client {
 	}
 	for _, o := range opts {
 		o(c)
+	}
+	if c.taxData == nil {
+		c.taxData = skatteverketTaxData{c}
 	}
 	return c
 }
@@ -126,15 +138,26 @@ func (c *Client) fetchCached(ctx context.Context, cacheKey, baseURL string, para
 }
 
 // GetTaxTableNumber resolves the tax table number for a kommun/forsamling/year.
-// It fetches from the Skatteverket tax rate API and rounds the total rate to the nearest integer.
 func (c *Client) GetTaxTableNumber(ctx context.Context, kommun, forsamling, year string, churchMember bool) (int, error) {
+	return c.taxData.TaxTableNumber(ctx, kommun, forsamling, year, churchMember)
+}
+
+// skatteverketTaxData is the Client's TaxData unless WithTaxData replaces it: fetched from
+// Skatteverket's open data and cached.
+type skatteverketTaxData struct {
+	c *Client
+}
+
+// TaxTableNumber fetches the total tax rate of the kommun and församling and rounds it to the nearest
+// integer.
+func (d skatteverketTaxData) TaxTableNumber(ctx context.Context, kommun, forsamling, year string, churchMember bool) (int, error) {
 	cacheKey := fmt.Sprintf("tax_rate:%s:%s:%s", kommun, forsamling, year)
 	params := url.Values{}
 	params.Set("kommun", kommun)
 	params.Set("församling", forsamling)
 	params.Set("år", year)
 
-	results, err := c.fetchCached(ctx, cacheKey, c.taxRateURL, params)
+	results, err := d.c.fetchCached(ctx, cacheKey, d.c.taxRateURL, params)
 	if err != nil {
 		return 0, fmt.Errorf("fetching tax rates: %w", err)
 	}
@@ -161,67 +184,92 @@ func (c *Client) GetTaxTableNumber(ctx context.Context, kommun, forsamling, year
 	return int(math.Round(rate)), nil
 }
 
-type taxBracket struct {
-	From float64
-	To   float64
-	Tax  float64
+// TaxTable fetches the table's monthly rows: its amounts ("30B") and its percentages ("30%").
+func (d skatteverketTaxData) TaxTable(ctx context.Context, tableNumber int, year string) ([]TaxTableRow, error) {
+	tabellnr := strconv.Itoa(tableNumber)
+	var rows []TaxTableRow
+	for _, days := range []string{"30B", "30%"} {
+		params := url.Values{}
+		params.Set("tabellnr", tabellnr)
+		params.Set("år", year)
+		params.Set("antal dgr", days)
+		results, err := d.c.fetchCached(ctx, fmt.Sprintf("tax_table:%s:%s:%s", tabellnr, year, days), d.c.taxTableURL, params)
+		if err != nil {
+			return nil, fmt.Errorf("fetching the %s rows: %w", days, err)
+		}
+		for _, result := range results {
+			row, err := taxTableRowFromSkatteverket(result)
+			if err != nil {
+				return nil, err
+			}
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
 }
 
-// NewTaxLookup fetches and parses the tax table once, returning a fast lookup
-// function that does a binary search over sorted brackets.
-func (c *Client) NewTaxLookup(ctx context.Context, tableNumber int, year string, column int) (func(grossMonthly float64) (float64, error), error) {
-	tabellnr := strconv.Itoa(tableNumber)
-	cacheKey := fmt.Sprintf("tax_table:%s:%s", tabellnr, year)
-	params := url.Values{}
-	params.Set("tabellnr", tabellnr)
-	params.Set("år", year)
-	params.Set("antal dgr", "30B")
+func taxTableRowFromSkatteverket(r map[string]string) (TaxTableRow, error) {
+	row := TaxTableRow{Percent: r["antal dgr"] == "30%"}
+	var err error
+	if row.From, err = strconv.ParseFloat(r["inkomst fr.o.m."], 64); err != nil {
+		return TaxTableRow{}, fmt.Errorf("parsing the income from %q: %w", r["inkomst fr.o.m."], err)
+	}
+	if to := r["inkomst t.o.m."]; to != "" {
+		if row.To, err = strconv.ParseFloat(to, 64); err != nil {
+			return TaxTableRow{}, fmt.Errorf("parsing the income to %q: %w", to, err)
+		}
+	}
+	if row.Tax, err = strconv.ParseFloat(r["kolumn 1"], 64); err != nil {
+		return TaxTableRow{}, fmt.Errorf("parsing the tax %q of income %s: %w", r["kolumn 1"], r["inkomst fr.o.m."], err)
+	}
+	return row, nil
+}
 
-	results, err := c.fetchCached(ctx, cacheKey, c.taxTableURL, params)
+// NewTaxLookup loads the Tax Table tableNumber of year and returns the monthly tax on every income: up
+// to the table's limit the amount of the income's row, above it the row's percentage of the whole
+// income, and 0 for an income of 0 or less. It fails when there is no such table, or when its rows end
+// at an income.
+func (c *Client) NewTaxLookup(ctx context.Context, tableNumber int, year string) (func(monthlyIncome float64) float64, error) {
+	rows, err := c.taxData.TaxTable(ctx, tableNumber, year)
 	if err != nil {
-		return nil, fmt.Errorf("fetching tax table: %w", err)
+		return nil, fmt.Errorf("fetching tax table %d for %s: %w", tableNumber, year, err)
 	}
-
-	colKey := fmt.Sprintf("kolumn %d", column)
-	brackets := make([]taxBracket, 0, len(results))
-	for _, row := range results {
-		from, err := strconv.ParseFloat(row["inkomst fr.o.m."], 64)
-		if err != nil {
-			continue
-		}
-		to, err := strconv.ParseFloat(row["inkomst t.o.m."], 64)
-		if err != nil {
-			continue
-		}
-		taxStr, ok := row[colKey]
-		if !ok || taxStr == "" {
-			continue
-		}
-		tax, err := strconv.ParseFloat(taxStr, 64)
-		if err != nil {
-			continue
-		}
-		brackets = append(brackets, taxBracket{From: from, To: to, Tax: tax})
+	lookup, err := taxLookup(rows)
+	if err != nil {
+		return nil, fmt.Errorf("tax table %d for %s: %w", tableNumber, year, err)
 	}
+	return lookup, nil
+}
 
-	sort.Slice(brackets, func(i, j int) bool { return brackets[i].From < brackets[j].From })
-
-	return func(grossMonthly float64) (float64, error) {
-		i := sort.Search(len(brackets), func(i int) bool { return brackets[i].To >= grossMonthly })
-		if i < len(brackets) && grossMonthly >= brackets[i].From && grossMonthly <= brackets[i].To {
-			return brackets[i].Tax, nil
+func taxLookup(rows []TaxTableRow) (func(monthlyIncome float64) float64, error) {
+	if len(rows) == 0 {
+		return nil, errors.New("no rows found")
+	}
+	rows = slices.Clone(rows)
+	slices.SortFunc(rows, func(a, b TaxTableRow) int { return cmp.Compare(a.From, b.From) })
+	if last := rows[len(rows)-1]; last.To != 0 {
+		return nil, fmt.Errorf("no row for incomes above %.0f", last.To)
+	}
+	return func(monthlyIncome float64) float64 {
+		// The income's row is the last one starting at or below it.
+		i := sort.Search(len(rows), func(i int) bool { return rows[i].From > monthlyIncome }) - 1
+		if monthlyIncome <= 0 || i < 0 {
+			return 0
 		}
-		return 0, fmt.Errorf("no matching bracket for income %.0f in table %d/%s", grossMonthly, tableNumber, year)
+		if rows[i].Percent {
+			return monthlyIncome * rows[i].Tax / 100
+		}
+		return rows[i].Tax
 	}, nil
 }
 
-// LookupTax finds the tax amount for a given table number, year, gross monthly income, and column.
-func (c *Client) LookupTax(ctx context.Context, tableNumber int, year string, grossMonthly float64, column int) (float64, error) {
-	lookup, err := c.NewTaxLookup(ctx, tableNumber, year, column)
+// LookupTax finds the tax for a given table number, year and monthly income.
+func (c *Client) LookupTax(ctx context.Context, tableNumber int, year string, monthlyIncome float64) (float64, error) {
+	lookup, err := c.NewTaxLookup(ctx, tableNumber, year)
 	if err != nil {
 		return 0, err
 	}
-	return lookup(grossMonthly)
+	return lookup(monthlyIncome), nil
 }
 
 // ListKommuner returns all distinct kommun names for a given year, sorted alphabetically.

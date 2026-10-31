@@ -6,7 +6,6 @@ import (
 	"net/url"
 
 	"github.com/SimonSchneider/pefigo/internal/model"
-	"github.com/SimonSchneider/pefigo/pkg/swe"
 	"github.com/a-h/templ"
 )
 
@@ -132,8 +131,8 @@ type (
 	FullParentalLeave                = model.FullParentalLeave
 	SweYearlyParams                  = model.SweYearlyParams
 	TransferTemplateSource           = model.TransferTemplateSource
-	NetSalarySegmentBreakdown        = model.NetSalarySegmentBreakdown
-	SalaryBreakdown                  = swe.SalaryBreakdown
+	SalarySegment                    = model.SalarySegment
+	SalaryBreakdown                  = model.SalaryBreakdown
 	BillAccount                      = model.BillAccount
 	Bill                             = model.Bill
 	BillAmount                       = model.BillAmount

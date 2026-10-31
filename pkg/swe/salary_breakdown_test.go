@@ -17,11 +17,11 @@ func TestCalculateSalaryBreakdown_Standard(t *testing.T) {
 		VABDaysPerYear:       10,
 		Prisbasbelopp:        pbb,
 	}
-	taxFunc := func(adjusted float64) (float64, error) {
-		return adjusted * 0.30, nil
+	taxFunc := func(adjusted float64) float64 {
+		return adjusted * 0.30
 	}
 
-	bd := swe.CalculateSalaryBreakdown(gross, adj, 0, 0, 0, pbb, taxFunc)
+	bd := swe.CalculateSalaryBreakdown(gross, adj, taxFunc)
 
 	if bd.GrossMonthly != gross {
 		t.Errorf("GrossMonthly = %v, want %v", bd.GrossMonthly, gross)
@@ -58,24 +58,31 @@ func TestCalculateSalaryBreakdown_WithPartialParentalLeave(t *testing.T) {
 	gross := 50000.0
 	pbb := 57300.0
 	adj := swe.SalaryAdjustmentParams{
-		YearlyVacationDays:   25,
-		SickDaysPerOccasion:  3,
-		SickOccasionsPerYear: 4,
-		VABDaysPerYear:       10,
-		Prisbasbelopp:        pbb,
+		YearlyVacationDays:             25,
+		SickDaysPerOccasion:            3,
+		SickOccasionsPerYear:           4,
+		VABDaysPerYear:                 10,
+		ParentalSjukDaysPerYear:        40,
+		ParentalLagstaDaysPerYear:      10,
+		ParentalSkippedWorkDaysPerYear: 50,
+		Prisbasbelopp:                  pbb,
 	}
-	taxFunc := func(adjusted float64) (float64, error) {
-		return adjusted * 0.30, nil
+	taxFunc := func(adjusted float64) float64 {
+		return adjusted * 0.30
 	}
 
-	bd := swe.CalculateSalaryBreakdown(gross, adj, 40, 10, 50, pbb, taxFunc)
+	bd := swe.CalculateSalaryBreakdown(gross, adj, taxFunc)
 
-	if bd.PartialParentalDeduction == 0 {
-		t.Error("expected non-zero PartialParentalDeduction")
+	wantDeduction := swe.CalculatePartialParentalLeaveDeduction(gross, 40, 10, 50, pbb)
+	if bd.PartialParentalDeduction == 0 || bd.PartialParentalDeduction != wantDeduction {
+		t.Errorf("PartialParentalDeduction = %v, want %v", bd.PartialParentalDeduction, wantDeduction)
 	}
 	wantAdj := gross + bd.VacationSupplement - bd.SickPayDeduction - bd.VABDeduction - bd.PartialParentalDeduction
 	if math.Abs(bd.AdjustedGross-wantAdj) > 0.01 {
 		t.Errorf("AdjustedGross = %v, want %v", bd.AdjustedGross, wantAdj)
+	}
+	if got := swe.AdjustGrossSalary(gross, adj); got != bd.AdjustedGross {
+		t.Errorf("AdjustGrossSalary = %v, want the breakdown's adjusted gross %v", got, bd.AdjustedGross)
 	}
 }
 
