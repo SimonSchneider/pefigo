@@ -170,14 +170,19 @@ func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEven
 	default:
 		end = f.start
 	}
-	marklines := dateLines(specialDates, date.Today())
+	today := date.Today()
+	marklines := dateLines(specialDates, today)
 	chartEnd := end
 	if !f.hasStart {
 		chartEnd = marklines[len(marklines)-1].Date
 	}
+	entities, err := s.setupEntities(ctx, fold, params.GroupBy, f, ucfg, today)
+	if err != nil {
+		return err
+	}
 	if err := eventHandler.Setup(PredictionSetupEvent{
 		Max:       chartEnd,
-		Entities:  fold.entities(f.history(ucfg)),
+		Entities:  entities,
 		Marklines: marklines,
 	}); err != nil {
 		return fmt.Errorf("sending the setup: %w", err)
@@ -189,6 +194,9 @@ func (s *Service) RunPrediction(ctx context.Context, eventHandler PredictionEven
 	}
 	return eventHandler.Close()
 }
+
+// totalGroupID is the ID of the one series of a Forecast in total.
+const totalGroupID = "total"
 
 // forecastGroup is a series of a grouped Forecast, adding up its accounts.
 type forecastGroup struct {
@@ -218,7 +226,7 @@ func forecastGroups(groupBy GroupBy, accounts []Account, accountTypes []AccountT
 		}
 		return groups
 	case GroupByTotal:
-		total := forecastGroup{id: "total", name: "total"}
+		total := forecastGroup{id: totalGroupID, name: "total"}
 		for _, acc := range accounts {
 			total.accountIDs = append(total.accountIDs, acc.ID)
 		}
@@ -254,6 +262,36 @@ func (f *forecastFold) OnReport(day date.Date, balances map[string]uncertain.Val
 		}
 	}
 	return nil
+}
+
+// setupEntities are the groups of the setup with their history: per account, each account's own
+// history; per Account Type or in total, the Balance History.
+func (s *Service) setupEntities(ctx context.Context, fold *forecastFold, groupBy GroupBy, f *forecast, ucfg *uncertain.Config, today date.Date) ([]PredictionFinancialEntity, error) {
+	if groupBy == GroupByNone {
+		return fold.entities(f.history(ucfg)), nil
+	}
+	history, err := s.balanceHistory(ctx, today)
+	if err != nil {
+		return nil, fmt.Errorf("building balance history: %w", err)
+	}
+	if groupBy == GroupByTotal {
+		history = map[string][]BalancePoint{totalGroupID: totalBalanceHistory(history)}
+	}
+	return fold.balanceHistoryEntities(history), nil
+}
+
+// balanceHistoryEntities are the groups of the setup, each with the Balance History under its ID.
+// Balance History holds averages, so when bounds are asked for, a point's bounds are its balance.
+func (f *forecastFold) balanceHistoryEntities(history map[string][]BalancePoint) []PredictionFinancialEntity {
+	entities := make([]PredictionFinancialEntity, 0, len(f.groups))
+	for _, g := range f.groups {
+		points := make([]PredictionBalanceSnapshot, 0, len(history[g.id]))
+		for _, p := range history[g.id] {
+			points = append(points, f.point(g.id, p.Date, uncertain.NewFixed(p.Balance)))
+		}
+		entities = append(entities, PredictionFinancialEntity{ID: g.id, Name: g.name, Color: g.color, Snapshots: points})
+	}
+	return entities
 }
 
 // entities are the groups of the setup, each with the sum of its accounts' history on each day.

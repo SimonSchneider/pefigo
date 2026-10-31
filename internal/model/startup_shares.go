@@ -659,18 +659,15 @@ type startupShareHistory struct {
 	shareChanges []ShareChange
 }
 
-// listStartupShareHistories returns the Startup Share accounts with investment rounds that aren't
-// in withSnapshots, keyed by account ID. A nil withSnapshots leaves none out.
-func (s *Service) listStartupShareHistories(ctx context.Context, withSnapshots map[string]struct{}) (map[string]*startupShareHistory, error) {
+// listStartupShareHistories returns the Startup Share accounts with investment rounds, keyed by
+// account ID.
+func (s *Service) listStartupShareHistories(ctx context.Context) (map[string]*startupShareHistory, error) {
 	rows, err := s.q.ListStartupShareSnapshotHistory(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing startup share snapshot history: %w", err)
 	}
 	histories := make(map[string]*startupShareHistory)
 	for _, r := range rows {
-		if _, has := withSnapshots[r.AccountID]; has {
-			continue
-		}
 		h, ok := histories[r.AccountID]
 		if !ok {
 			h = &startupShareHistory{typeID: r.TypeID}

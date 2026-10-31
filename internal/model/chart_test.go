@@ -187,7 +187,7 @@ func TestChartWithoutAForecastEndsOnItsLastDateLine(t *testing.T) {
 	}
 }
 
-func TestChartWithoutAForecastShowsAStartupShareAccountsDerivedHistory(t *testing.T) {
+func TestChartPerAccountWithoutAForecastShowsAStartupShareAccountsDerivedHistory(t *testing.T) {
 	svc := newTestService(t)
 	equity := mustAccountType(t, svc, "Equity", "#ff00ff")
 	startup := mustTypedAccount(t, svc, "Startup", equity.ID)
@@ -199,19 +199,19 @@ func TestChartWithoutAForecastShowsAStartupShareAccountsDerivedHistory(t *testin
 		[]model.ShareChangeInput{{Date: mustParseDate("2021-02-01"), DeltaShares: 10, TotalPrice: 100}},
 	)
 
-	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(date.Year), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByType})
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(date.Year), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByNone})
 
 	// Its balance on each day of an investment round or share change with shares to value.
-	if len(rec.setup.Entities) != 1 || rec.setup.Entities[0].ID != equity.ID {
-		t.Fatalf("expected the Equity entity, got %+v", rec.setup.Entities)
+	if len(rec.setup.Entities) != 1 || rec.setup.Entities[0].ID != startup.ID {
+		t.Fatalf("expected the Startup entity, got %+v", rec.setup.Entities)
 	}
-	expectPoints(t, rec.setup.Entities[0].Snapshots, point(equity.ID, "2021-02-01", 10000), point(equity.ID, "2021-03-01", 20000))
+	expectPoints(t, rec.setup.Entities[0].Snapshots, point(startup.ID, "2021-02-01", 10000), point(startup.ID, "2021-03-01", 20000))
 	if len(rec.snapshots) != 0 {
 		t.Fatalf("expected no forecast points without a Forecast, got %+v", rec.snapshots)
 	}
 }
 
-func TestChartHistoryKeepsAStartupShareAccountAfterItsSharesAreSold(t *testing.T) {
+func TestChartPerAccountHistoryKeepsAStartupShareAccountAfterItsSharesAreSold(t *testing.T) {
 	svc := newTestService(t)
 	equity := mustAccountType(t, svc, "Equity", "#ff00ff")
 	startup := mustTypedAccount(t, svc, "Startup", equity.ID)
@@ -226,16 +226,16 @@ func TestChartHistoryKeepsAStartupShareAccountAfterItsSharesAreSold(t *testing.T
 		},
 	)
 
-	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(date.Year), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByType})
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(date.Year), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByNone})
 
 	// No point before it first has shares, then every day of a round or share change, sold out included.
-	if len(rec.setup.Entities) != 1 {
-		t.Fatalf("expected the Equity entity, got %+v", rec.setup.Entities)
+	if len(rec.setup.Entities) != 1 || rec.setup.Entities[0].ID != startup.ID {
+		t.Fatalf("expected the Startup entity, got %+v", rec.setup.Entities)
 	}
 	expectPoints(t, rec.setup.Entities[0].Snapshots,
-		point(equity.ID, "2021-02-01", 10000),
-		point(equity.ID, "2021-04-01", 0),
-		point(equity.ID, "2021-05-01", 0),
+		point(startup.ID, "2021-02-01", 10000),
+		point(startup.ID, "2021-04-01", 0),
+		point(startup.ID, "2021-05-01", 0),
 	)
 }
 
@@ -299,4 +299,100 @@ func TestAForecastWithAnInvalidIntervalOrGroupingIsInvalidInput(t *testing.T) {
 			}
 		})
 	}
+}
+
+// bounded is a history point whose lower and upper bounds are its balance.
+func bounded(id string, day string, balance float64) model.PredictionBalanceSnapshot {
+	return model.PredictionBalanceSnapshot{ID: id, Day: mustParseDate(day), Balance: balance, LowerBound: balance, UpperBound: balance}
+}
+
+// entityByID returns the setup's entity id, failing when there is none.
+func entityByID(t *testing.T, rec *recordedPrediction, id string) model.PredictionFinancialEntity {
+	t.Helper()
+	for _, e := range rec.setup.Entities {
+		if e.ID == id {
+			return e
+		}
+	}
+	t.Fatalf("expected an entity %q, got %+v", id, rec.setup.Entities)
+	return model.PredictionFinancialEntity{}
+}
+
+func mustUncertainSnapshot(t *testing.T, svc *model.Service, accountID string, day date.Date, balance uncertain.Value) {
+	t.Helper()
+	if _, err := svc.UpsertAccountSnapshot(t.Context(), accountID, model.AccountSnapshotInput{Date: day, Balance: balance}); err != nil {
+		t.Fatalf("create snapshot on %s: %v", day, err)
+	}
+}
+
+func TestChartHistoryByAccountTypeIsItsBalanceHistoryWithoutBands(t *testing.T) {
+	svc := newTestService(t)
+	savings := mustAccountType(t, svc, "Savings", "#00ff00")
+	empty := mustAccountType(t, svc, "Empty", "#00ffff")
+	mustUncertainSnapshot(t, svc, mustTypedAccount(t, svc, "A", savings.ID).ID, mustParseDate("2025-01-01"), uncertain.NewUniform(0, 2000))
+	mustSnapshot(t, svc, mustTypedAccount(t, svc, "B", savings.ID).ID, mustParseDate("2025-01-15"), 5000)
+	mustTypedAccount(t, svc, "Not recorded yet", empty.ID)
+
+	rec := runPrediction(t, svc, model.GroupByType)
+
+	// Every account at its latest balance, as an average: bounds are asked for, but history has none.
+	expectPoints(t, entityByID(t, rec, savings.ID).Snapshots, bounded(savings.ID, "2025-01-01", 1000), bounded(savings.ID, "2025-01-15", 6000))
+	if got := entityByID(t, rec, empty.ID).Snapshots; got == nil || len(got) != 0 {
+		t.Fatalf("expected Empty to have an empty history, got %+v", got)
+	}
+}
+
+func TestChartTotalHistoryAddsUpEveryAccountTypesBalanceHistory(t *testing.T) {
+	svc := newTestService(t)
+	wallet := mustTypedAccount(t, svc, "Wallet", mustAccountType(t, svc, "Cash", "#ff0000").ID)
+	mustSnapshot(t, svc, wallet.ID, mustParseDate("2025-01-01"), 100)
+	mustSnapshot(t, svc, mustTypedAccount(t, svc, "Bank", mustAccountType(t, svc, "Savings", "#00ff00").ID).ID, mustParseDate("2025-01-15"), 200)
+	mustSnapshot(t, svc, mustAccount(t, svc, "No type").ID, mustParseDate("2025-01-20"), 10)
+	mustSnapshot(t, svc, wallet.ID, mustParseDate("2025-02-01"), 150)
+
+	rec := runPrediction(t, svc, model.GroupByTotal)
+
+	expectPoints(t, entityByID(t, rec, "total").Snapshots,
+		bounded("total", "2025-01-01", 100),
+		bounded("total", "2025-01-15", 300),
+		bounded("total", "2025-01-20", 310),
+		bounded("total", "2025-02-01", 360),
+	)
+}
+
+func TestChartHistoryByAccountTypeValuesAStartupShareAccountOnSnapshotDays(t *testing.T) {
+	svc := newTestService(t)
+	equity := mustAccountType(t, svc, "Equity", "#ff00ff")
+	mustStartupShareAccount(t, svc, mustTypedAccount(t, svc, "Startup", equity.ID).ID,
+		[]model.InvestmentRoundInput{
+			{Date: mustParseDate("2021-01-01"), Valuation: 1e6, PreMoneyShares: 1000},
+			{Date: mustParseDate("2021-03-01"), Valuation: 2e6, PreMoneyShares: 1000},
+		},
+		[]model.ShareChangeInput{{Date: mustParseDate("2021-02-01"), DeltaShares: 10, TotalPrice: 100}},
+	)
+	savings := mustTypedAccount(t, svc, "Savings", mustAccountType(t, svc, "Savings", "#00ff00").ID)
+	mustSnapshot(t, svc, savings.ID, mustParseDate("2021-02-15"), 1000)
+	mustSnapshot(t, svc, savings.ID, mustParseDate("2021-03-15"), 1000)
+
+	rec := forecastWith(t, svc, model.PredictionParams{Duration: ptr(date.Year), Samples: ptr[int64](1), Quantile: ptr(0.0), SnapshotInterval: "*-*-*", GroupBy: model.GroupByType})
+
+	// Its derived balance on the days a Snapshot was recorded, not on its own rounds or share changes.
+	expectPoints(t, entityByID(t, rec, equity.ID).Snapshots, point(equity.ID, "2021-02-15", 10000), point(equity.ID, "2021-03-15", 20000))
+}
+
+func TestChartHistoryPerAccountIsEachAccountsOwnSnapshotsWithBands(t *testing.T) {
+	svc := newTestService(t)
+	savings := mustAccountType(t, svc, "Savings", "#00ff00")
+	a := mustTypedAccount(t, svc, "A", savings.ID)
+	b := mustTypedAccount(t, svc, "B", savings.ID)
+	mustUncertainSnapshot(t, svc, a.ID, mustParseDate("2025-01-01"), uncertain.NewUniform(0, 2000))
+	mustSnapshot(t, svc, b.ID, mustParseDate("2025-01-15"), 5000)
+
+	rec := runPrediction(t, svc, model.GroupByNone)
+
+	gotA := entityByID(t, rec, a.ID).Snapshots
+	if len(gotA) != 1 || gotA[0].Day != mustParseDate("2025-01-01") || gotA[0].Balance != 1000 || gotA[0].LowerBound >= 1000 || gotA[0].UpperBound <= 1000 {
+		t.Fatalf("expected A to have its own Snapshot of 1000 on 2025-01-01 with its band, got %+v", gotA)
+	}
+	expectPoints(t, entityByID(t, rec, b.ID).Snapshots, bounded(b.ID, "2025-01-15", 5000))
 }
