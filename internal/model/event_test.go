@@ -391,3 +391,32 @@ func TestAnEventListsItsEntriesByDate(t *testing.T) {
 		t.Fatalf("expected the Transfer Templates by Start Date and name %v, got %v", want, names)
 	}
 }
+
+func TestSavingAnEntryIntoAnEventLiftsTheEndTheEventGaveIt(t *testing.T) {
+	svc := newTestService(t)
+	checking := mustAccount(t, svc, "Checking")
+	ev := mustEvent(t, svc, model.EventInput{Name: "Raise", Date: mustParseDate("2027-01-01")})
+	tt := mustTransferTemplate(t, svc, model.TransferTemplate{
+		Name: "Savings", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(1000),
+		Recurrence: "*-*-25", StartDate: mustParseDate("2026-01-01"), Enabled: true,
+	})
+	gm := mustGrowthModel(t, svc, model.AccountGrowthModelInput{AccountID: checking.ID, AnnualRate: newFixedValue(0.01), StartDate: mustParseDate("2026-01-01")})
+	mustEventEnd(t, svc, model.EventEndInput{EventID: ev.ID, Entry: model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: tt.ID}})
+	mustEventEnd(t, svc, model.EventEndInput{EventID: ev.ID, Entry: model.EventEntry{Kind: model.EventEntryGrowthModel, ID: gm.ID}})
+
+	tt.EventID = ev.ID
+	mustTransferTemplate(t, svc, tt)
+	if _, err := svc.UpsertAccountGrowthModel(t.Context(), model.AccountGrowthModelInput{
+		ID: gm.ID, AccountID: checking.ID, Type: gm.Type, AnnualRate: gm.AnnualRate, StartDate: gm.StartDate, EventID: ev.ID,
+	}); err != nil {
+		t.Fatalf("save growth model: %v", err)
+	}
+
+	view, err := svc.GetEventEditPageData(t.Context(), ev.ID)
+	if err != nil {
+		t.Fatalf("event page: %v", err)
+	}
+	if len(view.Event.Ends) != 0 {
+		t.Fatalf("expected an Event to end no entry in it, got %+v", view.Event.Ends)
+	}
+}

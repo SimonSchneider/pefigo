@@ -242,10 +242,7 @@ func (s *Service) AddToEvent(ctx context.Context, eventID string, entry EventEnt
 	if _, err := s.eventDate(ctx, eventID); err != nil {
 		return err
 	}
-	if err := s.setEntryEvent(ctx, entry, eventID); err != nil {
-		return err
-	}
-	return s.DeleteEventEnd(ctx, eventID, entry)
+	return s.setEntryEvent(ctx, entry, eventID)
 }
 
 // RemoveFromEvent puts entry in the Baseline, out of its Event. Its dates become the absolute dates

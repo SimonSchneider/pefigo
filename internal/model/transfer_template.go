@@ -142,7 +142,8 @@ type TransferTemplateInput struct {
 }
 
 // UpsertTransferTemplate saves the Transfer Template. In an Event its Start Date is the Event's date
-// when it isn't given, and its dates are saved as offsets from the Event's date.
+// when it isn't given, its dates are saved as offsets from the Event's date, and an end the Event gave
+// it is lifted.
 func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTemplate) (TransferTemplate, error) {
 	at, err := s.eventDate(ctx, inp.EventID)
 	if err != nil {
@@ -190,6 +191,10 @@ func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTempla
 	})
 	if err != nil {
 		return TransferTemplate{}, fmt.Errorf("failed to upsert template: %w", err)
+	}
+	// An Event only ends entries outside it.
+	if err := s.DeleteEventEnd(ctx, inp.EventID, EventEntry{Kind: EventEntryTransferTemplate, ID: t.ID}); err != nil {
+		return TransferTemplate{}, err
 	}
 	return transferTemplateFromDB(t, at)
 }

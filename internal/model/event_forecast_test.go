@@ -388,3 +388,38 @@ func TestPlannedEventsAreMarkedOnTheDashboardForecastChart(t *testing.T) {
 		t.Fatalf("expected the date lines %v, got %+v", want, data.Marklines)
 	}
 }
+
+func TestAnUnplannedEventsAccountsAreLeftOutOfTheDashboardForecastSeriesAndTheCashflows(t *testing.T) {
+	svc := newTestService(t)
+	savings := mustAccountType(t, svc, "Savings", "#00ff00")
+	property := mustAccountType(t, svc, "Property", "#0000ff")
+	checking := mustTypedAccount(t, svc, "Checking", savings.ID)
+	mustSnapshot(t, svc, checking.ID, mustParseDate("2025-01-01"), 1000)
+	ev := mustEvent(t, svc, model.EventInput{Name: "Cabin", Date: mustParseDate("2030-01-01"), Planned: ptr(false)})
+	cabin, err := svc.UpsertAccount(t.Context(), model.AccountInput{Name: "Cabin", TypeID: property.ID, EventID: ev.ID})
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	mustTransferTemplate(t, svc, model.TransferTemplate{
+		Name: "Cabin savings", FromAccountID: checking.ID, ToAccountID: cabin.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(100),
+		Recurrence: "*-*-25", StartDate: mustParseDate("2020-01-01"), Enabled: true,
+	})
+
+	if _, ok := seriesByID(dashboardForecastHistory(t, svc, nil))[property.ID]; ok {
+		t.Errorf("expected no Dashboard Forecast series for an Account Type of an unplanned Event's accounts only")
+	}
+	data, err := svc.GetTransferChartData(t.Context(), model.GroupByAccount)
+	if err != nil {
+		t.Fatalf("cashflows: %v", err)
+	}
+	for _, node := range data.Data {
+		if node.Name == cabin.ID || node.Label == "Cabin" {
+			t.Errorf("expected the Cabin left out of the cashflows, got %+v", node)
+		}
+	}
+
+	moveEvent(t, svc, model.Event{ID: ev.ID, Name: ev.Name, Date: ev.Date, Planned: true}, "2030-01-01")
+	if _, ok := seriesByID(dashboardForecastHistory(t, svc, nil))[property.ID]; !ok {
+		t.Errorf("expected a Dashboard Forecast series for the planned Event's Account Type")
+	}
+}
