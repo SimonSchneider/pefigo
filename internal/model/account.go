@@ -460,7 +460,8 @@ func (s *Service) GetAccountsPageData(ctx context.Context, excludedTypeIDs []str
 	return NewAccountsView(accs, accountTypes, categories, events), nil
 }
 
-func (s *Service) GetAccountNewPageData(ctx context.Context, excludedTypeIDs []string) (*AccountEditView, error) {
+// GetAccountNewPageData is the page of a new account in the Event eventID, or in the Baseline for "".
+func (s *Service) GetAccountNewPageData(ctx context.Context, excludedTypeIDs []string, eventID string) (*AccountEditView, error) {
 	accs, err := s.ListAccounts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing accounts: %w", err)
@@ -478,6 +479,7 @@ func (s *Service) GetAccountNewPageData(ctx context.Context, excludedTypeIDs []s
 		return nil, err
 	}
 	return &AccountEditView{
+		Account:      Account{EventID: eventID},
 		Accounts:     accs,
 		Events:       events,
 		AccountTypes: accountTypes,

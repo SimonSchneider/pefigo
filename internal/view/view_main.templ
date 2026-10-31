@@ -88,6 +88,7 @@ templ SidebarContent(page string) {
 				NavItem("/transfers", IconTransfer("w-5 h-5"), "Transfer Calculator", page),
 			)
 				@NavGroup("Forecasting",
+					NavItem("/events", IconCalendarEvent("w-5 h-5"), "Events", page),
 					NavItem("/transfers/chart", IconChartSankey("w-5 h-5"), "Cashflows", page),
 					NavItem("/chart", IconTrendingUp("w-5 h-5"), "Forecast", page),
 				)

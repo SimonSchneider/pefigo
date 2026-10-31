@@ -129,7 +129,11 @@ templ TransferTemplateForm(view *model.TransferTemplateEditView) {
 						<div class="grid grid-cols-2 gap-4">
 							<div class="form-control">
 								<label class="label"><span class="label-text font-medium">Start Date</span></label>
-								<input type="text" class="input input-bordered w-full" name="start_date" value={ view.TransferTemplate.StartDate.String() }/>
+								{{ startDate := "" }}
+								if !view.TransferTemplate.StartDate.IsZero() {
+									{{ startDate = view.TransferTemplate.StartDate.String() }}
+								}
+								<input type="text" class="input input-bordered w-full" name="start_date" value={ startDate } placeholder="The Event's date in an Event"/>
 							</div>
 							<div class="form-control">
 								<label class="label"><span class="label-text font-medium">End Date</span></label>
@@ -166,6 +170,19 @@ templ TransferTemplateForm(view *model.TransferTemplateEditView) {
 						</select>
 						<div class="text-sm text-base-content/60 mt-1">
 							Assign a budget category to include this template in the monthly budget summary
+						</div>
+					</div>
+				</div>
+			</div>
+			<!-- Event -->
+			<div class="card bg-base-100 shadow-sm border border-base-300">
+				<div class="card-body p-5">
+					<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/60 mb-3">Event</h3>
+					<div class="form-control">
+						<label class="label"><span class="label-text font-medium">Event</span></label>
+						@EventSelect(view.Events, view.TransferTemplate.EventID, "select-bordered")
+						<div class="text-sm text-base-content/60 mt-1">
+							In an Event, the dates move with the Event's date, and a blank Start Date is the Event's date. A one-off's date moves too; a repeating recurrence doesn't.
 						</div>
 					</div>
 				</div>
@@ -248,6 +265,7 @@ templ TransferTemplateTableRow(view *model.TransferTemplatesView, t *model.Trans
 							{ t.Source.Type }
 						</div>
 					}
+					@EventBadge(view.GetEvent(t.EventID))
 				</div>
 				if t.StartDate > 0 || t.EndDate != nil {
 					<div class="text-xs text-base-content/40 ml-6">
@@ -261,6 +279,9 @@ templ TransferTemplateTableRow(view *model.TransferTemplatesView, t *model.Trans
 							{ t.EndDate.String() }
 						} else {
 							-
+						}
+						if ended := view.GetEvent(t.EndedByEventID); ended != nil {
+							<span title={ "Ended by the Event " + ended.Name }>(ended by { ended.Name })</span>
 						}
 					</div>
 				}
@@ -371,6 +392,7 @@ templ TransferTemplateMemberRow(view *model.TransferTemplatesView, parentID stri
 							{ t.Source.Type }
 						</a>
 					}
+					@EventBadge(view.GetEvent(t.EventID))
 				</div>
 				if t.StartDate > 0 || t.EndDate != nil {
 					<div class="text-xs text-base-content/40 ml-6">
@@ -518,9 +540,89 @@ templ TransferTemplatesContent(view *model.TransferTemplatesView) {
 						</div>
 					</div>
 				</div>
+				if len(view.LeftOut) > 0 {
+					@LeftOutTransferTemplates(view)
+				}
 			</div>
 		</div>
 	</main>
+}
+
+// LeftOutTransferTemplates lists the Transfer Templates the Events leave out of the Baseline: those
+// of unplanned Events, at their Events' dates, and those that use their Accounts. They count in
+// nothing on this page.
+templ LeftOutTransferTemplates(view *model.TransferTemplatesView) {
+	<div class="card bg-base-100 shadow-sm border border-base-300">
+		<div class="card-body">
+			<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/60">Left out of the Baseline</h3>
+			<p class="text-sm text-base-content/60">In unplanned Events, or using their accounts. They count in no total, Forecast or budget.</p>
+			<div class="overflow-x-auto">
+				<table class="table table-sm w-full">
+					<thead class="bg-base-200/60">
+						<tr>
+							<th class="font-semibold">Name</th>
+							<th class="font-semibold">From → To</th>
+							<th class="font-semibold">Recurrence</th>
+							<th class="font-semibold text-right">Amount</th>
+							<th class="font-semibold text-right">Actions</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, t := range view.LeftOut {
+							<tr class="text-base-content/70">
+								<td>
+									<div class="flex items-center gap-2">
+										<span>{ t.Name }</span>
+										@EventBadge(view.GetEvent(t.EventID))
+									</div>
+									<div class="text-xs text-base-content/40">
+										{ t.StartDate.String() } —
+										if t.EndDate != nil {
+											{ t.EndDate.String() }
+										} else {
+											-
+										}
+									</div>
+								</td>
+								<td class="text-sm whitespace-nowrap">
+									if t.FromAccountID != "" {
+										{ view.GetAccount(t.FromAccountID).Name }
+									} else {
+										external
+									}
+									<span class="text-base-content/40 mx-1">→</span>
+									if t.ToAccountID != "" {
+										{ view.GetAccount(t.ToAccountID).Name }
+									} else {
+										external
+									}
+								</td>
+								<td class="font-mono text-sm">{ string(t.Recurrence) }</td>
+								<td class="text-right">
+									if t.AmountType == model.TransferAmountPercent {
+										<span class="text-xs">{ ui.FormatPercent(t.AmountPercent) }%</span>
+									} else {
+										@BalanceBadge(t.AmountFixed.Mean(), false, "")
+									}
+								</td>
+								<td class="text-right">
+									if t.Source.IsGenerated() {
+										<a class="btn btn-ghost btn-xs" title={ "Edit " + t.Source.Label } href={ sourceEditURL(t.Source) }>
+											@IconPencil("w-4 h-4")
+										</a>
+									} else {
+										<a class="btn btn-ghost btn-xs" title="Edit" href={ "/transfer-templates/" + t.ID + "/edit" }>
+											@IconPencil("w-4 h-4")
+										</a>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		</div>
+	</div>
 }
 
 // sourceEditURL is the edit page of what a generated Transfer Template is generated from: its Salary,

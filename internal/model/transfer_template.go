@@ -72,6 +72,9 @@ type TransferTemplate struct {
 	// EventID is the Event the Transfer Template is in, or "" in the Baseline. In an Event its Start and
 	// End Dates, and the date of a one-off, are stored as offsets from the Event's date.
 	EventID string
+	// EndedByEventID is the placed Event whose end it ends on, when an Event's end is earlier than its
+	// own End Date. Only a Transfer Schedule places Events, so a stored Transfer Template has none.
+	EndedByEventID string
 
 	Source TransferTemplateSource
 }
@@ -348,7 +351,9 @@ func (s *Service) GetTransferTemplatesPageData(ctx context.Context) (*TransferTe
 	return newTransferTemplatesView(schedule, date.Today(), accounts, categories, events), nil
 }
 
-func (s *Service) GetTransferTemplateNewPageData(ctx context.Context) (*TransferTemplateEditView, error) {
+// GetTransferTemplateNewPageData is the page of a new Transfer Template in the Event eventID, or in the
+// Baseline for "".
+func (s *Service) GetTransferTemplateNewPageData(ctx context.Context, eventID string) (*TransferTemplateEditView, error) {
 	accs, err := s.ListAccounts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing accounts: %w", err)
@@ -362,9 +367,10 @@ func (s *Service) GetTransferTemplateNewPageData(ctx context.Context) (*Transfer
 		return nil, err
 	}
 	return &TransferTemplateEditView{
-		Accounts:   accs,
-		Categories: categories,
-		Events:     events,
+		TransferTemplate: TransferTemplate{EventID: eventID},
+		Accounts:         accs,
+		Categories:       categories,
+		Events:           events,
 	}, nil
 }
 

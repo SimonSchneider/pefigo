@@ -555,6 +555,12 @@ func (e *eventEntries) view(ev Event) EventView {
 			})
 		}
 	}
+	slices.SortStableFunc(v.GrowthModels, func(a, b EventGrowthModel) int {
+		return cmp.Or(cmp.Compare(a.StartDate, b.StartDate), cmp.Compare(a.AccountName, b.AccountName))
+	})
+	slices.SortStableFunc(v.TransferTemplates, func(a, b EventTransferTemplate) int {
+		return cmp.Or(cmp.Compare(a.StartDate, b.StartDate), cmp.Compare(a.Name, b.Name))
+	})
 	slices.SortStableFunc(v.Ends, func(a, b EventEnd) int { return cmp.Compare(a.Name, b.Name) })
 	return v
 }

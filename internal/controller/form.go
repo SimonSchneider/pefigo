@@ -28,6 +28,7 @@ func (a *accountInputForm) FromForm(r *http.Request) error {
 	a.TypeID = r.FormValue("type_id")
 	a.BudgetCategoryID = ui.WithDefaultNull(r.FormValue("budget_category_id"))
 	a.IsISK = r.FormValue("is_isk") == "on"
+	a.EventID = r.FormValue("event_id")
 	if r.FormValue("account_form_mode") == "startup" {
 		var startupShares startupShareAccountInputForm
 		if err := startupShares.FromForm(r); err != nil {
@@ -83,7 +84,42 @@ func (a *accountGrowthModelInputForm) FromForm(r *http.Request) error {
 	if err := shttp.Parse(&a.EndDate, ui.ParseNullable(date.ParseDate), r.FormValue("end_date"), nil); err != nil {
 		return fmt.Errorf("parsing end date: %w", err)
 	}
+	a.EventID = r.FormValue("event_id")
 	return nil
+}
+
+type eventInputForm struct {
+	model.EventInput
+}
+
+func (e *eventInputForm) FromForm(r *http.Request) error {
+	e.ID = r.FormValue("id")
+	e.Name = r.FormValue("name")
+	if err := shttp.Parse(&e.Date, date.ParseDate, r.FormValue("date"), date.Date(0)); err != nil {
+		return fmt.Errorf("parsing date: %w", err)
+	}
+	e.Planned = ptr(r.FormValue("unplanned") != "on")
+	return nil
+}
+
+// eventEntryForm names an entry to add to an Event, remove from one, or end in one on EndDate.
+type eventEntryForm struct {
+	Entry   model.EventEntry
+	EndDate date.Date
+}
+
+func (e *eventEntryForm) FromForm(r *http.Request) error {
+	if err := shttp.Parse(&e.Entry, model.ParseEventEntry, r.FormValue("entry"), model.EventEntry{}); err != nil {
+		return fmt.Errorf("parsing entry: %w", err)
+	}
+	if err := shttp.Parse(&e.EndDate, date.ParseDate, r.FormValue("end_date"), date.Date(0)); err != nil {
+		return fmt.Errorf("parsing end date: %w", err)
+	}
+	return nil
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }
 
 type startupShareAccountInputForm struct {
@@ -214,6 +250,7 @@ func (t *transferTemplateForm) FromForm(r *http.Request) error {
 	}
 	t.Enabled = r.FormValue("enabled") == "on"
 	t.BudgetCategoryID = ui.WithDefaultNull(r.FormValue("budget_category_id"))
+	t.EventID = r.FormValue("event_id")
 	return nil
 }
 

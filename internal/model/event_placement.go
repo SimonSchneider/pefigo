@@ -146,8 +146,8 @@ func placeEntries(events []Event, stored storedEntries, placements EventPlacemen
 	for _, end := range stored.transferEnds {
 		day, ok := at[end.EventID]
 		i, placedEntry := transferIndex[end.TransferTemplateID]
-		if ok && placedEntry {
-			endEarlier(&p.transferTemplates[i].EndDate, placeDate(end.EndOffset, day))
+		if ok && placedEntry && endEarlier(&p.transferTemplates[i].EndDate, placeDate(end.EndOffset, day)) {
+			p.transferTemplates[i].EndedByEventID = end.EventID
 		}
 	}
 	for _, end := range stored.growthEnds {
@@ -160,9 +160,11 @@ func placeEntries(events []Event, stored storedEntries, placements EventPlacemen
 	return p, nil
 }
 
-// endEarlier ends an entry on day, unless it already ends before.
-func endEarlier(end **date.Date, day date.Date) {
+// endEarlier ends an entry on day, unless it already ends on or before it, and reports whether it did.
+func endEarlier(end **date.Date, day date.Date) bool {
 	if *end == nil || day.Before(**end) {
 		*end = &day
+		return true
 	}
+	return false
 }

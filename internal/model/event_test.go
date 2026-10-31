@@ -360,3 +360,34 @@ func transferStateOn(t *testing.T, svc *model.Service, id string, day string) mo
 	}
 	return "absent"
 }
+
+func TestTheBaselineSaysWhichEventEndsATransferTemplate(t *testing.T) {
+	svc := newTestService(t)
+	p := mustApartmentPlans(t, svc, "2028-03-01")
+
+	for _, tt := range mustTransferSchedule(t, svc).On(mustParseDate("2028-01-25")).Transfers() {
+		if tt.ID == p.savingsTT.ID && (tt.EndedByEventID != p.apartment.ID || dateOf(tt.EndDate) != "2028-03-01") {
+			t.Fatalf("expected Savings to end on 2028-03-01, ended by the Apartment, got %+v", tt.TransferTemplate)
+		}
+	}
+	if got := mustGetTransferTemplate(t, svc, p.savingsTT.ID); got.EndedByEventID != "" || got.EndDate != nil {
+		t.Fatalf("expected Savings as stored to have no End Date of its own, got %+v", got)
+	}
+}
+
+func TestAnEventListsItsEntriesByDate(t *testing.T) {
+	svc := newTestService(t)
+	p := mustApartmentPlans(t, svc, "2028-03-01")
+
+	page, err := svc.GetEventsPageData(t.Context())
+	if err != nil {
+		t.Fatalf("events page: %v", err)
+	}
+	var names []string
+	for _, tt := range page.Events[0].TransferTemplates {
+		names = append(names, tt.Name)
+	}
+	if want := []string{p.purchase.Name, p.smallerSavingsTT.Name, p.amortization.Name}; !slices.Equal(names, want) {
+		t.Fatalf("expected the Transfer Templates by Start Date and name %v, got %v", want, names)
+	}
+}

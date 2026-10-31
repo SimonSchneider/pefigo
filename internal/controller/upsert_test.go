@@ -70,6 +70,7 @@ func upsertRoutes(p parents) []upsertRoute {
 		{"transfer template category", "/transfer-template-categories/", url.Values{"name": {"Food"}}},
 		{"account type", "/account-types/", url.Values{"name": {"Pension"}}},
 		{"special date", "/special-dates/", url.Values{"name": {"Retirement"}, "date": {"2050-01-01"}}},
+		{"event", "/events/", url.Values{"name": {"Apartment"}, "date": {"2028-03-01"}}},
 		{"swe yearly params", "/settings/swe-yearly-params/", url.Values{"valid_from": {"2025-01-01"}}},
 	}
 }
@@ -106,6 +107,7 @@ func TestDeletingWithoutNextRedirectsToAPageThatExists(t *testing.T) {
 		"/accounts/" + account.ID + "/delete",
 		"/account-types/missing/delete",
 		"/special-dates/missing/delete",
+		"/events/missing/delete",
 		"/salaries/missing/delete",
 		"/salary-amounts/missing/delete",
 		"/salary-adjustments/missing/delete",
