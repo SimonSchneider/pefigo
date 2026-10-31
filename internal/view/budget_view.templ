@@ -2,14 +2,16 @@ package view
 
 import (
 	"fmt"
+
+	"github.com/SimonSchneider/pefigo/internal/model"
 	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
 
-templ PageBudget(view *BudgetView) {
+templ PageBudget(view *model.BudgetView) {
 	@Layout("/budget", BudgetContent(view))
 }
 
-templ BudgetContent(view *BudgetView) {
+templ BudgetContent(view *model.BudgetView) {
 	<main class="flex-1 flex flex-col min-h-0">
 		@Header("Monthly Budget")
 		<div class="flex-1 p-6 overflow-auto bg-base-100">
@@ -58,7 +60,7 @@ templ BudgetContent(view *BudgetView) {
 	</main>
 }
 
-templ BudgetCategoryTable(categories []BudgetCategoryGroup, grandTotal float64) {
+templ BudgetCategoryTable(categories []model.BudgetCategoryGroup, grandTotal float64) {
 	<div>
 		<table class="table table-zebra w-full">
 			<thead>
@@ -105,7 +107,7 @@ templ BudgetCategoryTable(categories []BudgetCategoryGroup, grandTotal float64) 
 	</div>
 }
 
-templ BudgetCategoryDetails(cat BudgetCategoryGroup) {
+templ BudgetCategoryDetails(cat model.BudgetCategoryGroup) {
 	<div class="collapse collapse-arrow bg-base-200 mb-2">
 		<input type="checkbox"/>
 		<div class="collapse-title font-medium">
@@ -148,7 +150,7 @@ templ BudgetCategoryDetails(cat BudgetCategoryGroup) {
 	</div>
 }
 
-templ BudgetPieChart(id string, chartData []BudgetChartEntry, height string) {
+templ BudgetPieChart(id string, chartData []model.BudgetChartEntry, height string) {
 	<div class="budget-pie-chart-wrapper" data-chart-id={ id }>
 		<div id={ id } style={ "width: 100%; height: " + height }></div>
 		@templ.JSONScript(id+"-data", chartData)

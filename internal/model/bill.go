@@ -173,10 +173,10 @@ func (b Bill) GenerateTransferTemplates(ba BillAccount) []TransferTemplate {
 	}
 
 	source := TransferTemplateSource{
-		Type:          "bill",
+		Type:          TransferSourceBill,
 		EntityID:      b.ID,
 		Label:         b.Name,
-		EditURL:       "/bills/" + ba.ID + "/edit",
+		BillAccountID: ba.ID,
 		recurrenceRow: "bill account " + ba.ID,
 	}
 
@@ -494,12 +494,12 @@ func (s *Service) DeleteBillAmount(ctx context.Context, id string) error {
 	return nil
 }
 
-type BillsPageData struct {
+type BillsView struct {
 	BillAccounts []BillAccount
 	Categories   map[string]TransferTemplateCategory
 }
 
-func (v *BillsPageData) GetBudgetCategory(id *string) *TransferTemplateCategory {
+func (v *BillsView) GetBudgetCategory(id *string) *TransferTemplateCategory {
 	if id == nil {
 		return nil
 	}
@@ -520,8 +520,8 @@ func (v BillAccountEditView) IsEdit() bool {
 	return v.BillAccount.ID != ""
 }
 
-func (v *BillAccountEditView) BillsPageView() *BillsPageData {
-	return &BillsPageData{
+func (v *BillAccountEditView) BillsView() *BillsView {
+	return &BillsView{
 		Categories: KeyBy(v.Categories, func(c TransferTemplateCategory) string { return c.ID }),
 	}
 }
@@ -537,7 +537,7 @@ func (v BillEditView) IsEdit() bool {
 	return v.Bill.ID != ""
 }
 
-func (s *Service) GetBillAccountsPageData(ctx context.Context) (*BillsPageData, error) {
+func (s *Service) GetBillAccountsPageData(ctx context.Context) (*BillsView, error) {
 	accounts, err := s.loadBillAccounts(ctx)
 	if err != nil {
 		return nil, err
@@ -549,7 +549,7 @@ func (s *Service) GetBillAccountsPageData(ctx context.Context) (*BillsPageData, 
 	for i := range accounts {
 		SortBillsByAmount(accounts[i].Bills)
 	}
-	return &BillsPageData{
+	return &BillsView{
 		BillAccounts: accounts,
 		Categories:   KeyBy(categories, func(c TransferTemplateCategory) string { return c.ID }),
 	}, nil

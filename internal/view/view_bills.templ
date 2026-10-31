@@ -3,6 +3,7 @@ package view
 import (
 	"strconv"
 
+	"github.com/SimonSchneider/pefigo/internal/model"
 	"github.com/SimonSchneider/pefigo/pkg/currency"
 	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
@@ -11,7 +12,7 @@ templ PageBills(child templ.Component) {
 	@Layout("/bills", child)
 }
 
-templ BillsListView(view *BillsPageData) {
+templ BillsListView(view *model.BillsView) {
 	<main class="flex-1 flex flex-col min-h-0">
 		@Header("Bills", NewButton("/bills/new", IconPlus("w-4 h-4"), "New Bill Account"))
 		<div class="flex-1 p-6 overflow-auto bg-base-100">
@@ -54,7 +55,7 @@ templ BillsListView(view *BillsPageData) {
 	</main>
 }
 
-templ billsTable(view *BillsPageData, bills []Bill) {
+templ billsTable(view *model.BillsView, bills []model.Bill) {
 	if len(bills) == 0 {
 		<p class="text-sm text-base-content/50">No bills in this account</p>
 	} else {
@@ -111,7 +112,7 @@ templ billsTable(view *BillsPageData, bills []Bill) {
 								}
 							</td>
 							<td>
-								if bill.CurrentPeriod() == BillPeriodYearly {
+								if bill.CurrentPeriod() == model.BillPeriodYearly {
 									<span class="badge badge-info badge-xs">Yearly</span>
 								} else {
 									<span class="badge badge-ghost badge-xs">Monthly</span>
@@ -151,7 +152,7 @@ templ PageEditBillAccount(child templ.Component) {
 	@Layout("/bills", child)
 }
 
-templ BillAccountEditContent(view *BillAccountEditView) {
+templ BillAccountEditContent(view *model.BillAccountEditView) {
 	<main class="flex-1 flex flex-col min-h-0">
 		if view.IsEdit() {
 			@Header("Edit Bill Account", deleteBillAccountButton(view.BillAccount.ID))
@@ -218,7 +219,7 @@ templ BillAccountEditContent(view *BillAccountEditView) {
 							<div class="flex items-center justify-between">
 								<h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Bills</h3>
 							</div>
-							@billsTable(view.BillsPageView(), view.BillAccount.Bills)
+							@billsTable(view.BillsView(), view.BillAccount.Bills)
 							<div class="mt-2 border border-dashed border-base-300 rounded-lg p-2">
 								<form method="post" action="/bill-items/" class="flex items-center gap-2">
 									<input type="hidden" name="bill_account_id" value={ view.BillAccount.ID }/>
@@ -258,7 +259,7 @@ templ PageEditBill(child templ.Component) {
 	@Layout("/bills", child)
 }
 
-templ BillEditContent(view *BillEditView) {
+templ BillEditContent(view *model.BillEditView) {
 	<main class="flex-1 flex flex-col min-h-0">
 		if view.IsEdit() {
 			@Header("Edit Bill", deleteBillButton(view.Bill))
@@ -359,7 +360,7 @@ templ BillEditContent(view *BillEditView) {
 								for _, amt := range view.Bill.Amounts {
 									@BillAmountRow(view.Bill.ID, amt)
 								}
-								@BillAmountRow(view.Bill.ID, BillAmount{})
+								@BillAmountRow(view.Bill.ID, model.BillAmount{})
 							</div>
 						</div>
 					</div>
@@ -369,7 +370,7 @@ templ BillEditContent(view *BillEditView) {
 	</main>
 }
 
-templ deleteBillButton(bill Bill) {
+templ deleteBillButton(bill model.Bill) {
 	<form method="post" action={ "/bill-items/" + bill.ID + "/delete?next=" + templ.EscapeString("/bills/"+bill.BillAccountID+"/edit") } onsubmit="return confirm('Delete this bill and all its amounts?')">
 		<button class="btn btn-error" type="submit">
 			Delete
@@ -377,7 +378,7 @@ templ deleteBillButton(bill Bill) {
 	</form>
 }
 
-templ BillAmountRow(billID string, amt BillAmount) {
+templ BillAmountRow(billID string, amt model.BillAmount) {
 	<form method="post" action={ "/bill-amounts/?next=" + templ.EscapeString("/bill-items/"+billID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ amt.ID }/>
@@ -388,13 +389,13 @@ templ BillAmountRow(billID string, amt BillAmount) {
 		<div><input type="text" class="input input-xs w-full" placeholder="149" name="amount" value={ amt.GetAmountString() }/></div>
 		<div>
 			<select class="select select-xs w-full" name="amount_period">
-				<option value={ BillPeriodMonthly }
-					if amt.Period != BillPeriodYearly {
+				<option value={ model.BillPeriodMonthly }
+					if amt.Period != model.BillPeriodYearly {
 						selected
 					}
 				>Monthly</option>
-				<option value={ BillPeriodYearly }
-					if amt.Period == BillPeriodYearly {
+				<option value={ model.BillPeriodYearly }
+					if amt.Period == model.BillPeriodYearly {
 						selected
 					}
 				>Yearly</option>
@@ -433,21 +434,21 @@ templ BillAmountRow(billID string, amt BillAmount) {
 	</form>
 }
 
-func billAccountRecurrenceValue(ba BillAccount) string {
+func billAccountRecurrenceValue(ba model.BillAccount) string {
 	if ba.ID == "" {
-		return string(DefaultBillAccountRecurrence)
+		return string(model.DefaultBillAccountRecurrence)
 	}
 	return string(ba.Recurrence)
 }
 
-func billAccountPriorityValue(ba BillAccount) string {
+func billAccountPriorityValue(ba model.BillAccount) string {
 	if ba.ID == "" {
 		return "0"
 	}
 	return strconv.FormatInt(ba.Priority, 10)
 }
 
-func billCurrentAmountDisplay(bill Bill) string {
+func billCurrentAmountDisplay(bill model.Bill) string {
 	amt := bill.CurrentAmount()
 	if amt == 0 {
 		return "—"

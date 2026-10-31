@@ -117,10 +117,9 @@ type FullParentalLeave struct {
 // Service loaded has. It fails on a Gross Salary whose Net Salary is unknown.
 func (s Salary) GenerateTransferTemplates() ([]TransferTemplate, error) {
 	source := TransferTemplateSource{
-		Type:          "salary",
+		Type:          TransferSourceSalary,
 		EntityID:      s.ID,
 		Label:         s.Name,
-		EditURL:       "/salaries/" + s.ID + "/edit",
 		recurrenceRow: "salary " + s.ID,
 	}
 	template := func(id, name, toAccountID string, amount uncertain.Value, startDate date.Date, endDate *date.Date) TransferTemplate {

@@ -8,9 +8,13 @@ package view
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import "fmt"
+import (
+	"fmt"
 
-func SweYearlyParamsEditPage(p SweYearlyParams, isEdit bool) templ.Component {
+	"github.com/SimonSchneider/pefigo/internal/model"
+)
+
+func SweYearlyParamsEditPage(p model.SweYearlyParams, isEdit bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -39,7 +43,7 @@ func SweYearlyParamsEditPage(p SweYearlyParams, isEdit bool) templ.Component {
 	})
 }
 
-func sweYearlyParamsEditContent(p SweYearlyParams, isEdit bool) templ.Component {
+func sweYearlyParamsEditContent(p model.SweYearlyParams, isEdit bool) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -82,7 +86,7 @@ func sweYearlyParamsEditContent(p SweYearlyParams, isEdit bool) templ.Component 
 		var templ_7745c5c3_Var3 templ.SafeURL
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/settings/swe-yearly-params/?next=" + nextEncoded("/settings?tab=swe-yearly-params")))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 18, Col: 119}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 22, Col: 119}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -95,7 +99,7 @@ func sweYearlyParamsEditContent(p SweYearlyParams, isEdit bool) templ.Component 
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(p.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 22, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 26, Col: 50}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
@@ -108,7 +112,7 @@ func sweYearlyParamsEditContent(p SweYearlyParams, isEdit bool) templ.Component 
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(p.ValidFrom.String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 25, Col: 134}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 29, Col: 134}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
@@ -121,7 +125,7 @@ func sweYearlyParamsEditContent(p SweYearlyParams, isEdit bool) templ.Component 
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0f", p.Amount))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 29, Col: 134}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 33, Col: 134}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 		if templ_7745c5c3_Err != nil {
@@ -134,7 +138,7 @@ func sweYearlyParamsEditContent(p SweYearlyParams, isEdit bool) templ.Component 
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0f", p.Prisbasbelopp))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 33, Col: 148}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 37, Col: 148}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 		if templ_7745c5c3_Err != nil {
@@ -147,7 +151,7 @@ func sweYearlyParamsEditContent(p SweYearlyParams, isEdit bool) templ.Component 
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%g", p.SchablonRanta))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 37, Col: 148}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 41, Col: 148}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {
@@ -160,7 +164,7 @@ func sweYearlyParamsEditContent(p SweYearlyParams, isEdit bool) templ.Component 
 		var templ_7745c5c3_Var9 string
 		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0f", p.IskFribelopp))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 41, Col: 143}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 45, Col: 143}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 		if templ_7745c5c3_Err != nil {
@@ -210,7 +214,7 @@ func sweYearlyParamsDeleteButton(id string) templ.Component {
 		var templ_7745c5c3_Var11 templ.SafeURL
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/settings/swe-yearly-params/" + id + "/delete?next=" + nextEncoded("/settings?tab=swe-yearly-params")))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 53, Col: 147}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/swe_yearly_params_view.templ`, Line: 57, Col: 147}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 		if templ_7745c5c3_Err != nil {

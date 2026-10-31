@@ -3,14 +3,15 @@ package view;
 import (
 	"fmt"
 
+	"github.com/SimonSchneider/pefigo/internal/model"
 	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
 
-templ PageChart(p PredictionParams) {
+templ PageChart(p model.PredictionParams) {
 	@Layout("/chart", ChartContent(p))
 }
 
-templ ChartContent(p PredictionParams) {
+templ ChartContent(p model.PredictionParams) {
 	<main class="flex-1 flex flex-col min-h-0">
 		@Header("Forecast", ChartControls(p))
 		<div class="flex-1 p-6 overflow-auto bg-base-100">
@@ -22,7 +23,7 @@ templ ChartContent(p PredictionParams) {
 }
 
 // ChartControls shows the prediction parameters p, with their defaults (PredictionParams.WithDefaults).
-templ ChartControls(p PredictionParams) {
+templ ChartControls(p model.PredictionParams) {
 	<form method="GET" class="flex items-center gap-4">
 		<div class="form-control">
 			<label class="label">

@@ -54,145 +54,11 @@ func (v *View) setupHeaders(cache bool) {
 	}
 }
 
-// Type aliases for model types used by templ templates.
-// Templates stay in the view package and reference these aliases,
-// while the real type definitions live in the model package.
-
-type (
-	Account                          = model.Account
-	AccountDetailed                  = model.AccountDetailed
-	AccountInput                     = model.AccountInput
-	AccountType                      = model.AccountType
-	AccountTypeInput                 = model.AccountTypeInput
-	AccountTypeWithFilter            = model.AccountTypeWithFilter
-	AccountTypesWithFilter           = model.AccountTypesWithFilter
-	TransferTemplate                 = model.TransferTemplate
-	ScheduledTransfer                = model.ScheduledTransfer
-	TransferScheduleRow              = model.TransferScheduleRow
-	TransferTemplateCategory         = model.TransferTemplateCategory
-	TransferTemplateCategoryInput    = model.TransferTemplateCategoryInput
-	AccountSnapshot                  = model.AccountSnapshot
-	AccountSnapshotInput             = model.AccountSnapshotInput
-	AccountSnapshotCell              = model.AccountSnapshotCell
-	BalanceChange                    = model.BalanceChange
-	GrowthModel                      = model.GrowthModel
-	GrowthModels                     = model.GrowthModels
-	AccountGrowthModelInput          = model.AccountGrowthModelInput
-	InvestmentRound                  = model.InvestmentRound
-	InvestmentRoundInput             = model.InvestmentRoundInput
-	ShareChange                      = model.ShareChange
-	ShareChangeInput                 = model.ShareChangeInput
-	StartupShareOption               = model.StartupShareOption
-	StartupShareOptionInput          = model.StartupShareOptionInput
-	StartupShareAccount              = model.StartupShareAccount
-	StartupShareAccountInput         = model.StartupShareAccountInput
-	DerivedStartupShareSummary       = model.DerivedStartupShareSummary
-	SpecialDate                      = model.SpecialDate
-	SpecialDateInput                 = model.SpecialDateInput
-	DashboardView                    = model.DashboardView
-	BudgetView                       = model.BudgetView
-	BudgetCategoryGroup              = model.BudgetCategoryGroup
-	BudgetChartEntry                 = model.BudgetChartEntry
-	BudgetItem                       = model.BudgetItem
-	AccountsView                     = model.AccountsView
-	AccountEditView2                 = model.AccountEditView2
-	TransferTemplatesView2           = model.TransferTemplatesView2
-	TransferTemplateEditView         = model.TransferTemplateEditView
-	TransfersView                    = model.TransfersView
-	Transfer                         = model.Transfer
-	SnapshotsTableView               = model.SnapshotsTableView
-	SnapshotsRow                     = model.SnapshotsRow
-	TransferTemplateCategoriesView   = model.TransferTemplateCategoriesView
-	TransferTemplateCategoryEditView = model.TransferTemplateCategoryEditView
-	CategoriesPageView               = model.CategoriesPageView
-	SettingsPageView                 = model.SettingsPageView
-	PredictionParams                 = model.PredictionParams
-	AccountTypeGroup                 = model.AccountTypeGroup
-	AccountTypeChartEntry            = model.AccountTypeChartEntry
-	SnapshotHistoryChartData         = model.SnapshotHistoryChartData
-	TransferChartGroupBy             = model.TransferChartGroupBy
-	GroupBy                          = model.GroupBy
-	TransferChartLink                = model.TransferChartLink
-	TransferChartDataNode            = model.TransferChartDataNode
-	TransferChartDataEnvelope        = model.TransferChartDataEnvelope
-	PredictionSetupEvent             = model.PredictionSetupEvent
-	PredictionBalanceSnapshot        = model.PredictionBalanceSnapshot
-	PredictionFinancialEntity        = model.PredictionFinancialEntity
-	Markline                         = model.Markline
-	PredictionEventHandler           = model.PredictionEventHandler
-	BudgetChartItem                  = model.BudgetChartItem
-	SnapshotHistorySeries            = model.SnapshotHistorySeries
-	AccountChartEntry                = model.AccountChartEntry
-	Salary                           = model.Salary
-	SalaryAmount                     = model.SalaryAmount
-	SalaryAdjustment                 = model.SalaryAdjustment
-	SalaryEditView                   = model.SalaryEditView
-	PartialParentalLeave             = model.PartialParentalLeave
-	FullParentalLeave                = model.FullParentalLeave
-	SweYearlyParams                  = model.SweYearlyParams
-	TransferTemplateSource           = model.TransferTemplateSource
-	SalarySegment                    = model.SalarySegment
-	SalaryBreakdown                  = model.SalaryBreakdown
-	BillAccount                      = model.BillAccount
-	Bill                             = model.Bill
-	BillAmount                       = model.BillAmount
-	BillsPageData                    = model.BillsPageData
-	BillAccountEditView              = model.BillAccountEditView
-	BillEditView                     = model.BillEditView
-)
-
-// The recurrences a new Salary and Bill account are pre-filled with, the ones the Service saves when
-// none is given.
-const (
-	DefaultSalaryRecurrence      = model.DefaultSalaryRecurrence
-	DefaultBillAccountRecurrence = model.DefaultBillAccountRecurrence
-)
-
-// The Forecast Settings a blank field saves.
-const (
-	DefaultForecastSamples   = model.DefaultForecastSamples
-	DefaultForecastInterval  = model.DefaultForecastInterval
-	DefaultForecastStartDays = model.DefaultForecastStartDays
-)
-
-// The range the Forecast Samples must be within.
-const (
-	MinForecastSamples = model.MinForecastSamples
-	MaxForecastSamples = model.MaxForecastSamples
-)
-
-// The closed sets of Growth Model types, Transfer Template amount types and Bill Amount periods.
-const (
-	GrowthModelFixed      = model.GrowthModelFixed
-	GrowthModelLogNormal  = model.GrowthModelLogNormal
-	TransferAmountFixed   = model.TransferAmountFixed
-	TransferAmountPercent = model.TransferAmountPercent
-	BillPeriodMonthly     = model.BillPeriodMonthly
-	BillPeriodYearly      = model.BillPeriodYearly
-)
-
-const (
-	BalanceUnchanged BalanceChange = model.BalanceUnchanged
-	BalanceIncreased BalanceChange = model.BalanceIncreased
-	BalanceDecreased BalanceChange = model.BalanceDecreased
-)
-
-const (
-	GroupByNone  GroupBy = model.GroupByNone
-	GroupByType  GroupBy = model.GroupByType
-	GroupByTotal GroupBy = model.GroupByTotal
-)
-
-const (
-	GroupByAccount     TransferChartGroupBy = model.GroupByAccount
-	GroupByAccountType TransferChartGroupBy = model.GroupByAccountType
-)
-
 func nextEncoded(path string) string {
 	return url.QueryEscape(path)
 }
 
-func billFaviconURL(bill Bill) string {
+func billFaviconURL(bill model.Bill) string {
 	domain := model.ExtractDomain(bill.URL)
 	if domain == "" {
 		return ""
@@ -200,6 +66,6 @@ func billFaviconURL(bill Bill) string {
 	return "/favicons/" + domain
 }
 
-func billCompanyName(bill Bill) string {
+func billCompanyName(bill model.Bill) string {
 	return model.ExtractCompanyName(bill.URL)
 }

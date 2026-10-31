@@ -1,9 +1,10 @@
 package view
 
 import (
-	"strconv"
 	"fmt"
+	"strconv"
 
+	"github.com/SimonSchneider/pefigo/internal/model"
 	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
 
@@ -11,7 +12,7 @@ templ PageSalaries(child templ.Component) {
 	@Layout("/salaries", child)
 }
 
-templ SalariesListView(salaries []Salary) {
+templ SalariesListView(salaries []model.Salary) {
 	<main class="flex-1 flex flex-col min-h-0">
 		@Header("Salaries", NewButton("/salaries/new", IconPlus("w-4 h-4"), "New Salary"))
 		<div class="flex-1 p-6 overflow-auto bg-base-100">
@@ -88,7 +89,7 @@ templ SalariesListView(salaries []Salary) {
 
 // salaryTodayCells are a Gross Salary's Net Salary and Pension Contribution today, from the Salary
 // Breakdown of its Salary Segment today: "–" without one, and why when they can't be computed.
-templ salaryTodayCells(sal Salary) {
+templ salaryTodayCells(sal model.Salary) {
 	{{ _, err := sal.Segments() }}
 	{{ today := sal.CurrentSegment() }}
 	if !sal.IsGross {
@@ -117,7 +118,7 @@ templ PageEditSalary(child templ.Component) {
 	@Layout("/salaries", child)
 }
 
-templ SalaryEditContent(view *SalaryEditView) {
+templ SalaryEditContent(view *model.SalaryEditView) {
 	<main class="flex-1 flex flex-col min-h-0">
 		if view.IsEdit() {
 			@Header("Edit Salary", DeleteSalaryButton(view.Salary.ID))
@@ -148,7 +149,7 @@ templ DeleteSalaryButton(id string) {
 	</form>
 }
 
-templ SalaryForm(view *SalaryEditView) {
+templ SalaryForm(view *model.SalaryEditView) {
 	<div class="flex-1 p-4 overflow-auto bg-base-100">
 		<div>
 			<form action={ "/salaries/?next=" + templ.EscapeString("/salaries") } method="post">
@@ -340,7 +341,7 @@ templ SalaryForm(view *SalaryEditView) {
 							for _, amt := range view.Salary.Amounts {
 								@SalaryAmountRow(view.Salary.ID, amt)
 							}
-							@SalaryAmountRow(view.Salary.ID, SalaryAmount{})
+							@SalaryAmountRow(view.Salary.ID, model.SalaryAmount{})
 						</div>
 					</div>
 				</div>
@@ -362,7 +363,7 @@ templ SalaryForm(view *SalaryEditView) {
 							for _, adj := range view.Salary.Adjustments {
 								@SalaryAdjustmentRow(view.Salary.ID, adj)
 							}
-							@SalaryAdjustmentRow(view.Salary.ID, SalaryAdjustment{})
+							@SalaryAdjustmentRow(view.Salary.ID, model.SalaryAdjustment{})
 						</div>
 					</div>
 				</div>
@@ -383,7 +384,7 @@ templ SalaryForm(view *SalaryEditView) {
 							for _, ppl := range view.Salary.PartialParentalLeaves {
 								@PartialParentalLeaveRow(view.Salary.ID, ppl)
 							}
-							@PartialParentalLeaveRow(view.Salary.ID, PartialParentalLeave{})
+							@PartialParentalLeaveRow(view.Salary.ID, model.PartialParentalLeave{})
 						</div>
 					</div>
 				</div>
@@ -402,7 +403,7 @@ templ SalaryForm(view *SalaryEditView) {
 							for _, fpl := range view.Salary.FullParentalLeaves {
 								@FullParentalLeaveRow(view.Salary.ID, fpl)
 							}
-							@FullParentalLeaveRow(view.Salary.ID, FullParentalLeave{})
+							@FullParentalLeaveRow(view.Salary.ID, model.FullParentalLeave{})
 						</div>
 					</div>
 				</div>
@@ -412,7 +413,7 @@ templ SalaryForm(view *SalaryEditView) {
 	</div>
 }
 
-templ SalaryAmountRow(salaryID string, amt SalaryAmount) {
+templ SalaryAmountRow(salaryID string, amt model.SalaryAmount) {
 	<form method="post" action={ "/salary-amounts/?next=" + templ.EscapeString("/salaries/"+salaryID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ amt.ID }/>
@@ -437,7 +438,7 @@ templ SalaryAmountRow(salaryID string, amt SalaryAmount) {
 	</form>
 }
 
-templ SalaryAdjustmentRow(salaryID string, adj SalaryAdjustment) {
+templ SalaryAdjustmentRow(salaryID string, adj model.SalaryAdjustment) {
 	<form method="post" action={ "/salary-adjustments/?next=" + templ.EscapeString("/salaries/"+salaryID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ adj.ID }/>
@@ -465,7 +466,7 @@ templ SalaryAdjustmentRow(salaryID string, adj SalaryAdjustment) {
 	</form>
 }
 
-templ PartialParentalLeaveRow(salaryID string, ppl PartialParentalLeave) {
+templ PartialParentalLeaveRow(salaryID string, ppl model.PartialParentalLeave) {
 	<form method="post" action={ "/partial-parental-leaves/?next=" + templ.EscapeString("/salaries/"+salaryID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ ppl.ID }/>
@@ -493,7 +494,7 @@ templ PartialParentalLeaveRow(salaryID string, ppl PartialParentalLeave) {
 	</form>
 }
 
-templ FullParentalLeaveRow(salaryID string, fpl FullParentalLeave) {
+templ FullParentalLeaveRow(salaryID string, fpl model.FullParentalLeave) {
 	<form method="post" action={ "/full-parental-leaves/?next=" + templ.EscapeString("/salaries/"+salaryID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ fpl.ID }/>
@@ -544,7 +545,7 @@ templ SalaryForsamlingOptions(forsamlingar []string, selected string) {
 }
 
 // SalaryBreakdownPanel shows the Salary Breakdown of each Salary Segment, or err, why there are none.
-templ SalaryBreakdownPanel(segments []SalarySegment, err error) {
+templ SalaryBreakdownPanel(segments []model.SalarySegment, err error) {
 	<div class="p-4 space-y-3">
 		<div class="sticky top-0 z-10 bg-base-200/40 -mx-4 -mt-4 px-4 pt-4 pb-3 border-b border-base-300 backdrop-blur">
 			<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/60">Net Salary Breakdown</h3>
@@ -576,7 +577,7 @@ templ SalaryBreakdownPanel(segments []SalarySegment, err error) {
 	</div>
 }
 
-templ breakdownNormal(bd SalaryBreakdown) {
+templ breakdownNormal(bd model.SalaryBreakdown) {
 	<table class="table table-xs w-full">
 		<tbody>
 			<tr>
@@ -624,7 +625,7 @@ templ breakdownNormal(bd SalaryBreakdown) {
 	</table>
 }
 
-templ breakdownPensionContribution(bd SalaryBreakdown) {
+templ breakdownPensionContribution(bd model.SalaryBreakdown) {
 	<tr>
 		<td class="text-base-content/70">Pension contribution</td>
 		<td class="text-right font-mono">
@@ -637,7 +638,7 @@ templ breakdownPensionContribution(bd SalaryBreakdown) {
 	</tr>
 }
 
-templ breakdownFullParentalLeave(bd SalaryBreakdown) {
+templ breakdownFullParentalLeave(bd model.SalaryBreakdown) {
 	<div class="badge badge-warning badge-sm mb-2">Full parental leave</div>
 	<table class="table table-xs w-full">
 		<tbody>
@@ -658,14 +659,14 @@ templ breakdownFullParentalLeave(bd SalaryBreakdown) {
 	</table>
 }
 
-func salaryRecurrenceValue(s Salary) string {
+func salaryRecurrenceValue(s model.Salary) string {
 	if s.ID == "" {
-		return string(DefaultSalaryRecurrence)
+		return string(model.DefaultSalaryRecurrence)
 	}
 	return string(s.Recurrence)
 }
 
-func salaryPriorityValue(s Salary) string {
+func salaryPriorityValue(s model.Salary) string {
 	if s.ID == "" {
 		return "0"
 	}

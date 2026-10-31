@@ -1,22 +1,23 @@
 package view
 
 import (
+	"github.com/SimonSchneider/pefigo/internal/model"
 	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
 
-templ PageDashboard(view *DashboardView) {
+templ PageDashboard(view *model.DashboardView) {
 	@Layout("/", DashboardMainContent(view))
 }
 
-templ DashboardMainContent(view *DashboardView) {
+templ DashboardMainContent(view *model.DashboardView) {
 	<main class="flex-1 flex flex-col min-h-0">
 		@Header("Dashboard")
 		<div class="flex-1 p-6 overflow-auto bg-base-100">
 			<script src="/static/public/echarts.min.js"></script>
 			<div class="flex flex-row flex-wrap gap-4 mb-6">
-				@StatCard("Net Worth", ui.FormatWithThousands(view.TotalBalance), "Current net worth", IconTrendingUp("w-10 h-10"))
-				@StatCard("Total Assets", ui.FormatWithThousands(view.TotalAssets), "Total assets", IconTrendingUp("w-10 h-10 text-success"))
-				@StatCard("Total Liabilities", ui.FormatWithThousands(view.TotalLiabilities), "Total liabilities", IconTrendingDown("w-10 h-10 text-error"))
+				@StatCard("Net Worth", ui.FormatWithThousands(view.NetWorth.Total), "Current net worth", IconTrendingUp("w-10 h-10"))
+				@StatCard("Assets", ui.FormatWithThousands(view.NetWorth.Assets), "Total assets", IconTrendingUp("w-10 h-10 text-success"))
+				@StatCard("Liabilities", ui.FormatWithThousands(view.NetWorth.Liabilities), "Total liabilities", IconTrendingDown("w-10 h-10 text-error"))
 				@StatCard("Monthly Budget", ui.FormatWithThousands(view.Budget.GrandTotal), "Total monthly expenses", IconCashBanknote("w-10 h-10"))
 			</div>
 			<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">

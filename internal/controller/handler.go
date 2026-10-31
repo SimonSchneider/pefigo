@@ -651,7 +651,7 @@ func (h *Handler) settingsPage() http.Handler {
 
 func (h *Handler) transferTemplateCategoryNewPage() http.Handler {
 	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		return view.NewView(ctx, w, r).Render(view.Page("Transfer Template Categories", view.PageEditTransferTemplateCategory(&view.TransferTemplateCategoryEditView{})))
+		return view.NewView(ctx, w, r).Render(view.Page("Transfer Template Categories", view.PageEditTransferTemplateCategory(&model.TransferTemplateCategoryEditView{})))
 	})
 }
 
@@ -661,7 +661,7 @@ func (h *Handler) transferTemplateCategoryEditPage() http.Handler {
 		if err != nil {
 			return fmt.Errorf("getting category: %w", err)
 		}
-		return view.NewView(ctx, w, r).Render(view.Page("Transfer Template Categories", view.PageEditTransferTemplateCategory(&view.TransferTemplateCategoryEditView{
+		return view.NewView(ctx, w, r).Render(view.Page("Transfer Template Categories", view.PageEditTransferTemplateCategory(&model.TransferTemplateCategoryEditView{
 			Category: c,
 		})))
 	})
@@ -683,7 +683,7 @@ func (h *Handler) transferTemplateCategoryDelete() http.Handler {
 
 func (h *Handler) accountTypeNewPage() http.Handler {
 	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		return view.NewView(ctx, w, r).Render(view.Page("Account Types", view.PageEditAccountType(view.AccountTypeEditView(view.AccountType{}))))
+		return view.NewView(ctx, w, r).Render(view.Page("Account Types", view.PageEditAccountType(view.AccountTypeEditView(model.AccountType{}))))
 	})
 }
 
@@ -713,7 +713,7 @@ func (h *Handler) accountTypeDelete() http.Handler {
 
 func (h *Handler) specialDateNewPage() http.Handler {
 	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		return view.NewView(ctx, w, r).Render(view.Page("Special Dates", view.PageEditSpecialDate(view.SpecialDateEditView(view.SpecialDate{}))))
+		return view.NewView(ctx, w, r).Render(view.Page("Special Dates", view.PageEditSpecialDate(view.SpecialDateEditView(model.SpecialDate{}))))
 	})
 }
 
@@ -823,7 +823,7 @@ func (h *Handler) transfersPage() http.Handler {
 
 func (h *Handler) transferChartPage() http.Handler {
 	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var groupBy view.TransferChartGroupBy
+		var groupBy model.TransferChartGroupBy
 		if err := shttp.Parse(&groupBy, model.ParseTransferChartGroupBy, r.FormValue("group_by"), model.GroupByAccount); err != nil {
 			return fmt.Errorf("parsing group_by: %w", err)
 		}
@@ -833,7 +833,7 @@ func (h *Handler) transferChartPage() http.Handler {
 
 func (h *Handler) transferChartData() http.Handler {
 	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		var groupBy view.TransferChartGroupBy
+		var groupBy model.TransferChartGroupBy
 		if err := shttp.Parse(&groupBy, model.ParseTransferChartGroupBy, r.FormValue("group_by"), model.GroupByAccount); err != nil {
 			return fmt.Errorf("parsing group_by: %w", err)
 		}
@@ -903,7 +903,7 @@ func (h *Handler) chartsDataStream() http.Handler {
 
 func (h *Handler) sweYearlyParamsNewPage() http.Handler {
 	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		return view.NewView(ctx, w, r).Render(view.Page("New SWE Yearly Params", view.SweYearlyParamsEditPage(view.SweYearlyParams{}, false)))
+		return view.NewView(ctx, w, r).Render(view.Page("New SWE Yearly Params", view.SweYearlyParamsEditPage(model.SweYearlyParams{}, false)))
 	})
 }
 

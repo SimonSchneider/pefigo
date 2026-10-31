@@ -39,9 +39,7 @@ type SnapshotHistoryChartData struct {
 }
 
 type DashboardView struct {
-	TotalBalance         float64
-	TotalAssets          float64
-	TotalLiabilities     float64
+	NetWorth             NetWorth
 	Budget               *BudgetView
 	AccountTypeGroups    []AccountTypeGroup
 	AccountChartData     []AccountTypeChartEntry
@@ -67,19 +65,6 @@ func (s *Service) GetDashboardData(ctx context.Context) (*DashboardView, error) 
 		return nil, fmt.Errorf("listing account types: %w", err)
 	}
 
-	var totalBalance, totalAssets, totalLiabilities float64
-	for _, acc := range accounts {
-		if acc.LastSnapshot != nil {
-			bal := acc.LastSnapshot.Balance.Mean()
-			totalBalance += bal
-			if bal > 0 {
-				totalAssets += bal
-			} else {
-				totalLiabilities += bal
-			}
-		}
-	}
-
 	groups := groupAccountsByType(accounts, accountTypes)
 	chartData := buildAccountChartData(groups)
 
@@ -94,9 +79,7 @@ func (s *Service) GetDashboardData(ctx context.Context) (*DashboardView, error) 
 	}
 
 	return &DashboardView{
-		TotalBalance:         totalBalance,
-		TotalAssets:          totalAssets,
-		TotalLiabilities:     totalLiabilities,
+		NetWorth:             newNetWorth(accounts),
 		Budget:               budget,
 		AccountTypeGroups:    groups,
 		AccountChartData:     chartData,

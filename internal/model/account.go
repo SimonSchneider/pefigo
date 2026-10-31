@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -37,6 +38,33 @@ type AccountDetailed struct {
 	LastSnapshot        *AccountSnapshot
 	GrowthModel         *GrowthModel
 	StartupShareAccount *StartupShareAccount
+}
+
+// NetWorth is the sum of every Account's current balance, split into its Assets and its Liabilities,
+// which are a positive amount.
+type NetWorth struct {
+	Total       float64
+	Assets      float64
+	Liabilities float64
+}
+
+// newNetWorth is the Net Worth of accounts, each at its latest Snapshot or, for a Startup Share
+// Account, its derived balance.
+func newNetWorth(accounts []AccountDetailed) NetWorth {
+	var nw NetWorth
+	for _, acc := range accounts {
+		if acc.LastSnapshot == nil {
+			continue
+		}
+		bal := acc.LastSnapshot.Balance.Mean()
+		nw.Total += bal
+		if bal > 0 {
+			nw.Assets += bal
+		} else {
+			nw.Liabilities -= bal
+		}
+	}
+	return nw
 }
 
 type AccountInput struct {
@@ -276,4 +304,218 @@ func (s *Service) ListAccountsDetailed(ctx context.Context, today date.Date) ([]
 		}
 	}
 	return accountsListFromDBDetailed(accs, snapshots, growthModelsMap, startupShareAccounts), nil
+}
+
+type AccountsView struct {
+	Accounts     []AccountDetailed
+	AccountTypes AccountTypesWithFilter
+	Categories   map[string]TransferTemplateCategory
+	NetWorth     NetWorth
+}
+
+func NewAccountsView(accounts []AccountDetailed, accountTypes []AccountTypeWithFilter, categories []TransferTemplateCategory) *AccountsView {
+	return &AccountsView{
+		Accounts:     accounts,
+		AccountTypes: accountTypes,
+		Categories:   KeyBy(categories, func(c TransferTemplateCategory) string { return c.ID }),
+		NetWorth:     newNetWorth(accounts),
+	}
+}
+
+func (v *AccountsView) GetBudgetCategory(id *string) *TransferTemplateCategory {
+	if id == nil {
+		return nil
+	}
+	cat, ok := v.Categories[*id]
+	if !ok {
+		return nil
+	}
+	return &cat
+}
+
+func (v *AccountsView) GetAccountType(typeID string) AccountTypeWithFilter {
+	return v.AccountTypes.GetAccountType(typeID)
+}
+
+type AccountEditView struct {
+	Account                    Account
+	Accounts                   []Account
+	GrowthModels               []GrowthModel
+	AccountTypes               AccountTypesWithFilter
+	Categories                 []TransferTemplateCategory
+	StartupShareAccount        *StartupShareAccount
+	InvestmentRounds           []InvestmentRound
+	ShareChanges               []ShareChange
+	Options                    []StartupShareOption
+	DerivedStartupShareSummary *DerivedStartupShareSummary
+}
+
+func (v *AccountEditView) GetStartupShareSharesOwned() string {
+	if v.DerivedStartupShareSummary == nil {
+		return "0"
+	}
+	return ui.FormatWithThousands(v.DerivedStartupShareSummary.SharesOwned)
+}
+
+func (v *AccountEditView) GetStartupShareTotalShares() string {
+	if v.DerivedStartupShareSummary == nil {
+		return "0"
+	}
+	return ui.FormatWithThousands(v.DerivedStartupShareSummary.TotalShares)
+}
+
+func (v *AccountEditView) GetStartupSharePurchasePrice() string {
+	if v.DerivedStartupShareSummary == nil {
+		return "0"
+	}
+	return fmt.Sprintf("%.10f", v.DerivedStartupShareSummary.AvgPurchasePricePerShare)
+}
+
+// GetStartupShareTaxRate is the Tax Rate as a percentage, or the default one for an account without
+// startup shares.
+func (v *AccountEditView) GetStartupShareTaxRate() string {
+	if v.StartupShareAccount == nil {
+		return ui.FormatPercent(DefaultStartupShareTaxRate)
+	}
+	return ui.FormatPercent(v.StartupShareAccount.TaxRate)
+}
+
+// GetStartupShareDiscountFactor is the Valuation Discount as a percentage, or the default one for an
+// account without startup shares.
+func (v *AccountEditView) GetStartupShareDiscountFactor() string {
+	if v.StartupShareAccount == nil {
+		return ui.FormatPercent(DefaultValuationDiscount)
+	}
+	return ui.FormatPercent(v.StartupShareAccount.ValuationDiscountFactor)
+}
+
+func (v *AccountEditView) HasStartupShareAccount() bool {
+	return v.StartupShareAccount != nil
+}
+
+func (v *AccountEditView) IsEdit() bool {
+	return v.Account.ID != ""
+}
+
+func (v *AccountEditView) AccountFormMode() string {
+	if v.HasStartupShareAccount() {
+		return "startup"
+	}
+	return "standard"
+}
+
+func (v *AccountEditView) GetAccountTypeName(typeID string) string {
+	return v.AccountTypes.GetAccountType(typeID).Name
+}
+
+func (s *Service) GetAccountsPageData(ctx context.Context, excludedTypeIDs []string) (*AccountsView, error) {
+	accs, err := s.ListAccountsDetailed(ctx, date.Today())
+	if err != nil {
+		return nil, fmt.Errorf("listing accounts: %w", err)
+	}
+	accountTypes, err := s.accountTypesWithExclusions(ctx, excludedTypeIDs)
+	if err != nil {
+		return nil, err
+	}
+	categories, err := s.ListCategories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing categories: %w", err)
+	}
+	return NewAccountsView(accs, accountTypes, categories), nil
+}
+
+func (s *Service) GetAccountNewPageData(ctx context.Context, excludedTypeIDs []string) (*AccountEditView, error) {
+	accs, err := s.ListAccounts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing accounts: %w", err)
+	}
+	accountTypes, err := s.accountTypesWithExclusions(ctx, excludedTypeIDs)
+	if err != nil {
+		return nil, err
+	}
+	categories, err := s.ListCategories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing categories: %w", err)
+	}
+	return &AccountEditView{
+		Accounts:     accs,
+		AccountTypes: accountTypes,
+		Categories:   categories,
+	}, nil
+}
+
+func (s *Service) GetAccountEditPageData(ctx context.Context, accountID string, excludedTypeIDs []string) (*AccountEditView, error) {
+	accs, err := s.ListAccounts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing accounts: %w", err)
+	}
+	acc, err := s.GetAccount(ctx, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("getting account: %w", err)
+	}
+	growthModels, err := s.ListAccountGrowthModels(ctx, acc.ID)
+	if err != nil {
+		return nil, fmt.Errorf("listing growth models: %w", err)
+	}
+	accountTypes, err := s.accountTypesWithExclusions(ctx, excludedTypeIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	var startupShareAccount *StartupShareAccount
+	var investmentRounds []InvestmentRound
+	var shareChanges []ShareChange
+	var options []StartupShareOption
+	var derivedSummary *DerivedStartupShareSummary
+	ssa, err := s.GetStartupShareAccount(ctx, acc.ID)
+	if err == nil {
+		startupShareAccount = &ssa
+		investmentRounds, err = s.ListInvestmentRounds(ctx, acc.ID)
+		if err != nil {
+			return nil, fmt.Errorf("listing investment rounds: %w", err)
+		}
+		shareChanges, err = s.ListShareChanges(ctx, acc.ID)
+		if err != nil {
+			return nil, fmt.Errorf("listing share changes: %w", err)
+		}
+		options, err = s.ListStartupShareOptions(ctx, acc.ID)
+		if err != nil {
+			return nil, fmt.Errorf("listing startup share options: %w", err)
+		}
+		today := date.Today()
+		var postShares float64
+		round, roundErr := s.GetLatestInvestmentRound(ctx, acc.ID, today)
+		if roundErr != nil {
+			if !errors.Is(roundErr, sql.ErrNoRows) {
+				return nil, fmt.Errorf("getting latest investment round: %w", roundErr)
+			}
+		} else {
+			_, postShares = PostMoneyValuationAndShares(round.Valuation, round.PreMoneyShares, round.Investment)
+		}
+		sharesOwned, avgPrice := DeriveShareState(shareChanges, today)
+		derivedSummary = &DerivedStartupShareSummary{
+			SharesOwned:              sharesOwned,
+			TotalShares:              postShares,
+			AvgPurchasePricePerShare: avgPrice,
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("getting startup share account: %w", err)
+	}
+
+	categories, err := s.ListCategories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing categories: %w", err)
+	}
+	return &AccountEditView{
+		Account:                    acc,
+		Accounts:                   accs,
+		GrowthModels:               growthModels,
+		AccountTypes:               accountTypes,
+		Categories:                 categories,
+		StartupShareAccount:        startupShareAccount,
+		InvestmentRounds:           investmentRounds,
+		ShareChanges:               shareChanges,
+		Options:                    options,
+		DerivedStartupShareSummary: derivedSummary,
+	}, nil
 }

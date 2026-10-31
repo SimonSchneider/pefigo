@@ -97,3 +97,22 @@ func (s *Service) ListAccountTypes(ctx context.Context) ([]AccountType, error) {
 	}
 	return result, nil
 }
+
+func (s *Service) accountTypesWithExclusions(ctx context.Context, excludedTypeIDs []string) (AccountTypesWithFilter, error) {
+	accountTypes, err := s.ListAccountTypes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing account types: %w", err)
+	}
+	excludeSet := make(map[string]bool, len(excludedTypeIDs))
+	for _, id := range excludedTypeIDs {
+		excludeSet[id] = true
+	}
+	result := make(AccountTypesWithFilter, 0, len(accountTypes))
+	for _, at := range accountTypes {
+		result = append(result, AccountTypeWithFilter{
+			AccountType: at,
+			Exclude:     excludeSet[at.ID],
+		})
+	}
+	return result, nil
+}

@@ -3,19 +3,20 @@ package view;
 import (
 	"strconv"
 
+	"github.com/SimonSchneider/pefigo/internal/model"
 	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
 
 // import "github.com/SimonSchneider/pefigo/pkg/uncertain"
-templ PageTransferTemplates(view *TransferTemplatesView2) {
+templ PageTransferTemplates(view *model.TransferTemplatesView) {
 	@Layout("/transfer-templates", TransferTemplatesContent(view))
 }
 
-templ PageEditTransferTemplate(view *TransferTemplateEditView) {
+templ PageEditTransferTemplate(view *model.TransferTemplateEditView) {
 	@Layout("/transfer-templates", EditTransferTemplateContent(view))
 }
 
-templ EditTransferTemplateContent(view *TransferTemplateEditView) {
+templ EditTransferTemplateContent(view *model.TransferTemplateEditView) {
 	<main class="flex-1 flex flex-col min-h-0">
 		if view.IsEdit() {
 			@Header("Edit Transfer Template", DeleteTransferTemplateButton(view.TransferTemplate.ID))
@@ -36,7 +37,7 @@ templ DeleteTransferTemplateButton(id string) {
 	</form>
 }
 
-templ TransferTemplateForm(view *TransferTemplateEditView) {
+templ TransferTemplateForm(view *model.TransferTemplateEditView) {
 	<form action={ "/transfers/?next=" + templ.EscapeString("/transfer-templates") } method="post">
 		<input type="hidden" name="id" value={ view.TransferTemplate.ID }/>
 		<div class="max-w-4xl mx-auto">
@@ -87,14 +88,14 @@ templ TransferTemplateForm(view *TransferTemplateEditView) {
 							<label class="label"><span class="label-text font-medium">Amount Type</span></label>
 							<select class="select select-bordered w-full" name="amount_type" id="amount-type-select">
 								<option
-									value={ TransferAmountFixed }
-									if view.TransferTemplate.AmountType == TransferAmountFixed {
+									value={ model.TransferAmountFixed }
+									if view.TransferTemplate.AmountType == model.TransferAmountFixed {
 										selected
 									}
 								>Fixed Amount</option>
 								<option
-									value={ TransferAmountPercent }
-									if view.TransferTemplate.AmountType == TransferAmountPercent {
+									value={ model.TransferAmountPercent }
+									if view.TransferTemplate.AmountType == model.TransferAmountPercent {
 										selected
 									}
 								>Percentage</option>
@@ -195,7 +196,7 @@ templ TransferTemplateForm(view *TransferTemplateEditView) {
 	</form>
 }
 
-templ TransferTemplatesStatCardRow(view *TransferTemplatesView2) {
+templ TransferTemplatesStatCardRow(view *model.TransferTemplatesView) {
 	<div class="flex flex-row flex-wrap gap-4">
 		@StatCard("Net Income", ui.FormatWithThousands(view.MonthlyIncome+view.MonthlyExpenses), "Net income of all accounts", IconTrendingUp("w-10 h-10 text-green-600"))
 		@StatCard("Total Templates", strconv.Itoa(len(view.Rows)), "number of templates", IconCashBanknote("w-10 h-10"))
@@ -204,7 +205,7 @@ templ TransferTemplatesStatCardRow(view *TransferTemplatesView2) {
 	</div>
 }
 
-templ TransferTemplateTableRow(view *TransferTemplatesView2, t *TransferScheduleRow) {
+templ TransferTemplateTableRow(view *model.TransferTemplatesView, t *model.TransferScheduleRow) {
 	{{ isGroup := t.IsGroup() }}
 	<tr
 		class={
@@ -314,7 +315,7 @@ templ TransferTemplateTableRow(view *TransferTemplatesView2, t *TransferSchedule
 					@BalanceBadge(t.Amount, false, class)
 				} else {
 					@BalanceBadge(t.Amount, false, class)
-					if t.AmountType == TransferAmountPercent {
+					if t.AmountType == model.TransferAmountPercent {
 						<span class="text-xs text-base-content/40">{ ui.FormatPercent(t.AmountPercent) }%</span>
 					} else if t.HasDifferentAmount() {
 					    @BalanceBadge(t.AmountFixed.Mean(), false, "text-xs text-base-content/40")
@@ -327,7 +328,7 @@ templ TransferTemplateTableRow(view *TransferTemplatesView2, t *TransferSchedule
 			<div class="flex items-center justify-end gap-1 row-actions">
 				if !isGroup {
 					if t.Source.IsGenerated() {
-						<a class="btn btn-ghost btn-xs" title={ "Edit " + t.Source.Label } href={ templ.SafeURL(t.Source.EditURL) }>
+						<a class="btn btn-ghost btn-xs" title={ "Edit " + t.Source.Label } href={ sourceEditURL(t.Source) }>
 							@IconPencil("w-4 h-4")
 						</a>
 					} else {
@@ -346,7 +347,7 @@ templ TransferTemplateTableRow(view *TransferTemplatesView2, t *TransferSchedule
 	</tr>
 }
 
-templ TransferTemplateMemberRow(view *TransferTemplatesView2, parentID string, t *ScheduledTransfer) {
+templ TransferTemplateMemberRow(view *model.TransferTemplatesView, parentID string, t *model.ScheduledTransfer) {
 	<tr
 		class="hover:bg-base-200/50 transition-colors bg-base-100/50 hidden"
 		data-parent-id={ parentID }
@@ -366,7 +367,7 @@ templ TransferTemplateMemberRow(view *TransferTemplatesView2, parentID string, t
 					}
 					<span>{ t.Name }</span>
 					if t.Source.IsGenerated() {
-						<a href={ templ.SafeURL(t.Source.EditURL) } class="badge badge-outline badge-sm gap-1" title={ t.Source.Label }>
+						<a href={ sourceEditURL(t.Source) } class="badge badge-outline badge-sm gap-1" title={ t.Source.Label }>
 							{ t.Source.Type }
 						</a>
 					}
@@ -431,7 +432,7 @@ templ TransferTemplateMemberRow(view *TransferTemplatesView2, parentID string, t
 					{{ class = "text-green-600" }}
 				}
 				@BalanceBadge(t.Amount, false, class)
-				if t.AmountType == TransferAmountPercent {
+				if t.AmountType == model.TransferAmountPercent {
 					<span class="text-xs text-base-content/40">{ ui.FormatPercent(t.AmountPercent) }%</span>
 				} else if t.HasDifferentAmount() {
 					@BalanceBadge(t.AmountFixed.Mean(), false, "text-xs text-base-content/40")
@@ -441,7 +442,7 @@ templ TransferTemplateMemberRow(view *TransferTemplatesView2, parentID string, t
 		<td class="text-right">
 			<div class="flex items-center justify-end gap-1 row-actions">
 				if t.Source.IsGenerated() {
-					<a class="btn btn-ghost btn-xs" title={ "Edit " + t.Source.Label } href={ templ.SafeURL(t.Source.EditURL) }>
+					<a class="btn btn-ghost btn-xs" title={ "Edit " + t.Source.Label } href={ sourceEditURL(t.Source) }>
 						@IconPencil("w-4 h-4")
 					</a>
 				} else {
@@ -467,7 +468,7 @@ templ NewTransferTemplateButton() {
 	</a>
 }
 
-templ TransferTemplatesContent(view *TransferTemplatesView2) {
+templ TransferTemplatesContent(view *model.TransferTemplatesView) {
 	<main class="flex-1 flex flex-col min-h-0">
 		@Header("Transfer Templates", NewTransferTemplateButton())
 		<div class="flex-1 p-6 overflow-auto bg-base-100">
@@ -520,4 +521,16 @@ templ TransferTemplatesContent(view *TransferTemplatesView2) {
 			</div>
 		</div>
 	</main>
+}
+
+// sourceEditURL is the edit page of what a generated Transfer Template is generated from: its Salary,
+// or the Bill Account that lists its Bill.
+func sourceEditURL(source model.TransferTemplateSource) templ.SafeURL {
+	switch source.Type {
+	case model.TransferSourceSalary:
+		return templ.SafeURL("/salaries/" + source.EntityID + "/edit")
+	case model.TransferSourceBill:
+		return templ.SafeURL("/bills/" + source.BillAccountID + "/edit")
+	}
+	return ""
 }

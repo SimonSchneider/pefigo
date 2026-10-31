@@ -1,20 +1,22 @@
-package model
+package model_test
 
 import (
 	"testing"
+
+	"github.com/SimonSchneider/pefigo/internal/model"
 )
 
 func TestAccountFormMode(t *testing.T) {
 	t.Run("standard when no startup share account", func(t *testing.T) {
-		v := &AccountEditView2{}
+		v := &model.AccountEditView{}
 		if got := v.AccountFormMode(); got != "standard" {
 			t.Errorf("expected 'standard', got %q", got)
 		}
 	})
 
 	t.Run("startup when startup share account exists", func(t *testing.T) {
-		v := &AccountEditView2{
-			StartupShareAccount: &StartupShareAccount{AccountID: "a1"},
+		v := &model.AccountEditView{
+			StartupShareAccount: &model.StartupShareAccount{AccountID: "a1"},
 		}
 		if got := v.AccountFormMode(); got != "startup" {
 			t.Errorf("expected 'startup', got %q", got)
@@ -23,8 +25,8 @@ func TestAccountFormMode(t *testing.T) {
 }
 
 func TestDerivedStartupShareFormatting(t *testing.T) {
-	v := &AccountEditView2{
-		DerivedStartupShareSummary: &DerivedStartupShareSummary{
+	v := &model.AccountEditView{
+		DerivedStartupShareSummary: &model.DerivedStartupShareSummary{
 			SharesOwned:              12345.67,
 			TotalShares:              1000000.00,
 			AvgPurchasePricePerShare: 0.0012345678,
