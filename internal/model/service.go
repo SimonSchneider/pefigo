@@ -38,6 +38,14 @@ func WithCurrencyOptions(opts ...currency.ClientOption) ServiceOption {
 	}
 }
 
+// WithSweOptions builds the Service's swe client with opts, such as swe.WithTaxData for in-memory Tax
+// Tables instead of Skatteverket's.
+func WithSweOptions(opts ...swe.ClientOption) ServiceOption {
+	return func(s *Service) {
+		s.sweClient = swe.NewClient(NewSQLiteCache(s.db), opts...)
+	}
+}
+
 // Open opens and migrates the SQLite database at conn, with the migrations in dir under path, and
 // returns a Service on it. Writes to Forecast Inputs are detected on every pooled connection and
 // mark the Dashboard Forecast Stale, which only schedules Forecast Runs once it is started.

@@ -13,33 +13,13 @@ type SalaryBreakdown struct {
 	FKSjukCompensation       float64
 }
 
-// CalculateSalaryBreakdown produces an itemized breakdown of a normal (non-full-
-// parental-leave) monthly salary. The taxFunc should return the monthly tax for
-// a given adjusted gross.
-func CalculateSalaryBreakdown(
-	grossMonthly float64,
-	adj SalaryAdjustmentParams,
-	pplSjukDays, pplLagstaDays, pplSkippedDays, prisbasbelopp float64,
-	taxFunc func(float64) (float64, error),
-) SalaryBreakdown {
-	vacation := CalculateVacationPaySupplement(grossMonthly, adj.YearlyVacationDays)
-	sick := CalculateSickPayDeduction(grossMonthly, adj.SickDaysPerOccasion, adj.SickOccasionsPerYear, adj.Prisbasbelopp)
-	vab := CalculateVABDeduction(grossMonthly, adj.VABDaysPerYear, adj.Prisbasbelopp)
-	ppl := CalculatePartialParentalLeaveDeduction(grossMonthly, pplSjukDays, pplLagstaDays, pplSkippedDays, prisbasbelopp)
-
-	adjusted := grossMonthly + vacation - sick - vab - ppl
-	tax, _ := taxFunc(adjusted)
-
-	return SalaryBreakdown{
-		GrossMonthly:             grossMonthly,
-		VacationSupplement:       vacation,
-		SickPayDeduction:         sick,
-		VABDeduction:             vab,
-		PartialParentalDeduction: ppl,
-		AdjustedGross:            adjusted,
-		Tax:                      tax,
-		NetMonthly:               adjusted - tax,
-	}
+// CalculateSalaryBreakdown produces an itemized breakdown of a normal (non-full-parental-leave)
+// monthly salary. tax returns the monthly tax on an adjusted gross.
+func CalculateSalaryBreakdown(grossMonthly float64, adj SalaryAdjustmentParams, tax func(adjustedGross float64) float64) SalaryBreakdown {
+	bd := adjustGrossSalary(grossMonthly, adj)
+	bd.Tax = tax(bd.AdjustedGross)
+	bd.NetMonthly = bd.AdjustedGross - bd.Tax
+	return bd
 }
 
 // CalculateFullParentalLeaveBreakdown produces a breakdown for a period where

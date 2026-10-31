@@ -376,11 +376,6 @@ func (h *Handler) salaryEditPage() http.Handler {
 		if err != nil {
 			return fmt.Errorf("getting salary edit page data: %w", err)
 		}
-		breakdowns, err := h.svc.ComputeSalaryBreakdowns(ctx, id)
-		if err != nil {
-			return fmt.Errorf("computing salary breakdowns: %w", err)
-		}
-		data.Breakdowns = breakdowns
 		return view.NewView(ctx, w, r).Render(view.Page("Salaries", view.PageEditSalary(view.SalaryEditContent(data))))
 	})
 }

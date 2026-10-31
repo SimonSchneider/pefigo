@@ -46,9 +46,12 @@ func mustParseDate(s string) date.Date {
 	return d
 }
 
-func newTestService(t *testing.T) *model.Service {
+// newTestService opens a Service on a new in-memory database, with no tax data unless opts give it, so a
+// test never fetches it from Skatteverket.
+func newTestService(t *testing.T, opts ...model.ServiceOption) *model.Service {
 	t.Helper()
-	svc, err := model.Open(t.Context(), pefigo.StaticEmbeddedFS, "static/migrations", memdb.TestDB(t))
+	opts = append([]model.ServiceOption{model.WithSweOptions(swe.WithTaxData(swe.MemoryTaxData{}))}, opts...)
+	svc, err := model.Open(t.Context(), pefigo.StaticEmbeddedFS, "static/migrations", memdb.TestDB(t), opts...)
 	if err != nil {
 		t.Fatalf("failed to create test db: %v", err)
 	}
@@ -1381,80 +1384,56 @@ func TestSalaryAmountCascadeDelete(t *testing.T) {
 
 // ---- Salary Transfer Template Generation (Gross) ----
 
-func TestSalaryGenerateTransferTemplates_GrossSalary(t *testing.T) {
-	sal := model.Salary{
-		ID:               "sal1",
-		Name:             "Acme Corp",
-		ToAccountID:      "acc1",
-		PensionAccountID: "pension1",
-		Priority:         0,
-		Recurrence:       "*-*-25",
-		Enabled:          true,
-		IsGross:          true,
-		Amounts: []model.SalaryAmount{
-			{ID: "amt1", Amount: newFixedValue(50000), StartDate: mustParseDate("2025-01-01")},
-		},
-		NetSegments: []model.NetSalarySegment{
-			{StartDate: mustParseDate("2025-01-01"), Net: newFixedValue(35000)},
-		},
-		PensionSegments: []model.PensionSegment{
-			{StartDate: mustParseDate("2025-01-01"), Pension: newFixedValue(2500)},
-		},
-	}
-
-	templates := sal.GenerateTransferTemplates()
-	if len(templates) != 2 {
-		t.Fatalf("expected 2 templates (net + pension), got %d", len(templates))
-	}
-
-	var netTpl, pensionTpl model.TransferTemplate
-	for _, tt := range templates {
-		if tt.ToAccountID == "acc1" {
-			netTpl = tt
-		} else if tt.ToAccountID == "pension1" {
-			pensionTpl = tt
+// grossTTs are the Net Salary and Pension Contribution Transfer Templates of the Salary salaryID, the
+// latter those into the account pensionAccountID.
+func grossTTs(t *testing.T, svc *model.Service, salaryID, pensionAccountID string) (net, pension []model.TransferTemplate) {
+	t.Helper()
+	for _, tt := range salaryTTsFromAll(t, svc, salaryID) {
+		if pensionAccountID != "" && tt.ToAccountID == pensionAccountID {
+			pension = append(pension, tt)
+		} else {
+			net = append(net, tt)
 		}
 	}
+	return net, pension
+}
+
+func TestSalaryGenerateTransferTemplates_GrossSalary(t *testing.T) {
+	svc := newTestService(t, withStockholmTaxTables("2025"))
+	checking := mustAccount(t, svc, "Checking")
+	pension := mustAccount(t, svc, "Pension")
+	gross := stockholmGrossSalary("Acme Corp")
+	gross.ToAccountID, gross.PensionAccountID = checking.ID, pension.ID
+	sal := mustSalary(t, svc, gross, model.SalaryAmount{Amount: newFixedValue(50000), StartDate: mustParseDate("2025-01-01")})
+	mustSweYearlyParams(t, svc, "2025-01-01", 76200, 57300)
+
+	netTTs, pensionTTs := grossTTs(t, svc, sal.ID, pension.ID)
+	if len(netTTs) != 1 || len(pensionTTs) != 1 {
+		t.Fatalf("expected 1 net and 1 pension template, got %d and %d", len(netTTs), len(pensionTTs))
+	}
+	netTpl, pensionTpl := netTTs[0], pensionTTs[0]
 
 	if netTpl.AmountFixed.Mean() != 35000 {
 		t.Errorf("net template amount = %v, want 35000", netTpl.AmountFixed.Mean())
 	}
-	if netTpl.FromAccountID != "" {
-		t.Errorf("net template FromAccountID should be empty, got %s", netTpl.FromAccountID)
+	if netTpl.FromAccountID != "" || netTpl.ToAccountID != checking.ID {
+		t.Errorf("net template from %q to %q, want External to %s", netTpl.FromAccountID, netTpl.ToAccountID, checking.ID)
 	}
 
-	if pensionTpl.AmountFixed.Mean() != 2500 {
-		t.Errorf("pension template amount = %v, want 2500", pensionTpl.AmountFixed.Mean())
+	if want := swe.CalculateITP1Pension(50000, 76200); pensionTpl.AmountFixed.Mean() != want {
+		t.Errorf("pension template amount = %v, want %v", pensionTpl.AmountFixed.Mean(), want)
 	}
 	if pensionTpl.FromAccountID != "" {
 		t.Errorf("pension template FromAccountID should be empty, got %s", pensionTpl.FromAccountID)
 	}
-	if pensionTpl.ToAccountID != "pension1" {
-		t.Errorf("pension template ToAccountID = %s, want pension1", pensionTpl.ToAccountID)
-	}
 }
 
 func TestSalaryGenerateTransferTemplates_GrossNoPensionAccount(t *testing.T) {
-	sal := model.Salary{
-		ID:          "sal1",
-		Name:        "Acme Corp",
-		ToAccountID: "acc1",
-		Priority:    0,
-		Recurrence:  "*-*-25",
-		Enabled:     true,
-		IsGross:     true,
-		Amounts: []model.SalaryAmount{
-			{ID: "amt1", Amount: newFixedValue(50000), StartDate: mustParseDate("2025-01-01")},
-		},
-		NetSegments: []model.NetSalarySegment{
-			{StartDate: mustParseDate("2025-01-01"), Net: newFixedValue(35000)},
-		},
-		PensionSegments: []model.PensionSegment{
-			{StartDate: mustParseDate("2025-01-01"), Pension: newFixedValue(2500)},
-		},
-	}
+	svc := newTestService(t, withStockholmTaxTables("2025"))
+	sal := mustSalary(t, svc, stockholmGrossSalary("Acme Corp"), model.SalaryAmount{Amount: newFixedValue(50000), StartDate: mustParseDate("2025-01-01")})
+	mustSweYearlyParams(t, svc, "2025-01-01", 76200, 57300)
 
-	templates := sal.GenerateTransferTemplates()
+	templates := salaryTTsFromAll(t, svc, sal.ID)
 	if len(templates) != 1 {
 		t.Fatalf("expected 1 template (net only, no pension account), got %d", len(templates))
 	}
@@ -1467,55 +1446,23 @@ func TestSalaryGenerateTransferTemplates_GrossWithIBBChange(t *testing.T) {
 	// One salary amount spanning two IBB values:
 	// Salary: 50000 from 2025-01-01
 	// IBB: 76200 from 2025-01-01, 80000 from 2025-07-01
-	// Expected: 1 net TT, 2 pension TTs (split at IBB boundary)
+	// Expected: 2 Salary Segments, so 2 net and 2 pension TTs (split at IBB boundary)
+	svc := newTestService(t, withStockholmTaxTables("2025"))
+	pension := mustAccount(t, svc, "Pension")
+	gross := stockholmGrossSalary("Acme Corp")
+	gross.PensionAccountID = pension.ID
+	sal := mustSalary(t, svc, gross, model.SalaryAmount{Amount: newFixedValue(50000), StartDate: mustParseDate("2025-01-01")})
+	mustSweYearlyParams(t, svc, "2025-01-01", 76200, 57300)
+	mustSweYearlyParams(t, svc, "2025-07-01", 80000, 57300)
 
-	ibb1 := 76200.0
-	ibb2 := 80000.0
-	gross := 50000.0
-	pension1 := swe.CalculateITP1Pension(gross, ibb1)
-	pension2 := swe.CalculateITP1Pension(gross, ibb2)
-
+	pension1 := swe.CalculateITP1Pension(50000, 76200)
+	pension2 := swe.CalculateITP1Pension(50000, 80000)
 	ibbChangeDate := mustParseDate("2025-07-01")
 
-	sal := model.Salary{
-		ID:               "sal1",
-		Name:             "Acme Corp",
-		ToAccountID:      "acc1",
-		PensionAccountID: "pension1",
-		Priority:         0,
-		Recurrence:       "*-*-25",
-		Enabled:          true,
-		IsGross:          true,
-		Amounts: []model.SalaryAmount{
-			{ID: "amt1", Amount: newFixedValue(gross), StartDate: mustParseDate("2025-01-01")},
-		},
-		NetSegments: []model.NetSalarySegment{
-			{StartDate: mustParseDate("2025-01-01"), Net: newFixedValue(35000)},
-		},
-		PensionSegments: []model.PensionSegment{
-			{StartDate: mustParseDate("2025-01-01"), EndDate: &ibbChangeDate, Pension: newFixedValue(pension1)},
-			{StartDate: mustParseDate("2025-07-01"), Pension: newFixedValue(pension2)},
-		},
+	netTTs, pensionTTs := grossTTs(t, svc, sal.ID, pension.ID)
+	if len(netTTs) != 2 || netTTs[0].AmountFixed.Mean() != 35000 || netTTs[1].AmountFixed.Mean() != 35000 {
+		t.Fatalf("expected 2 net TTs of 35000, got %+v", netTTs)
 	}
-
-	templates := sal.GenerateTransferTemplates()
-
-	var netTTs, pensionTTs []model.TransferTemplate
-	for _, tt := range templates {
-		if tt.ToAccountID == "acc1" {
-			netTTs = append(netTTs, tt)
-		} else if tt.ToAccountID == "pension1" {
-			pensionTTs = append(pensionTTs, tt)
-		}
-	}
-
-	if len(netTTs) != 1 {
-		t.Fatalf("expected 1 net TT, got %d", len(netTTs))
-	}
-	if netTTs[0].AmountFixed.Mean() != 35000 {
-		t.Errorf("net amount = %v, want 35000", netTTs[0].AmountFixed.Mean())
-	}
-
 	if len(pensionTTs) != 2 {
 		t.Fatalf("expected 2 pension TTs (split at IBB change), got %d", len(pensionTTs))
 	}
@@ -1540,52 +1487,24 @@ func TestSalaryGenerateTransferTemplates_GrossMultipleAmountsAndIBB(t *testing.T
 	//   [2025-01-01, 2025-07-01) -> pension(40000, 76200)
 	//   [2025-07-01, 2026-01-01) -> pension(40000, 80000)
 	//   [2026-01-01, nil)        -> pension(45000, 80000)
+	svc := newTestService(t, withStockholmTaxTables("2025", "2026"))
+	pension := mustAccount(t, svc, "Pension")
+	gross := stockholmGrossSalary("Acme Corp")
+	gross.PensionAccountID = pension.ID
+	sal := mustSalary(t, svc, gross,
+		model.SalaryAmount{Amount: newFixedValue(40000), StartDate: mustParseDate("2025-01-01")},
+		model.SalaryAmount{Amount: newFixedValue(45000), StartDate: mustParseDate("2026-01-01")},
+	)
+	mustSweYearlyParams(t, svc, "2025-01-01", 76200, 57300)
+	mustSweYearlyParams(t, svc, "2025-07-01", 80000, 57300)
 
-	ibb1 := 76200.0
-	ibb2 := 80000.0
-	d1 := mustParseDate("2025-01-01")
-	d2 := mustParseDate("2025-07-01")
-	d3 := mustParseDate("2026-01-01")
-	p1 := swe.CalculateITP1Pension(40000, ibb1)
-	p2 := swe.CalculateITP1Pension(40000, ibb2)
-	p3 := swe.CalculateITP1Pension(45000, ibb2)
+	p1 := swe.CalculateITP1Pension(40000, 76200)
+	p2 := swe.CalculateITP1Pension(40000, 80000)
+	p3 := swe.CalculateITP1Pension(45000, 80000)
 
-	sal := model.Salary{
-		ID:               "sal1",
-		Name:             "Acme Corp",
-		ToAccountID:      "acc1",
-		PensionAccountID: "pension1",
-		Recurrence:       "*-*-25",
-		Enabled:          true,
-		IsGross:          true,
-		Amounts: []model.SalaryAmount{
-			{ID: "amt1", Amount: newFixedValue(40000), StartDate: d1},
-			{ID: "amt2", Amount: newFixedValue(45000), StartDate: d3},
-		},
-		NetSegments: []model.NetSalarySegment{
-			{StartDate: d1, EndDate: &d3, Net: newFixedValue(32500)},
-			{StartDate: d3, Net: newFixedValue(37500)},
-		},
-		PensionSegments: []model.PensionSegment{
-			{StartDate: d1, EndDate: &d2, Pension: newFixedValue(p1)},
-			{StartDate: d2, EndDate: &d3, Pension: newFixedValue(p2)},
-			{StartDate: d3, Pension: newFixedValue(p3)},
-		},
-	}
-
-	templates := sal.GenerateTransferTemplates()
-
-	var netTTs, pensionTTs []model.TransferTemplate
-	for _, tt := range templates {
-		if tt.ToAccountID == "acc1" {
-			netTTs = append(netTTs, tt)
-		} else if tt.ToAccountID == "pension1" {
-			pensionTTs = append(pensionTTs, tt)
-		}
-	}
-
-	if len(netTTs) != 2 {
-		t.Fatalf("expected 2 net TTs, got %d", len(netTTs))
+	netTTs, pensionTTs := grossTTs(t, svc, sal.ID, pension.ID)
+	if len(netTTs) != 3 {
+		t.Fatalf("expected 3 net TTs, got %d", len(netTTs))
 	}
 	if len(pensionTTs) != 3 {
 		t.Fatalf("expected 3 pension TTs, got %d", len(pensionTTs))
@@ -1602,28 +1521,6 @@ func TestSalaryGenerateTransferTemplates_GrossMultipleAmountsAndIBB(t *testing.T
 }
 
 // ---- Net Segment Splitting (integration via the Transfer Schedule) ----
-
-// seedTaxCache pre-populates the SQLite cache with tax rate and table data
-// so the swe client doesn't hit the network.
-func seedTaxCache(t *testing.T, svc *model.Service, kommun, forsamling, year string) {
-	t.Helper()
-	ctx := t.Context()
-	cache := model.NewSQLiteCache(svc.DB())
-
-	taxRateJSON := `[{"kommun":"` + kommun + `","församling":"` + forsamling + `","summa, exkl. kyrkoavgift":"31","summa, inkl. kyrkoavgift":"32","år":"` + year + `"}]`
-	if err := cache.Set(ctx, "tax_rate:"+kommun+":"+forsamling+":"+year, taxRateJSON); err != nil {
-		t.Fatalf("seeding tax rate cache: %v", err)
-	}
-
-	taxTableJSON := `[` +
-		`{"inkomst fr.o.m.":"0","inkomst t.o.m.":"24999","kolumn 1":"0","tabellnr":"31","år":"` + year + `","antal dgr":"30B"},` +
-		`{"inkomst fr.o.m.":"25000","inkomst t.o.m.":"49999","kolumn 1":"7500","tabellnr":"31","år":"` + year + `","antal dgr":"30B"},` +
-		`{"inkomst fr.o.m.":"50000","inkomst t.o.m.":"99999","kolumn 1":"15000","tabellnr":"31","år":"` + year + `","antal dgr":"30B"}` +
-		`]`
-	if err := cache.Set(ctx, "tax_table:31:"+year, taxTableJSON); err != nil {
-		t.Fatalf("seeding tax table cache: %v", err)
-	}
-}
 
 func createGrossSalary(t *testing.T, svc *model.Service, name, kommun, forsamling string) model.Salary {
 	t.Helper()
@@ -1663,9 +1560,8 @@ func allTransferTemplates(t *testing.T, svc *model.Service) []model.TransferTemp
 }
 
 func TestNetSegments_SplitsAtAdjustmentChange(t *testing.T) {
-	svc := newTestService(t)
+	svc := newTestService(t, withStockholmTaxTables("2025"))
 	ctx := t.Context()
-	seedTaxCache(t, svc, "STOCKHOLM", "TEST", "2025")
 
 	sal := createGrossSalary(t, svc, "Test Salary", "STOCKHOLM", "TEST")
 
@@ -1726,9 +1622,8 @@ func TestNetSegments_SplitsAtAdjustmentChange(t *testing.T) {
 }
 
 func TestNetSegments_SplitsAtPBBChange(t *testing.T) {
-	svc := newTestService(t)
+	svc := newTestService(t, withStockholmTaxTables("2025"))
 	ctx := t.Context()
-	seedTaxCache(t, svc, "STOCKHOLM", "TEST", "2025")
 
 	sal := createGrossSalary(t, svc, "Test Salary", "STOCKHOLM", "TEST")
 
@@ -1785,10 +1680,8 @@ func TestNetSegments_SplitsAtPBBChange(t *testing.T) {
 }
 
 func TestNetSegments_SplitsAtAllBoundaries(t *testing.T) {
-	svc := newTestService(t)
+	svc := newTestService(t, withStockholmTaxTables("2025", "2026"))
 	ctx := t.Context()
-	seedTaxCache(t, svc, "STOCKHOLM", "TEST", "2025")
-	seedTaxCache(t, svc, "STOCKHOLM", "TEST", "2026")
 
 	sal := createGrossSalary(t, svc, "Test Salary", "STOCKHOLM", "TEST")
 
@@ -1874,9 +1767,8 @@ func TestNetSegments_SplitsAtAllBoundaries(t *testing.T) {
 }
 
 func TestNetSegments_NoSplitWithoutAdjustmentsOrPBB(t *testing.T) {
-	svc := newTestService(t)
+	svc := newTestService(t, withStockholmTaxTables("2025"))
 	ctx := t.Context()
-	seedTaxCache(t, svc, "STOCKHOLM", "TEST", "2025")
 
 	sal := createGrossSalary(t, svc, "Test Salary", "STOCKHOLM", "TEST")
 
@@ -1953,9 +1845,8 @@ func TestPartialParentalLeaveCRUD(t *testing.T) {
 }
 
 func TestNetSegments_SplitsAtPartialParentalLeaveChange(t *testing.T) {
-	svc := newTestService(t)
+	svc := newTestService(t, withStockholmTaxTables("2025"))
 	ctx := t.Context()
-	seedTaxCache(t, svc, "STOCKHOLM", "TEST", "2025")
 
 	sal := createGrossSalary(t, svc, "Test Salary", "STOCKHOLM", "TEST")
 
@@ -2078,10 +1969,8 @@ func TestFullParentalLeaveCRUD(t *testing.T) {
 }
 
 func TestNetSegments_FullParentalLeaveOverridesNetSalary(t *testing.T) {
-	svc := newTestService(t)
+	svc := newTestService(t, withStockholmTaxTables("2025", "2026"))
 	ctx := t.Context()
-	seedTaxCache(t, svc, "STOCKHOLM", "TEST", "2025")
-	seedTaxCache(t, svc, "STOCKHOLM", "TEST", "2026")
 
 	sal := createGrossSalary(t, svc, "Test Salary", "STOCKHOLM", "TEST")
 
@@ -2158,7 +2047,10 @@ func TestSalaryGenerateTransferTemplates_SingleAmount(t *testing.T) {
 		},
 	}
 
-	templates := sal.GenerateTransferTemplates()
+	templates, err := sal.GenerateTransferTemplates()
+	if err != nil {
+		t.Fatalf("generate transfer templates: %v", err)
+	}
 	if len(templates) != 1 {
 		t.Fatalf("expected 1 template, got %d", len(templates))
 	}
@@ -2207,7 +2099,10 @@ func TestSalaryGenerateTransferTemplates_MultipleAmounts(t *testing.T) {
 		},
 	}
 
-	templates := sal.GenerateTransferTemplates()
+	templates, err := sal.GenerateTransferTemplates()
+	if err != nil {
+		t.Fatalf("generate transfer templates: %v", err)
+	}
 	if len(templates) != 2 {
 		t.Fatalf("expected 2 templates, got %d", len(templates))
 	}
@@ -2242,7 +2137,10 @@ func TestSalaryGenerateTransferTemplates_DisabledSalary(t *testing.T) {
 		},
 	}
 
-	templates := sal.GenerateTransferTemplates()
+	templates, err := sal.GenerateTransferTemplates()
+	if err != nil {
+		t.Fatalf("generate transfer templates: %v", err)
+	}
 	if len(templates) != 1 {
 		t.Fatalf("expected 1 template, got %d", len(templates))
 	}
@@ -2258,7 +2156,10 @@ func TestSalaryGenerateTransferTemplates_NoAmounts(t *testing.T) {
 		Enabled: true,
 	}
 
-	templates := sal.GenerateTransferTemplates()
+	templates, err := sal.GenerateTransferTemplates()
+	if err != nil {
+		t.Fatalf("generate transfer templates: %v", err)
+	}
 	if len(templates) != 0 {
 		t.Fatalf("expected 0 templates for salary with no amounts, got %d", len(templates))
 	}
@@ -2465,10 +2366,9 @@ func TestSweYearlyParamsCRUD(t *testing.T) {
 	}
 }
 
-func TestComputeSalaryBreakdowns_StandardSalary(t *testing.T) {
-	svc := newTestService(t)
+func TestSalaryBreakdowns_StandardSalary(t *testing.T) {
+	svc := newTestService(t, withStockholmTaxTables("2025"))
 	ctx := t.Context()
-	seedTaxCache(t, svc, "STOCKHOLM", "TEST", "2025")
 
 	sal := createGrossSalary(t, svc, "Test Salary", "STOCKHOLM", "TEST")
 
@@ -2496,10 +2396,7 @@ func TestComputeSalaryBreakdowns_StandardSalary(t *testing.T) {
 		t.Fatalf("creating adjustment: %v", err)
 	}
 
-	breakdowns, err := svc.ComputeSalaryBreakdowns(ctx, sal.ID)
-	if err != nil {
-		t.Fatalf("ComputeSalaryBreakdowns: %v", err)
-	}
+	breakdowns := mustSalarySegments(t, svc, sal.ID)
 	if len(breakdowns) != 1 {
 		t.Fatalf("expected 1 breakdown segment, got %d", len(breakdowns))
 	}
@@ -2533,10 +2430,9 @@ func TestComputeSalaryBreakdowns_StandardSalary(t *testing.T) {
 	}
 }
 
-func TestComputeSalaryBreakdowns_SplitsAtAdjustmentChange(t *testing.T) {
-	svc := newTestService(t)
+func TestSalaryBreakdowns_SplitsAtAdjustmentChange(t *testing.T) {
+	svc := newTestService(t, withStockholmTaxTables("2025"))
 	ctx := t.Context()
-	seedTaxCache(t, svc, "STOCKHOLM", "TEST", "2025")
 
 	sal := createGrossSalary(t, svc, "Test Salary", "STOCKHOLM", "TEST")
 
@@ -2573,10 +2469,7 @@ func TestComputeSalaryBreakdowns_SplitsAtAdjustmentChange(t *testing.T) {
 		t.Fatalf("creating adjustment 2: %v", err)
 	}
 
-	breakdowns, err := svc.ComputeSalaryBreakdowns(ctx, sal.ID)
-	if err != nil {
-		t.Fatalf("ComputeSalaryBreakdowns: %v", err)
-	}
+	breakdowns := mustSalarySegments(t, svc, sal.ID)
 	if len(breakdowns) != 2 {
 		t.Fatalf("expected 2 breakdown segments, got %d", len(breakdowns))
 	}
@@ -2592,11 +2485,9 @@ func TestComputeSalaryBreakdowns_SplitsAtAdjustmentChange(t *testing.T) {
 	}
 }
 
-func TestComputeSalaryBreakdowns_FullParentalLeave(t *testing.T) {
-	svc := newTestService(t)
+func TestSalaryBreakdowns_FullParentalLeave(t *testing.T) {
+	svc := newTestService(t, withStockholmTaxTables("2025", "2026"))
 	ctx := t.Context()
-	seedTaxCache(t, svc, "STOCKHOLM", "TEST", "2025")
-	seedTaxCache(t, svc, "STOCKHOLM", "TEST", "2026")
 
 	sal := createGrossSalary(t, svc, "Test Salary", "STOCKHOLM", "TEST")
 
@@ -2625,10 +2516,7 @@ func TestComputeSalaryBreakdowns_FullParentalLeave(t *testing.T) {
 		t.Fatalf("creating full parental leave: %v", err)
 	}
 
-	breakdowns, err := svc.ComputeSalaryBreakdowns(ctx, sal.ID)
-	if err != nil {
-		t.Fatalf("ComputeSalaryBreakdowns: %v", err)
-	}
+	breakdowns := mustSalarySegments(t, svc, sal.ID)
 	if len(breakdowns) != 3 {
 		t.Fatalf("expected 3 breakdown segments, got %d", len(breakdowns))
 	}
@@ -2651,7 +2539,7 @@ func TestComputeSalaryBreakdowns_FullParentalLeave(t *testing.T) {
 	}
 }
 
-func TestComputeSalaryBreakdowns_NonGrossSalaryReturnsNil(t *testing.T) {
+func TestSalaryBreakdowns_NonGrossSalaryHasNone(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()
 
@@ -2665,10 +2553,7 @@ func TestComputeSalaryBreakdowns_NonGrossSalaryReturnsNil(t *testing.T) {
 		t.Fatalf("creating salary: %v", err)
 	}
 
-	breakdowns, err := svc.ComputeSalaryBreakdowns(ctx, sal.ID)
-	if err != nil {
-		t.Fatalf("ComputeSalaryBreakdowns: %v", err)
-	}
+	breakdowns := mustSalarySegments(t, svc, sal.ID)
 	if breakdowns != nil {
 		t.Errorf("expected nil for non-gross salary, got %d segments", len(breakdowns))
 	}
@@ -3432,79 +3317,6 @@ func TestTransferSchedule_MergesDBSalaryAndBills(t *testing.T) {
 	if billCount != 1 {
 		t.Errorf("expected 1 bill template, got %d", billCount)
 	}
-}
-
-// ---- BillAmount Currency Conversion ----
-
-func TestBillAmountCurrencyConversion(t *testing.T) {
-	getRate := func(from, to string) float64 {
-		if from == "EUR" && to == "SEK" {
-			return 11.47
-		}
-		return 1
-	}
-
-	t.Run("monthly EUR converted to SEK", func(t *testing.T) {
-		ba := model.BillAmount{
-			ID: "a1", BillID: "b1", Amount: newFixedValue(100),
-			Period: "monthly", Currency: "EUR",
-			StartDate: mustParseDate("2020-01-01"),
-		}
-		got := ba.ConvertedMonthlyAmountValue("SEK", getRate).Mean()
-		if !approxEqual(got, 1147, 0.01) {
-			t.Errorf("ConvertedMonthlyAmountValue = %v, want 1147", got)
-		}
-	})
-
-	t.Run("default currency no conversion", func(t *testing.T) {
-		ba := model.BillAmount{
-			ID: "a2", BillID: "b2", Amount: newFixedValue(100),
-			Period: "monthly", Currency: "",
-			StartDate: mustParseDate("2020-01-01"),
-		}
-		got := ba.ConvertedMonthlyAmountValue("SEK", getRate).Mean()
-		if !approxEqual(got, 100, 0.01) {
-			t.Errorf("empty currency should not convert, got %v, want 100", got)
-		}
-	})
-
-	t.Run("same currency no conversion", func(t *testing.T) {
-		ba := model.BillAmount{
-			ID: "a3", BillID: "b3", Amount: newFixedValue(100),
-			Period: "monthly", Currency: "SEK",
-			StartDate: mustParseDate("2020-01-01"),
-		}
-		got := ba.ConvertedMonthlyAmountValue("SEK", getRate).Mean()
-		if !approxEqual(got, 100, 0.01) {
-			t.Errorf("same currency should not convert, got %v, want 100", got)
-		}
-	})
-
-	t.Run("yearly EUR to monthly SEK", func(t *testing.T) {
-		ba := model.BillAmount{
-			ID: "a4", BillID: "b4", Amount: newFixedValue(1200),
-			Period: "yearly", Currency: "EUR",
-			StartDate: mustParseDate("2020-01-01"),
-		}
-		got := ba.ConvertedMonthlyAmountValue("SEK", getRate).Mean()
-		// 1200 yearly / 12 = 100 monthly EUR * 11.47 = 1147 SEK
-		if !approxEqual(got, 1147, 0.01) {
-			t.Errorf("yearly EUR -> monthly SEK = %v, want 1147", got)
-		}
-	})
-
-	t.Run("yearly conversion", func(t *testing.T) {
-		ba := model.BillAmount{
-			ID: "a5", BillID: "b5", Amount: newFixedValue(100),
-			Period: "monthly", Currency: "EUR",
-			StartDate: mustParseDate("2020-01-01"),
-		}
-		got := ba.ConvertedYearlyAmountValue("SEK", getRate).Mean()
-		// 100 monthly EUR * 12 = 1200 yearly EUR * 11.47 = 13764 SEK
-		if !approxEqual(got, 13764, 0.01) {
-			t.Errorf("monthly EUR -> yearly SEK = %v, want 13764", got)
-		}
-	})
 }
 
 // ---- Settings Persistence ----
