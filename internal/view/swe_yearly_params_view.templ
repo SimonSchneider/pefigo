@@ -1,12 +1,16 @@
 package view
 
-import "fmt"
+import (
+	"fmt"
 
-templ SweYearlyParamsEditPage(p SweYearlyParams, isEdit bool) {
+	"github.com/SimonSchneider/pefigo/internal/model"
+)
+
+templ SweYearlyParamsEditPage(p model.SweYearlyParams, isEdit bool) {
 	@Layout("/settings", sweYearlyParamsEditContent(p, isEdit))
 }
 
-templ sweYearlyParamsEditContent(p SweYearlyParams, isEdit bool) {
+templ sweYearlyParamsEditContent(p model.SweYearlyParams, isEdit bool) {
 	<main class="flex-1 flex flex-col min-h-0">
 		if isEdit {
 			@Header("Edit SWE Yearly Params", sweYearlyParamsDeleteButton(p.ID))

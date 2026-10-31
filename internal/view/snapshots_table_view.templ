@@ -1,8 +1,11 @@
 package view
 
-import "github.com/SimonSchneider/goslu/date"
+import (
+	"github.com/SimonSchneider/goslu/date"
+	"github.com/SimonSchneider/pefigo/internal/model"
+)
 
-templ PageSnapshotsTable(view *SnapshotsTableView) {
+templ PageSnapshotsTable(view *model.SnapshotsTableView) {
 	@Layout("/snapshots-table", SnapshotsTableContent(view))
 }
 
@@ -13,7 +16,7 @@ templ SnapshotsTableNewRowButton() {
 	</button>
 }
 
-templ SnapshotsTableContent(view *SnapshotsTableView) {
+templ SnapshotsTableContent(view *model.SnapshotsTableView) {
 	<main class="flex-1 flex flex-col overflow-hidden">
 		@Header("Balances", AccountsFilter(view.AccountTypes), SnapshotsTableNewRowButton())
 		<div class="flex-1 p-6 bg-base-100 overflow-hidden">
@@ -78,7 +81,7 @@ templ SnapshotsTableContent(view *SnapshotsTableView) {
 	</script>
 }
 
-templ SnapshotsTableRow(row *SnapshotsRow) {
+templ SnapshotsTableRow(row *model.SnapshotsRow) {
 	<tr class={
 		templ.KV("bg-base-200 hover:bg-base-300", row.UnsavedSuggestions),
 		templ.KV("hover:bg-base-100 even:bg-base-100", !row.UnsavedSuggestions),
@@ -102,13 +105,13 @@ templ SnapshotsTableRow(row *SnapshotsRow) {
 	</tr>
 }
 
-templ SnapshotCell(accountID string, date date.Date, snapshot AccountSnapshotCell) {
+templ SnapshotCell(accountID string, date date.Date, snapshot model.AccountSnapshotCell) {
 	<td
 		class={
 			"px-3 py-2 text-sm text-base-content border-r border-base-300 last:border-r-0",
-			templ.KV("bg-base-100 text-base-content", snapshot.Change == BalanceUnchanged),
-			templ.KV("bg-success text-success-content", snapshot.Change == BalanceIncreased),
-			templ.KV("bg-error text-error-content", snapshot.Change == BalanceDecreased),
+			templ.KV("bg-base-100 text-base-content", snapshot.Change == model.BalanceUnchanged),
+			templ.KV("bg-success text-success-content", snapshot.Change == model.BalanceIncreased),
+			templ.KV("bg-error text-error-content", snapshot.Change == model.BalanceDecreased),
 		}
 	>
 		<input
@@ -125,7 +128,7 @@ templ SnapshotCell(accountID string, date date.Date, snapshot AccountSnapshotCel
 	</td>
 }
 
-func getSnapshotValue(snapshot AccountSnapshot) string {
+func getSnapshotValue(snapshot model.AccountSnapshot) string {
 	if !snapshot.Balance.Valid() {
 		return ""
 	}

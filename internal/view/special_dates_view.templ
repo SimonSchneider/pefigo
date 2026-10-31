@@ -1,10 +1,12 @@
 package view
 
+import "github.com/SimonSchneider/pefigo/internal/model"
+
 templ PageEditSpecialDate(child templ.Component) {
 	@Layout("/settings", child)
 }
 
-templ SpecialDateEditView(specialDate SpecialDate) {
+templ SpecialDateEditView(specialDate model.SpecialDate) {
 	<main class="flex-1 flex flex-col min-h-0">
 		if specialDate.ID != "" {
 			@Header("Edit Special Date", DeleteSpecialDateButton(specialDate.ID))
@@ -23,7 +25,7 @@ templ DeleteSpecialDateButton(id string) {
 	</form>
 }
 
-templ SpecialDateForm(specialDate SpecialDate) {
+templ SpecialDateForm(specialDate model.SpecialDate) {
 	<div class="flex-1 p-6 overflow-auto bg-base-100">
 		<div class="max-w-lg mx-auto">
 			<form action={ templ.SafeURL("/special-dates/?next=" + nextEncoded("/settings?tab=special-dates")) } method="post">

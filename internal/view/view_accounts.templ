@@ -3,18 +3,19 @@ package view;
 import (
 	"strconv"
 
+	"github.com/SimonSchneider/pefigo/internal/model"
 	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
 
-templ PageAccounts(view *AccountsView) {
+templ PageAccounts(view *model.AccountsView) {
 	@Layout("/accounts", AccountsContent(view))
 }
 
-templ PageEditAccount(view *AccountEditView2) {
+templ PageEditAccount(view *model.AccountEditView) {
 	@Layout("/accounts", EditAccountContent(view))
 }
 
-templ EditAccountContent(view *AccountEditView2) {
+templ EditAccountContent(view *model.AccountEditView) {
 	<main class="flex-1 flex flex-col min-h-0">
 		if view.IsEdit() {
 			@Header("Edit Account", DeleteAccountButton(view.Account.ID))
@@ -33,7 +34,7 @@ templ DeleteAccountButton(id string) {
 	</form>
 }
 
-templ AccountForm(view *AccountEditView2) {
+templ AccountForm(view *model.AccountEditView) {
 	{{ balanceUpperLimit := "" }}
 	if view.Account.BalanceUpperLimit != nil {
 		{{ balanceUpperLimit = strconv.FormatFloat(*view.Account.BalanceUpperLimit, 'f', -1, 64) }}
@@ -234,7 +235,7 @@ templ AccountForm(view *AccountEditView2) {
 								for _, growthModel := range view.GrowthModels {
 									@GrowthModelRow(view.Account.ID, growthModel)
 								}
-								@GrowthModelRow(view.Account.ID, GrowthModel{})
+								@GrowthModelRow(view.Account.ID, model.GrowthModel{})
 							</div>
 						</div>
 					</div>
@@ -255,7 +256,7 @@ templ AccountForm(view *AccountEditView2) {
 	</div>
 }
 
-templ StartupEventTimeline(view *AccountEditView2) {
+templ StartupEventTimeline(view *model.AccountEditView) {
 	<!-- Delete forms -->
 	for _, round := range view.InvestmentRounds {
 		<form id={ "delete-round-form-" + round.ID } action={ "/investment-rounds/" + round.ID + "/delete?next=" + templ.EscapeString("/accounts/"+view.Account.ID+"/edit") } method="post"></form>
@@ -280,7 +281,7 @@ templ StartupEventTimeline(view *AccountEditView2) {
 				for _, round := range view.InvestmentRounds {
 					@InvestmentRoundRow(view.Account.ID, round)
 				}
-				@InvestmentRoundRow(view.Account.ID, InvestmentRound{})
+				@InvestmentRoundRow(view.Account.ID, model.InvestmentRound{})
 			</div>
 		</div>
 	</div>
@@ -297,7 +298,7 @@ templ StartupEventTimeline(view *AccountEditView2) {
 				for _, sc := range view.ShareChanges {
 					@ShareChangeRow(view.Account.ID, sc)
 				}
-				@ShareChangeRow(view.Account.ID, ShareChange{})
+				@ShareChangeRow(view.Account.ID, model.ShareChange{})
 			</div>
 		</div>
 	</div>
@@ -316,13 +317,13 @@ templ StartupEventTimeline(view *AccountEditView2) {
 				for _, option := range view.Options {
 					@StartupShareOptionRow(view.Account.ID, view.Accounts, option)
 				}
-				@StartupShareOptionRow(view.Account.ID, view.Accounts, StartupShareOption{})
+				@StartupShareOptionRow(view.Account.ID, view.Accounts, model.StartupShareOption{})
 			</div>
 		</div>
 	</div>
 }
 
-templ InvestmentRoundRow(accountID string, round InvestmentRound) {
+templ InvestmentRoundRow(accountID string, round model.InvestmentRound) {
 	<form method="post" action={ "/investment-rounds/?next=" + templ.EscapeString("/accounts/"+accountID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ round.ID }/>
@@ -349,7 +350,7 @@ templ InvestmentRoundRow(accountID string, round InvestmentRound) {
 	</form>
 }
 
-templ ShareChangeRow(accountID string, sc ShareChange) {
+templ ShareChangeRow(accountID string, sc model.ShareChange) {
 	<form method="post" action={ "/share-changes/?next=" + templ.EscapeString("/accounts/"+accountID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ sc.ID }/>
@@ -375,7 +376,7 @@ templ ShareChangeRow(accountID string, sc ShareChange) {
 	</form>
 }
 
-templ StartupShareOptionRow(accountID string, accounts []Account, option StartupShareOption) {
+templ StartupShareOptionRow(accountID string, accounts []model.Account, option model.StartupShareOption) {
 	<form method="post" action={ "/startup-share-options/?next=" + templ.EscapeString("/accounts/"+accountID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ option.ID }/>
@@ -415,21 +416,21 @@ templ StartupShareOptionRow(accountID string, accounts []Account, option Startup
 	</form>
 }
 
-templ GrowthModelRow(accountID string, growthModel GrowthModel) {
+templ GrowthModelRow(accountID string, growthModel model.GrowthModel) {
 	<form method="post" action={ "/growth-models/?next=" + templ.EscapeString("/accounts/"+accountID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ growthModel.ID }/>
 			<input type="hidden" name="account_id" value={ accountID }/>
 			<select class="select select-xs w-full" name="type">
 				<option
-					value={ GrowthModelFixed }
-					if growthModel.Type == GrowthModelFixed || growthModel.ID == "" {
+					value={ model.GrowthModelFixed }
+					if growthModel.Type == model.GrowthModelFixed || growthModel.ID == "" {
 						selected
 					}
 				>Fixed</option>
 				<option
-					value={ GrowthModelLogNormal }
-					if growthModel.Type == GrowthModelLogNormal {
+					value={ model.GrowthModelLogNormal }
+					if growthModel.Type == model.GrowthModelLogNormal {
 						selected
 					}
 				>Lognormal</option>
@@ -456,16 +457,16 @@ templ GrowthModelRow(accountID string, growthModel GrowthModel) {
 	</form>
 }
 
-templ AccountsStatCardRow(view *AccountsView) {
+templ AccountsStatCardRow(view *model.AccountsView) {
 	<div class="flex flex-row flex-wrap gap-4">
-		@StatCard("Total Balance", ui.FormatWithThousands(view.TotalBalance), "Total balance of all accounts", IconTrendingUp("w-10 h-10 text-green-600"))
+		@StatCard("Net Worth", ui.FormatWithThousands(view.NetWorth.Total), "Total balance of all accounts", IconTrendingUp("w-10 h-10 text-green-600"))
 		@StatCard("Total Accounts", strconv.Itoa(len(view.Accounts)), "number of accounts", IconCashBanknote("w-10 h-10"))
-		@StatCard("Assets", ui.FormatWithThousands(view.TotalAssets), "Total assets", IconTrendingUp("w-10 h-10 text-green-600"))
-		@StatCard("Liabilities", ui.FormatWithThousands(-view.TotalLiabilities), "Total liabilities", IconTrendingDown("w-10 h-10 text-red-600"))
+		@StatCard("Assets", ui.FormatWithThousands(view.NetWorth.Assets), "Total assets", IconTrendingUp("w-10 h-10 text-green-600"))
+		@StatCard("Liabilities", ui.FormatWithThousands(view.NetWorth.Liabilities), "Total liabilities", IconTrendingDown("w-10 h-10 text-red-600"))
 	</div>
 }
 
-templ AccountTableRow(view *AccountsView, account *AccountDetailed) {
+templ AccountTableRow(view *model.AccountsView, account *model.AccountDetailed) {
 	<tr class="hover:bg-base-200/50 transition-colors">
 		<td class="font-medium">{ account.Name }</td>
 		<td>
@@ -491,8 +492,8 @@ templ AccountTableRow(view *AccountsView, account *AccountDetailed) {
 			if account.GrowthModel != nil {
 				<span
 					class={ "badge",
-					templ.KV("badge-primary", account.GrowthModel.Type == GrowthModelFixed),
-					templ.KV("badge-secondary", account.GrowthModel.Type == GrowthModelLogNormal) }
+					templ.KV("badge-primary", account.GrowthModel.Type == model.GrowthModelFixed),
+					templ.KV("badge-secondary", account.GrowthModel.Type == model.GrowthModelLogNormal) }
 				>{ account.GrowthModel.Type }</span>
 			} else {
 				<span class="text-base-content/50"></span>
@@ -535,7 +536,7 @@ templ NewAccountButton() {
 	</a>
 }
 
-templ AccountsFilter(at []AccountTypeWithFilter) {
+templ AccountsFilter(at []model.AccountTypeWithFilter) {
 	<form method="get">
 		<div class="join">
 			for _, accountType := range at {
@@ -554,7 +555,7 @@ templ AccountsFilter(at []AccountTypeWithFilter) {
 	</form>
 }
 
-templ AccountsContent(view *AccountsView) {
+templ AccountsContent(view *model.AccountsView) {
 	<main class="flex-1 flex flex-col min-h-0">
 		@Header("Accounts", AccountsFilter(view.AccountTypes), NewAccountButton())
 		<div class="flex-1 p-6 overflow-auto bg-base-100">

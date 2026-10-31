@@ -9,6 +9,7 @@ import (
 
 	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/internal/pdb"
+	"github.com/SimonSchneider/pefigo/pkg/currency"
 )
 
 const (
@@ -159,4 +160,50 @@ func (s *Service) SetForecastSettings(ctx context.Context, inp ForecastSettingsI
 		return fmt.Errorf("saving the forecast settings: %w", err)
 	}
 	return nil
+}
+
+type SettingsView struct {
+	AccountTypes     []AccountType
+	Categories       []TransferTemplateCategory
+	SpecialDates     []SpecialDate
+	SweYearlyParams  []SweYearlyParams
+	CurrentCurrency  string
+	Currencies       []currency.Currency
+	ForecastSettings ForecastSettings
+}
+
+func (s *Service) GetSettingsPageData(ctx context.Context) (*SettingsView, error) {
+	accountTypes, err := s.ListAccountTypes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing account types: %w", err)
+	}
+	categories, err := s.ListCategories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing categories: %w", err)
+	}
+	specialDates, err := s.ListSpecialDates(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing special dates: %w", err)
+	}
+	ibbs, err := s.ListSweYearlyParams(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing swe yearly params: %w", err)
+	}
+	cur, err := s.GetDefaultCurrency(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting default currency: %w", err)
+	}
+	forecastSettings, err := s.GetForecastSettings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting forecast settings: %w", err)
+	}
+	return &SettingsView{
+		AccountTypes:     accountTypes,
+		Categories:       categories,
+		SpecialDates:     specialDates,
+		SweYearlyParams:  ibbs,
+		CurrentCurrency:  cur,
+		Currencies:       currency.SupportedCurrencies(),
+		ForecastSettings: forecastSettings,
+	}, nil
 }

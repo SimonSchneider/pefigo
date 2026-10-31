@@ -83,3 +83,11 @@ func (s *Service) DeleteCategory(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+type TransferTemplateCategoryEditView struct {
+	Category TransferTemplateCategory
+}
+
+func (v TransferTemplateCategoryEditView) IsEdit() bool {
+	return v.Category.ID != ""
+}

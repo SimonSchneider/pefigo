@@ -3,15 +3,16 @@ package view
 import (
 	"fmt"
 
+	"github.com/SimonSchneider/pefigo/internal/model"
 	"github.com/SimonSchneider/pefigo/pkg/currency"
 	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
 
-templ PageSettings(view *SettingsPageView, activeTab string) {
+templ PageSettings(view *model.SettingsView, activeTab string) {
 	@Layout("/settings", settingsContent(view, activeTab))
 }
 
-templ settingsContent(view *SettingsPageView, activeTab string) {
+templ settingsContent(view *model.SettingsView, activeTab string) {
 	<main class="flex-1 flex flex-col min-h-0">
 		@Header("Settings")
 		<div class="flex-1 p-6 overflow-auto bg-base-100">
@@ -78,7 +79,7 @@ templ settingsContent(view *SettingsPageView, activeTab string) {
 	</main>
 }
 
-templ settingsTabCategories(view *SettingsPageView) {
+templ settingsTabCategories(view *model.SettingsView) {
 	<div class="flex flex-col gap-6">
 		<div class="card bg-base-100 shadow-sm border border-base-300">
 			<div class="card-body">
@@ -211,7 +212,7 @@ templ settingsTabCurrency(currentCurrency string, currencies []currency.Currency
 	</div>
 }
 
-templ settingsTabSweYearlyParams(params []SweYearlyParams) {
+templ settingsTabSweYearlyParams(params []model.SweYearlyParams) {
 	<div class="flex flex-col gap-4">
 		<div class="flex justify-end">
 			@NewButton("/settings/swe-yearly-params/new", IconPlus("w-4 h-4"), "New")
@@ -267,7 +268,7 @@ templ settingsTabSweYearlyParams(params []SweYearlyParams) {
 	</div>
 }
 
-templ settingsTabSpecialDates(specialDates []SpecialDate) {
+templ settingsTabSpecialDates(specialDates []model.SpecialDate) {
 	<div class="flex flex-col gap-4">
 		<div class="flex justify-end">
 			@NewButton("/special-dates/new", IconPlus("w-4 h-4"), "New Special Date")
@@ -321,7 +322,7 @@ templ settingsTabSpecialDates(specialDates []SpecialDate) {
 	</div>
 }
 
-templ settingsTabForecast(view *SettingsPageView) {
+templ settingsTabForecast(view *model.SettingsView) {
 	<div class="max-w-lg mx-auto">
 		<form action={ templ.SafeURL("/settings/forecast?next=" + nextEncoded("/settings?tab=forecast")) } method="post">
 			<div class="card bg-base-100 shadow-sm border border-base-300">
@@ -332,17 +333,17 @@ templ settingsTabForecast(view *SettingsPageView) {
 					</p>
 					<div class="form-control mb-4">
 						<label class="label"><span class="label-text font-medium">Sample Count</span></label>
-						<input type="number" name="samples" class="input input-bordered w-full" value={ fmt.Sprintf("%d", view.ForecastSettings.Samples) } placeholder={ fmt.Sprintf("%d", DefaultForecastSamples) } min={ fmt.Sprintf("%d", MinForecastSamples) } max={ fmt.Sprintf("%d", MaxForecastSamples) } step="100"/>
+						<input type="number" name="samples" class="input input-bordered w-full" value={ fmt.Sprintf("%d", view.ForecastSettings.Samples) } placeholder={ fmt.Sprintf("%d", model.DefaultForecastSamples) } min={ fmt.Sprintf("%d", model.MinForecastSamples) } max={ fmt.Sprintf("%d", model.MaxForecastSamples) } step="100"/>
 						<label class="label"><span class="label-text-alt text-base-content/60">Higher values give more accurate results but take longer to compute</span></label>
 					</div>
 					<div class="form-control mb-4">
 						<label class="label"><span class="label-text font-medium">Forecast interval</span></label>
-						<input type="text" name="snapshot_interval" class="input input-bordered w-full" value={ string(view.ForecastSettings.Interval) } placeholder={ string(DefaultForecastInterval) }/>
+						<input type="text" name="snapshot_interval" class="input input-bordered w-full" value={ string(view.ForecastSettings.Interval) } placeholder={ string(model.DefaultForecastInterval) }/>
 						<label class="label"><span class="label-text-alt text-base-content/60">Date pattern: *-01-01 (yearly), *-*/6-01 (6 months), *-*-01 (monthly)</span></label>
 					</div>
 					<div class="form-control mb-4">
 						<label class="label"><span class="label-text font-medium">Forecast starts on</span></label>
-						<input type="text" name="start_days" class="input input-bordered w-full" value={ string(view.ForecastSettings.StartDays) } placeholder={ string(DefaultForecastStartDays) }/>
+						<input type="text" name="start_days" class="input input-bordered w-full" value={ string(view.ForecastSettings.StartDays) } placeholder={ string(model.DefaultForecastStartDays) }/>
 						<p class="text-xs text-base-content/60 mt-1">
 							Date pattern. The Forecast starts on the first matching day on or after the latest Snapshot; Transfers before then are taken to be in the Snapshots. *-*-* starts on the Snapshot's day; *-*-28 suits Snapshots recorded after the 25th–27th Transfers.
 						</p>

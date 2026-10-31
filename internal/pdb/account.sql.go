@@ -418,25 +418,6 @@ func (q *Queries) GetShareChange(ctx context.Context, id string) (ShareChange, e
 	return i, err
 }
 
-const getSnapshot = `-- name: GetSnapshot :one
-SELECT account_id, date, balance
-FROM account_snapshot
-WHERE account_id = ?
-  AND date = ?
-`
-
-type GetSnapshotParams struct {
-	AccountID string
-	Date      int64
-}
-
-func (q *Queries) GetSnapshot(ctx context.Context, arg GetSnapshotParams) (AccountSnapshot, error) {
-	row := q.db.QueryRowContext(ctx, getSnapshot, arg.AccountID, arg.Date)
-	var i AccountSnapshot
-	err := row.Scan(&i.AccountID, &i.Date, &i.Balance)
-	return i, err
-}
-
 const getSnapshotsByAccount = `-- name: GetSnapshotsByAccount :many
 SELECT account_id, date, balance
 FROM account_snapshot

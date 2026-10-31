@@ -15,11 +15,20 @@ import (
 	"github.com/SimonSchneider/pefigo/pkg/uncertain"
 )
 
+// The types of what a generated Transfer Template is generated from (TransferTemplateSource.Type).
+const (
+	TransferSourceSalary = "salary"
+	TransferSourceBill   = "bill"
+)
+
+// TransferTemplateSource is what a Transfer Template is generated from: a Salary or a Bill, or nothing
+// for a stored Transfer Template.
 type TransferTemplateSource struct {
-	Type     string // "", "salary" (empty = DB)
-	EntityID string
+	Type     string // "" for a stored Transfer Template, TransferSourceSalary or TransferSourceBill
+	EntityID string // the ID of the Salary or Bill
 	Label    string
-	EditURL  string
+	// BillAccountID is the Bill Account of a Bill source, which lists the Bill.
+	BillAccountID string
 
 	// recurrenceRow names the stored row a generated Transfer Template's recurrence is from, such as
 	// its Bill account, for an error about it.
@@ -233,4 +242,106 @@ func (s *Service) DeleteTransferTemplate(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to delete template: %w", err)
 	}
 	return nil
+}
+
+type TransferTemplateEditView struct {
+	TransferTemplate TransferTemplate
+	Accounts         []Account
+	Categories       []TransferTemplateCategory
+}
+
+func (c TransferTemplateEditView) IsEdit() bool {
+	return c.TransferTemplate.ID != ""
+}
+
+type TransferTemplatesView struct {
+	Rows            []TransferScheduleRow
+	Accounts        map[string]Account
+	Categories      map[string]TransferTemplateCategory
+	MonthlyIncome   float64
+	MonthlyExpenses float64
+}
+
+func newTransferTemplatesView(day *TransferScheduleDay, accounts []Account, categories []TransferTemplateCategory) *TransferTemplatesView {
+	v := &TransferTemplatesView{
+		Rows:       day.Rows(),
+		Accounts:   KeyBy(accounts, func(a Account) string { return a.ID }),
+		Categories: KeyBy(categories, func(c TransferTemplateCategory) string { return c.ID }),
+	}
+	for _, t := range day.Monthly() {
+		switch t.Kind() {
+		case TransferIncome:
+			v.MonthlyIncome += t.Amount
+		case TransferExpense:
+			v.MonthlyExpenses -= t.Amount
+		}
+	}
+	return v
+}
+
+func (v *TransferTemplatesView) GetBudgetCategory(id *string) *TransferTemplateCategory {
+	if id == nil {
+		return nil
+	}
+	cat, ok := v.Categories[*id]
+	if !ok {
+		return nil
+	}
+	return &cat
+}
+
+func (v *TransferTemplatesView) GetAccount(id string) *Account {
+	a := v.Accounts[id]
+	return &a
+}
+
+func (s *Service) GetTransferTemplatesPageData(ctx context.Context) (*TransferTemplatesView, error) {
+	schedule, err := s.TransferSchedule(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("loading transfer schedule: %w", err)
+	}
+	accounts, err := s.ListAccounts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing accounts: %w", err)
+	}
+	categories, err := s.ListCategories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing categories: %w", err)
+	}
+	return newTransferTemplatesView(schedule.On(date.Today()), accounts, categories), nil
+}
+
+func (s *Service) GetTransferTemplateNewPageData(ctx context.Context) (*TransferTemplateEditView, error) {
+	accs, err := s.ListAccounts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing accounts: %w", err)
+	}
+	categories, err := s.ListCategories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing categories: %w", err)
+	}
+	return &TransferTemplateEditView{
+		Accounts:   accs,
+		Categories: categories,
+	}, nil
+}
+
+func (s *Service) GetTransferTemplateEditPageData(ctx context.Context, id string) (*TransferTemplateEditView, error) {
+	t, err := s.GetTransferTemplate(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("getting transfer template: %w", err)
+	}
+	accs, err := s.ListAccounts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing accounts: %w", err)
+	}
+	categories, err := s.ListCategories(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing categories: %w", err)
+	}
+	return &TransferTemplateEditView{
+		Accounts:         accs,
+		TransferTemplate: t,
+		Categories:       categories,
+	}, nil
 }

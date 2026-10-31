@@ -1,10 +1,13 @@
 package view
 
-import "github.com/SimonSchneider/pefigo/pkg/ui"
+import (
+	"github.com/SimonSchneider/pefigo/internal/model"
+	"github.com/SimonSchneider/pefigo/pkg/ui"
+)
 
 // ---- Account Type components ----
 
-templ AccountTypeBadge(at AccountType) {
+templ AccountTypeBadge(at model.AccountType) {
 	<span class="badge badge-sm font-medium" style={ ui.BadgeStyle(at.Color) }>{ at.Name }</span>
 }
 
@@ -12,7 +15,7 @@ templ PageEditAccountType(child templ.Component) {
 	@Layout("/settings", child)
 }
 
-templ AccountTypeEditView(accountType AccountType) {
+templ AccountTypeEditView(accountType model.AccountType) {
 	<main class="flex-1 flex flex-col min-h-0">
 		if accountType.ID != "" {
 			@Header("Edit Account Type", DeleteAccountTypeButton(accountType.ID))
@@ -31,7 +34,7 @@ templ DeleteAccountTypeButton(id string) {
 	</form>
 }
 
-templ AccountTypeForm(accountType AccountType) {
+templ AccountTypeForm(accountType model.AccountType) {
 	<div class="flex-1 p-6 overflow-auto bg-base-100">
 		<div class="max-w-lg mx-auto">
 			<form action={ templ.SafeURL("/account-types/?next=" + nextEncoded("/settings?tab=categories")) } method="post">
@@ -57,7 +60,7 @@ templ AccountTypeForm(accountType AccountType) {
 
 // ---- Budget Category components ----
 
-templ CategoryBadge(cat TransferTemplateCategory) {
+templ CategoryBadge(cat model.TransferTemplateCategory) {
 	if cat.Color != nil && *cat.Color != "" {
 		<span class="badge badge-sm font-medium" style={ ui.BadgeStyle(*cat.Color) }>{ cat.Name }</span>
 	} else {
@@ -65,11 +68,11 @@ templ CategoryBadge(cat TransferTemplateCategory) {
 	}
 }
 
-templ PageEditTransferTemplateCategory(view *TransferTemplateCategoryEditView) {
+templ PageEditTransferTemplateCategory(view *model.TransferTemplateCategoryEditView) {
 	@Layout("/settings", EditTransferTemplateCategoryContent(view))
 }
 
-templ EditTransferTemplateCategoryContent(view *TransferTemplateCategoryEditView) {
+templ EditTransferTemplateCategoryContent(view *model.TransferTemplateCategoryEditView) {
 	<main class="flex-1 flex flex-col min-h-0">
 		if view.IsEdit() {
 			@Header("Edit Category", DeleteCategoryButton(view.Category.ID))
@@ -88,7 +91,7 @@ templ DeleteCategoryButton(id string) {
 	</form>
 }
 
-templ CategoryForm(view *TransferTemplateCategoryEditView) {
+templ CategoryForm(view *model.TransferTemplateCategoryEditView) {
 	<div class="flex-1 p-6 overflow-auto bg-base-100">
 		<div class="max-w-lg mx-auto">
 			<form action={ templ.SafeURL("/transfer-template-categories/?next=" + nextEncoded("/settings?tab=categories")) } method="post">

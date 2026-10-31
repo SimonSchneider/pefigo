@@ -9,10 +9,11 @@ import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
 import (
+	"github.com/SimonSchneider/pefigo/internal/model"
 	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
 
-func PageDashboard(view *DashboardView) templ.Component {
+func PageDashboard(view *model.DashboardView) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -41,7 +42,7 @@ func PageDashboard(view *DashboardView) templ.Component {
 	})
 }
 
-func DashboardMainContent(view *DashboardView) templ.Component {
+func DashboardMainContent(view *model.DashboardView) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -74,15 +75,15 @@ func DashboardMainContent(view *DashboardView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = StatCard("Net Worth", ui.FormatWithThousands(view.TotalBalance), "Current net worth", IconTrendingUp("w-10 h-10")).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = StatCard("Net Worth", ui.FormatWithThousands(view.NetWorth.Total), "Current net worth", IconTrendingUp("w-10 h-10")).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = StatCard("Total Assets", ui.FormatWithThousands(view.TotalAssets), "Total assets", IconTrendingUp("w-10 h-10 text-success")).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = StatCard("Assets", ui.FormatWithThousands(view.NetWorth.Assets), "Total assets", IconTrendingUp("w-10 h-10 text-success")).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = StatCard("Total Liabilities", ui.FormatWithThousands(view.TotalLiabilities), "Total liabilities", IconTrendingDown("w-10 h-10 text-error")).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = StatCard("Liabilities", ui.FormatWithThousands(view.NetWorth.Liabilities), "Total liabilities", IconTrendingDown("w-10 h-10 text-error")).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

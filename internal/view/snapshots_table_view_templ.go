@@ -8,9 +8,12 @@ package view
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import "github.com/SimonSchneider/goslu/date"
+import (
+	"github.com/SimonSchneider/goslu/date"
+	"github.com/SimonSchneider/pefigo/internal/model"
+)
 
-func PageSnapshotsTable(view *SnapshotsTableView) templ.Component {
+func PageSnapshotsTable(view *model.SnapshotsTableView) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -76,7 +79,7 @@ func SnapshotsTableNewRowButton() templ.Component {
 	})
 }
 
-func SnapshotsTableContent(view *SnapshotsTableView) templ.Component {
+func SnapshotsTableContent(view *model.SnapshotsTableView) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -117,7 +120,7 @@ func SnapshotsTableContent(view *SnapshotsTableView) templ.Component {
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(account.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/snapshots_table_view.templ`, Line: 32, Col: 26}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/snapshots_table_view.templ`, Line: 35, Col: 26}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 			if templ_7745c5c3_Err != nil {
@@ -146,7 +149,7 @@ func SnapshotsTableContent(view *SnapshotsTableView) templ.Component {
 	})
 }
 
-func SnapshotsTableRow(row *SnapshotsRow) templ.Component {
+func SnapshotsTableRow(row *model.SnapshotsRow) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -194,7 +197,7 @@ func SnapshotsTableRow(row *SnapshotsRow) templ.Component {
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(row.Date.String())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/snapshots_table_view.templ`, Line: 90, Col: 29}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/snapshots_table_view.templ`, Line: 93, Col: 29}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {
@@ -207,7 +210,7 @@ func SnapshotsTableRow(row *SnapshotsRow) templ.Component {
 		var templ_7745c5c3_Var9 string
 		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(templ.SafeURL("/snapshots-table/modify-date?old-date=" + row.Date.String()))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/snapshots_table_view.templ`, Line: 91, Col: 89}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/snapshots_table_view.templ`, Line: 94, Col: 89}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 		if templ_7745c5c3_Err != nil {
@@ -231,7 +234,7 @@ func SnapshotsTableRow(row *SnapshotsRow) templ.Component {
 	})
 }
 
-func SnapshotCell(accountID string, date date.Date, snapshot AccountSnapshotCell) templ.Component {
+func SnapshotCell(accountID string, date date.Date, snapshot model.AccountSnapshotCell) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -253,9 +256,9 @@ func SnapshotCell(accountID string, date date.Date, snapshot AccountSnapshotCell
 		}
 		ctx = templ.ClearChildren(ctx)
 		var templ_7745c5c3_Var11 = []any{"px-3 py-2 text-sm text-base-content border-r border-base-300 last:border-r-0",
-			templ.KV("bg-base-100 text-base-content", snapshot.Change == BalanceUnchanged),
-			templ.KV("bg-success text-success-content", snapshot.Change == BalanceIncreased),
-			templ.KV("bg-error text-error-content", snapshot.Change == BalanceDecreased),
+			templ.KV("bg-base-100 text-base-content", snapshot.Change == model.BalanceUnchanged),
+			templ.KV("bg-success text-success-content", snapshot.Change == model.BalanceIncreased),
+			templ.KV("bg-error text-error-content", snapshot.Change == model.BalanceDecreased),
 		}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var11...)
 		if templ_7745c5c3_Err != nil {
@@ -281,7 +284,7 @@ func SnapshotCell(accountID string, date date.Date, snapshot AccountSnapshotCell
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(getSnapshotValue(snapshot.AccountSnapshot))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/snapshots_table_view.templ`, Line: 117, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/snapshots_table_view.templ`, Line: 120, Col: 53}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 		if templ_7745c5c3_Err != nil {
@@ -294,7 +297,7 @@ func SnapshotCell(accountID string, date date.Date, snapshot AccountSnapshotCell
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(templ.SafeURL("/accounts/" + accountID + "/snapshots/" + date.String() + "/"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/snapshots_table_view.templ`, Line: 118, Col: 90}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/snapshots_table_view.templ`, Line: 121, Col: 90}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 		if templ_7745c5c3_Err != nil {
@@ -308,7 +311,7 @@ func SnapshotCell(accountID string, date date.Date, snapshot AccountSnapshotCell
 	})
 }
 
-func getSnapshotValue(snapshot AccountSnapshot) string {
+func getSnapshotValue(snapshot model.AccountSnapshot) string {
 	if !snapshot.Balance.Valid() {
 		return ""
 	}

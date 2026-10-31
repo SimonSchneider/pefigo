@@ -8,7 +8,9 @@ package view
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-func PageTransfersChart(groupBy TransferChartGroupBy) templ.Component {
+import "github.com/SimonSchneider/pefigo/internal/model"
+
+func PageTransfersChart(groupBy model.TransferChartGroupBy) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -37,7 +39,7 @@ func PageTransfersChart(groupBy TransferChartGroupBy) templ.Component {
 	})
 }
 
-func TransfersChartContent(groupBy TransferChartGroupBy) templ.Component {
+func TransfersChartContent(groupBy model.TransferChartGroupBy) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -74,7 +76,7 @@ func TransfersChartContent(groupBy TransferChartGroupBy) templ.Component {
 	})
 }
 
-func TransfersChartControls(groupBy TransferChartGroupBy) templ.Component {
+func TransfersChartControls(groupBy model.TransferChartGroupBy) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {

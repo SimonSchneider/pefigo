@@ -53,11 +53,6 @@ SELECT *
 FROM account_snapshot
 ORDER BY account_id,
   date;
--- name: GetSnapshot :one
-SELECT *
-FROM account_snapshot
-WHERE account_id = ?
-  AND date = ?;
 -- name: UpsertSnapshot :one
 INSERT INTO account_snapshot (account_id, date, balance)
 VALUES (?, ?, ?) ON CONFLICT (account_id, date) DO

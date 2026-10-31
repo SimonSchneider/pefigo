@@ -404,11 +404,8 @@ func TestGetDashboardData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get dashboard data: %v", err)
 	}
-	if dashboard.TotalBalance != 5000 {
-		t.Fatalf("expected total balance 5000, got %f", dashboard.TotalBalance)
-	}
-	if dashboard.TotalAssets != 5000 {
-		t.Fatalf("expected total assets 5000, got %f", dashboard.TotalAssets)
+	if want := (model.NetWorth{Total: 5000, Assets: 5000}); dashboard.NetWorth != want {
+		t.Fatalf("expected the Net Worth %+v, got %+v", want, dashboard.NetWorth)
 	}
 	if len(dashboard.AccountTypeGroups) != 1 {
 		t.Fatalf("expected 1 account type group, got %d", len(dashboard.AccountTypeGroups))
@@ -453,57 +450,6 @@ func TestGetBudgetData(t *testing.T) {
 	}
 	if budget.Categories[0].Category.Name != "Housing" {
 		t.Fatalf("expected Housing category, got %s", budget.Categories[0].Category.Name)
-	}
-}
-
-// ---- Categories Page Data ----
-
-func TestGetCategoriesPageData(t *testing.T) {
-	svc := newTestService(t)
-	ctx := t.Context()
-
-	at, err := svc.UpsertAccountType(ctx, model.AccountTypeInput{Name: "Savings", Color: "#00ff00"})
-	if err != nil {
-		t.Fatalf("create account type: %v", err)
-	}
-
-	color := "#abcdef"
-	cat, err := svc.UpsertCategory(ctx, model.TransferTemplateCategoryInput{Name: "Housing", Color: &color})
-	if err != nil {
-		t.Fatalf("create category: %v", err)
-	}
-
-	view, err := svc.GetCategoriesPageData(ctx)
-	if err != nil {
-		t.Fatalf("get categories page data: %v", err)
-	}
-	if len(view.AccountTypes) != 1 {
-		t.Fatalf("expected 1 account type, got %d", len(view.AccountTypes))
-	}
-	if view.AccountTypes[0].Name != at.Name {
-		t.Fatalf("expected account type %s, got %s", at.Name, view.AccountTypes[0].Name)
-	}
-	if len(view.Categories) != 1 {
-		t.Fatalf("expected 1 category, got %d", len(view.Categories))
-	}
-	if view.Categories[0].Name != cat.Name {
-		t.Fatalf("expected category %s, got %s", cat.Name, view.Categories[0].Name)
-	}
-}
-
-func TestGetCategoriesPageDataEmpty(t *testing.T) {
-	svc := newTestService(t)
-	ctx := t.Context()
-
-	view, err := svc.GetCategoriesPageData(ctx)
-	if err != nil {
-		t.Fatalf("get categories page data: %v", err)
-	}
-	if len(view.AccountTypes) != 0 {
-		t.Fatalf("expected 0 account types, got %d", len(view.AccountTypes))
-	}
-	if len(view.Categories) != 0 {
-		t.Fatalf("expected 0 categories, got %d", len(view.Categories))
 	}
 }
 
@@ -2745,7 +2691,7 @@ func TestBillAmountCRUD(t *testing.T) {
 	}
 }
 
-// ---- BillsPageData ----
+// ---- BillsView ----
 
 func TestBillAccountsPageDataIncludesCategories(t *testing.T) {
 	svc := newTestService(t)
