@@ -956,8 +956,10 @@ func (h *Handler) forecastSettingsSave() http.Handler {
 	})
 }
 
-// dashboardForecastStream streams the Dashboard Forecast: the history and marklines, then the
-// stored forecast as the events that would have built it, then every change as it happens.
+// dashboardForecastStream streams the Dashboard Forecast: the setup (the series with their Balance
+// History, and the marklines), then the stored forecast as the events that would have built it, then
+// every change as it happens. Every Forecast Run that starts after connecting follows a Forecast
+// Input write, so the current setup is sent again before its started.
 func (h *Handler) dashboardForecastStream() http.Handler {
 	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		sub, err := h.svc.DashboardForecast().Subscribe(ctx)
@@ -965,21 +967,13 @@ func (h *Handler) dashboardForecastStream() http.Handler {
 			return fmt.Errorf("subscribing to the dashboard forecast: %w", err)
 		}
 		defer sub.Unsubscribe()
-		history, err := h.svc.GetDashboardForecastHistory(ctx, sub.Rows)
+		setup, err := h.svc.GetDashboardForecastHistory(ctx, sub.Rows)
 		if err != nil {
 			return fmt.Errorf("getting the dashboard forecast history: %w", err)
 		}
 
 		sse := srvu.SSEResponse(w)
-		for _, series := range history.Series {
-			if err := sse.SendNamedJson("entity", series); err != nil {
-				return err
-			}
-		}
-		if err := sse.SendNamedJson("marklines", history.Marklines); err != nil {
-			return err
-		}
-		if err := sse.SendEventWithoutData("setup-done"); err != nil {
+		if err := sse.SendNamedJson("setup", setup); err != nil {
 			return err
 		}
 		for _, evt := range forecastSubscriptionEvents(sub) {
@@ -994,6 +988,16 @@ func (h *Handler) dashboardForecastStream() http.Handler {
 			case evt, ok := <-sub.Events:
 				if !ok {
 					return nil
+				}
+				if evt.Type == model.ForecastEventStarted {
+					// The Forecast Run has just cleared the stored rows, so none adds a series.
+					setup, err := h.svc.GetDashboardForecastHistory(ctx, nil)
+					if err != nil {
+						return fmt.Errorf("refreshing the dashboard forecast history: %w", err)
+					}
+					if err := sse.SendNamedJson("setup", setup); err != nil {
+						return err
+					}
 				}
 				if err := sendForecastEvent(sse, evt); err != nil {
 					return err

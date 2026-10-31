@@ -42,15 +42,16 @@
     var durationSelect = document.getElementById('forecast-duration');
 
     // Client state, rebuilt from scratch on every EventSource (re)connect.
-    // series maps an Account Type ID to its history points, which arrive once
-    // in the initial payload, and its forecast points, which every Forecast
-    // Run clears and refills. seriesOrder keeps the order the series arrived in.
-    // Every point is [date, balance], with the date as "YYYY-MM-DD": the history
-    // ends today and the forecast starts after it, so they join in date order.
+    // series maps an Account Type ID to its name, colour and history points,
+    // which every setup replaces, and to its forecast points, which every
+    // Forecast Run clears and refills. seriesOrder is the order of the latest
+    // setup. Every point is [date, balance], with the date as "YYYY-MM-DD": the
+    // history ends today and the forecast starts after it, so they join in
+    // date order.
     var series = {};
     var seriesOrder = [];
     var allMarklines = [];
-    var setupDone = false;
+    var hasSetup = false;
     var renderPending = false;
 
     // getMaxDate is the last date to show, as "YYYY-MM-DD" so it compares with
@@ -88,7 +89,7 @@
         series = {};
         seriesOrder = [];
         allMarklines = [];
-        setupDone = false;
+        hasSetup = false;
         hideLoading();
         hideFailure();
     }
@@ -97,18 +98,29 @@
         return [p.date, p.balance];
     }
 
-    function addEntity(e) {
-        var id = e.id;
-        if (!series[id]) seriesOrder.push(id);
-        series[id] = {
-            name: e.name,
-            color: e.color || '#666',
-            history: (e.history || []).map(toPoint),
-            forecast: []
-        };
+    // applySetup replaces the series and the marklines with the setup's. A
+    // series the setup no longer has is removed and a new one starts without
+    // forecast points. The others keep theirs: only a starting Forecast Run
+    // clears forecast points, and the server sends its started right after.
+    function applySetup(data) {
+        var next = {};
+        seriesOrder = (data.series || []).map(function(e) {
+            var prev = series[e.id];
+            next[e.id] = {
+                name: e.name,
+                color: e.color || '#666',
+                history: (e.history || []).map(toPoint),
+                forecast: prev ? prev.forecast : []
+            };
+            return e.id;
+        });
+        series = next;
+        allMarklines = data.marklines || [];
+        hasSetup = true;
     }
 
-    // Forecast points of an Account Type that no longer exists have no series.
+    // Forecast points of an Account Type the latest setup has no series for
+    // are dropped.
     function addForecastPoint(p) {
         var entry = series[p.id];
         if (!entry) return;
@@ -219,14 +231,14 @@
     }
 
     // Live snapshots arrive one at a time, so renders are coalesced to at most
-    // one per frame. Nothing renders until the initial payload's setup-done, so
-    // a reconnect keeps showing the previous chart until the new one is ready.
+    // one per frame. Nothing renders until the first setup, so a reconnect
+    // keeps showing the previous chart until the new one is ready.
     function scheduleRender() {
-        if (!setupDone || renderPending) return;
+        if (!hasSetup || renderPending) return;
         renderPending = true;
         requestAnimationFrame(function() {
             renderPending = false;
-            if (setupDone) updateChart();
+            if (hasSetup) updateChart();
         });
     }
 
@@ -236,16 +248,10 @@
         resetState();
     });
 
-    evtSource.addEventListener('entity', function(event) {
-        addEntity(JSON.parse(event.data));
-    });
-
-    evtSource.addEventListener('marklines', function(event) {
-        allMarklines = JSON.parse(event.data) || [];
-    });
-
-    evtSource.addEventListener('setup-done', function() {
-        setupDone = true;
+    // The setup arrives first on every connection, and again before every
+    // Forecast Run that starts while connected.
+    evtSource.addEventListener('setup', function(event) {
+        applySetup(JSON.parse(event.data) || {});
         scheduleRender();
     });
 

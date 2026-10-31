@@ -139,7 +139,7 @@ func emitting(rows []model.ForecastCacheRow, err error) computeFunc {
 }
 
 // streamFixture is a started Dashboard Forecast with fake timers and a fake compute, served by the
-// app's handler. Savings has history and Pension has none, so Pension only gets an entity when it
+// app's handler. Savings has history and Pension has none, so Pension only gets a series when it
 // has forecast rows.
 type streamFixture struct {
 	svc     *model.Service
@@ -147,7 +147,9 @@ type streamFixture struct {
 	srv     *httptest.Server
 	savings model.AccountType
 	pension model.AccountType
-	special model.SpecialDate
+	// savingsAccount is the account of Savings, with one Snapshot on historyDate.
+	savingsAccount model.Account
+	special        model.SpecialDate
 	// compute is what each Forecast Run predicts with. Set it before firing the timer.
 	compute computeFunc
 }
@@ -177,11 +179,10 @@ func newStreamFixture(t *testing.T) *streamFixture {
 	if fx.pension, err = svc.UpsertAccountType(ctx, model.AccountTypeInput{Name: "Pension", Color: "#0000ff"}); err != nil {
 		t.Fatalf("create account type: %v", err)
 	}
-	acc, err := svc.UpsertAccount(ctx, model.AccountInput{Name: "My Savings", TypeID: fx.savings.ID})
-	if err != nil {
+	if fx.savingsAccount, err = svc.UpsertAccount(ctx, model.AccountInput{Name: "My Savings", TypeID: fx.savings.ID}); err != nil {
 		t.Fatalf("create account: %v", err)
 	}
-	if _, err := svc.UpsertAccountSnapshot(ctx, acc.ID, model.AccountSnapshotInput{Date: historyDate(t), Balance: uncertain.NewFixed(10000)}); err != nil {
+	if _, err := svc.UpsertAccountSnapshot(ctx, fx.savingsAccount.ID, model.AccountSnapshotInput{Date: historyDate(t), Balance: uncertain.NewFixed(10000)}); err != nil {
 		t.Fatalf("create snapshot: %v", err)
 	}
 	if fx.special, err = svc.UpsertSpecialDate(ctx, model.SpecialDateInput{Name: "Retirement", Date: date.Today().Add(2 * date.Year), Color: "#ff0000"}); err != nil {
@@ -212,8 +213,8 @@ func historyDate(t *testing.T) date.Date {
 	return d
 }
 
-// savingsEntity is Savings with its history point.
-func (fx *streamFixture) savingsEntity(t *testing.T) model.DashboardForecastSeries {
+// savingsSeries is Savings with its history point.
+func (fx *streamFixture) savingsSeries(t *testing.T) model.DashboardForecastSeries {
 	return model.DashboardForecastSeries{
 		ID:      fx.savings.ID,
 		Name:    "Savings",
@@ -222,8 +223,8 @@ func (fx *streamFixture) savingsEntity(t *testing.T) model.DashboardForecastSeri
 	}
 }
 
-// pensionEntity is Pension, which has no history points.
-func (fx *streamFixture) pensionEntity() model.DashboardForecastSeries {
+// pensionSeries is Pension, which has no history points.
+func (fx *streamFixture) pensionSeries() model.DashboardForecastSeries {
 	return model.DashboardForecastSeries{ID: fx.pension.ID, Name: "Pension", Color: "#0000ff", History: []model.BalancePoint{}}
 }
 
@@ -236,27 +237,32 @@ func (fx *streamFixture) stop() {
 	fx.svc.DashboardForecast().Stop()
 }
 
-// expectHistory expects the entities, the marklines of today and the Special Date, and setup-done.
-func (fx *streamFixture) expectHistory(s *sseStream, entities ...model.DashboardForecastSeries) {
-	s.t.Helper()
-	for _, want := range entities {
-		evt := s.expect("entity")
-		var got model.DashboardForecastSeries
-		decode(s.t, evt, &got)
-		if got.ID != want.ID || got.Name != want.Name || got.Color != want.Color || got.History == nil || !slices.Equal(got.History, want.History) {
-			s.t.Fatalf("expected entity %+v, got %+v", want, got)
-		}
-	}
-	var marklines []model.Markline
-	decode(s.t, s.expect("marklines"), &marklines)
-	wantMarklines := []model.Markline{
+// marklines are the date lines of today and the Special Date.
+func (fx *streamFixture) marklines() []model.Markline {
+	return []model.Markline{
 		{Date: date.Today(), Name: "Today"},
 		{Date: fx.special.Date, Color: "#ff0000", Name: "Retirement"},
 	}
-	if !slices.Equal(marklines, wantMarklines) {
-		s.t.Fatalf("expected marklines %+v, got %+v", wantMarklines, marklines)
+}
+
+// setup is the setup of the series, with the date lines of today and the Special Date.
+func (fx *streamFixture) setup(series ...model.DashboardForecastSeries) model.ForecastDashboardData {
+	return model.ForecastDashboardData{Series: series, Marklines: fx.marklines()}
+}
+
+// expectSetup expects a setup event that carries want. Every series' history must be a list, even
+// an empty one.
+func expectSetup(s *sseStream, want model.ForecastDashboardData) {
+	s.t.Helper()
+	var got model.ForecastDashboardData
+	decode(s.t, s.expect("setup"), &got)
+	sameSeries := func(got, want model.DashboardForecastSeries) bool {
+		return got.ID == want.ID && got.Name == want.Name && got.Color == want.Color &&
+			got.History != nil && slices.Equal(got.History, want.History)
 	}
-	s.expect("setup-done")
+	if !slices.EqualFunc(got.Series, want.Series, sameSeries) || !slices.Equal(got.Marklines, want.Marklines) {
+		s.t.Fatalf("expected the setup %+v, got %+v", want, got)
+	}
 }
 
 type sseEvent struct {
@@ -389,12 +395,12 @@ func decode(t *testing.T, evt sseEvent, v any) {
 	}
 }
 
-func TestDashboardForecastStreamWhenIdleSendsTheHistoryUntilStopped(t *testing.T) {
+func TestDashboardForecastStreamWhenIdleSendsTheSetupUntilStopped(t *testing.T) {
 	fx := newStreamFixture(t)
 
 	stream := fx.connect(t)
-	// No Forecast Run has stored a row yet, and the entity is still identified by its Account Type.
-	fx.expectHistory(stream, fx.savingsEntity(t))
+	// No Forecast Run has stored a row yet, and the series is still identified by its Account Type.
+	expectSetup(stream, fx.setup(fx.savingsSeries(t)))
 
 	// Stopping closes the subscription, which ends the stream without another event.
 	fx.stop()
@@ -407,24 +413,26 @@ func TestDashboardForecastStreamForwardsAForecastRunThatIsDone(t *testing.T) {
 	fx.compute = emitting(rows, nil)
 
 	live := fx.connect(t)
-	fx.expectHistory(live, fx.savingsEntity(t))
+	expectSetup(live, fx.setup(fx.savingsSeries(t)))
 	fx.timers.fire()
 	after := fx.connect(t)
 	// Stopping ends both streams, so a missing event fails at once instead of at the guard.
 	fx.stop()
 
+	// A Forecast Run that starts while connected is preceded by the current setup.
+	expectSetup(live, fx.setup(fx.savingsSeries(t)))
 	live.expect("started")
 	expectSnapshots(live, rows...)
 	live.expect("done")
 	live.expectEnd()
 
 	// Connecting after the Forecast Run was Done sends its rows, without started or done.
-	fx.expectHistory(after, fx.savingsEntity(t))
+	expectSetup(after, fx.setup(fx.savingsSeries(t)))
 	expectSnapshots(after, rows...)
 	after.expectEnd()
 }
 
-func TestDashboardForecastStreamMidRunSendsTheForecastRunSoFar(t *testing.T) {
+func TestDashboardForecastStreamMidRunSendsTheSetupOnceAndTheForecastRunSoFar(t *testing.T) {
 	fx := newStreamFixture(t)
 	rows := forecastRows(fx.pension.ID, 4)
 	paused, resume := make(chan struct{}), make(chan struct{})
@@ -448,14 +456,15 @@ func TestDashboardForecastStreamMidRunSendsTheForecastRunSoFar(t *testing.T) {
 	ran := fx.timers.fireInBackground()
 	<-paused
 	stream := fx.connect(t)
-	// Pension has no history, but it has forecast rows, so it gets an entity too.
-	fx.expectHistory(stream, fx.pensionEntity(), fx.savingsEntity(t))
-	// The handler subscribed before sending the history: it holds the first two rows, and the
+	// Pension has no history, but it has forecast rows, so it gets a series too.
+	expectSetup(stream, fx.setup(fx.pensionSeries(), fx.savingsSeries(t)))
+	// The handler subscribed before sending the setup: it holds the first two rows, and the
 	// other two arrive live.
 	close(resume)
 	<-ran
 	fx.stop()
 
+	// The Forecast Run started before connecting, so its started follows the setup directly.
 	stream.expect("started")
 	expectSnapshots(stream, rows...)
 	stream.expect("done")
@@ -468,18 +477,21 @@ func TestDashboardForecastStreamSendsAFailedForecastRun(t *testing.T) {
 	fx.compute = emitting(rows, errors.New("simulation diverged"))
 
 	live := fx.connect(t)
-	fx.expectHistory(live, fx.savingsEntity(t))
+	expectSetup(live, fx.setup(fx.savingsSeries(t)))
 	fx.timers.fire()
 	after := fx.connect(t)
 	fx.stop()
 
+	// Pension has no account, so only stored rows give it a series, and a starting Forecast Run
+	// has none yet.
+	expectSetup(live, fx.setup(fx.savingsSeries(t)))
 	live.expect("started")
 	expectSnapshots(live, rows...)
 	expectFailed(live, "simulation diverged")
 	live.expectEnd()
 
 	// Connecting after the Forecast Run Failed sends the rows it stored and the failure.
-	fx.expectHistory(after, fx.pensionEntity(), fx.savingsEntity(t))
+	expectSetup(after, fx.setup(fx.pensionSeries(), fx.savingsSeries(t)))
 	expectSnapshots(after, rows...)
 	expectFailed(after, "simulation diverged")
 	after.expectEnd()
@@ -495,7 +507,7 @@ func TestDashboardForecastStreamReturnsWhenTheClientGoesAway(t *testing.T) {
 	}))
 
 	stream := connect(t, srv)
-	fx.expectHistory(stream, fx.savingsEntity(t))
+	expectSetup(stream, fx.setup(fx.savingsSeries(t)))
 	stream.close()
 
 	guard, cancel := context.WithTimeout(t.Context(), streamGuard)
@@ -533,6 +545,16 @@ func expectDay(t *testing.T, raw json.RawMessage) {
 	}
 }
 
+// decodeList decodes the JSON list raw.
+func decodeList(t *testing.T, raw json.RawMessage) []json.RawMessage {
+	t.Helper()
+	var list []json.RawMessage
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatalf("expected a list, got %s: %v", raw, err)
+	}
+	return list
+}
+
 func TestDashboardForecastStreamSendsEveryPointAsADateAndABalance(t *testing.T) {
 	fx := newStreamFixture(t)
 	acc, err := fx.svc.UpsertAccount(t.Context(), model.AccountInput{Name: "No type"})
@@ -547,31 +569,25 @@ func TestDashboardForecastStreamSendsEveryPointAsADateAndABalance(t *testing.T) 
 	stream := fx.connect(t)
 	fx.stop()
 
-	var entities []string
-	for {
-		evt := stream.expect("entity", "marklines")
-		if evt.Name == "marklines" {
-			var marklines []json.RawMessage
-			decode(t, evt, &marklines)
-			for _, m := range marklines {
-				expectDay(t, expectFields(t, m, "date", "color", "name")["date"])
-			}
-			break
-		}
-		entity := expectFields(t, json.RawMessage(evt.Data), "id", "name", "color", "history")
-		entities = append(entities, string(entity["name"]))
-		var history []json.RawMessage
-		if err := json.Unmarshal(entity["history"], &history); err != nil || len(history) == 0 {
-			t.Fatalf("expected history points in %s (%v)", evt.Data, err)
+	setup := expectFields(t, json.RawMessage(stream.expect("setup").Data), "series", "marklines")
+	var names []string
+	for _, raw := range decodeList(t, setup["series"]) {
+		series := expectFields(t, raw, "id", "name", "color", "history")
+		names = append(names, string(series["name"]))
+		history := decodeList(t, series["history"])
+		if len(history) == 0 {
+			t.Fatalf("expected history points in %s", raw)
 		}
 		for _, p := range history {
 			expectDay(t, expectFields(t, p, "date", "balance")["date"])
 		}
 	}
-	if want := []string{`"Savings"`, `"Uncategorized"`}; !slices.Equal(entities, want) {
-		t.Fatalf("expected the entities %v, got %v", want, entities)
+	if want := []string{`"Savings"`, `"Uncategorized"`}; !slices.Equal(names, want) {
+		t.Fatalf("expected the series %v, got %v", want, names)
 	}
-	stream.expect("setup-done")
+	for _, m := range decodeList(t, setup["marklines"]) {
+		expectDay(t, expectFields(t, m, "date", "color", "name")["date"])
+	}
 	var ids []string
 	for range 4 {
 		snapshot := expectFields(t, json.RawMessage(stream.expect("snapshot").Data), "id", "date", "balance")
@@ -595,12 +611,110 @@ func TestDashboardForecastStreamWhenIdleSendsTheSeriesTheForecastProjects(t *tes
 	stream := fx.connect(t)
 	// Pension's account has no Snapshot, so Pension has no history and no stored rows yet, but a
 	// Forecast projects every account: the Forecast Run will fill it.
-	fx.expectHistory(stream, fx.pensionEntity(), fx.savingsEntity(t))
+	expectSetup(stream, fx.setup(fx.pensionSeries(), fx.savingsSeries(t)))
 	fx.timers.fire()
 	fx.stop()
 
+	expectSetup(stream, fx.setup(fx.pensionSeries(), fx.savingsSeries(t)))
 	stream.expect("started")
 	expectSnapshots(stream, rows...)
 	stream.expect("done")
+	stream.expectEnd()
+}
+
+func TestDashboardForecastStreamSendsTheCurrentSetupBeforeEachLiveForecastRun(t *testing.T) {
+	tests := map[string]struct {
+		// change writes Forecast Inputs while the page is connected, and returns the setup the
+		// Forecast Run that follows must be preceded by.
+		change func(t *testing.T, fx *streamFixture) model.ForecastDashboardData
+	}{
+		"a recorded Snapshot adds to the Balance History": {
+			change: func(t *testing.T, fx *streamFixture) model.ForecastDashboardData {
+				recorded := historyDate(t).Add(31 * date.Day)
+				if _, err := fx.svc.UpsertAccountSnapshot(t.Context(), fx.savingsAccount.ID, model.AccountSnapshotInput{Date: recorded, Balance: uncertain.NewFixed(12000)}); err != nil {
+					t.Fatalf("create snapshot: %v", err)
+				}
+				savings := fx.savingsSeries(t)
+				savings.History = append(savings.History, model.BalancePoint{Date: recorded, Balance: 12000})
+				return fx.setup(savings)
+			},
+		},
+		"a new Account Type with an account gets a series": {
+			change: func(t *testing.T, fx *streamFixture) model.ForecastDashboardData {
+				stocks, err := fx.svc.UpsertAccountType(t.Context(), model.AccountTypeInput{Name: "Stocks", Color: "#ffff00"})
+				if err != nil {
+					t.Fatalf("create account type: %v", err)
+				}
+				if _, err := fx.svc.UpsertAccount(t.Context(), model.AccountInput{Name: "My Stocks", TypeID: stocks.ID}); err != nil {
+					t.Fatalf("create account: %v", err)
+				}
+				return fx.setup(fx.savingsSeries(t), model.DashboardForecastSeries{ID: stocks.ID, Name: "Stocks", Color: "#ffff00", History: []model.BalancePoint{}})
+			},
+		},
+		"a renamed and recoloured Account Type has its new name and colour": {
+			change: func(t *testing.T, fx *streamFixture) model.ForecastDashboardData {
+				if _, err := fx.svc.UpsertAccountType(t.Context(), model.AccountTypeInput{ID: fx.savings.ID, Name: "Buffer", Color: "#00ffff"}); err != nil {
+					t.Fatalf("update account type: %v", err)
+				}
+				savings := fx.savingsSeries(t)
+				savings.Name, savings.Color = "Buffer", "#00ffff"
+				return fx.setup(savings)
+			},
+		},
+		"a new Special Date gets a markline": {
+			change: func(t *testing.T, fx *streamFixture) model.ForecastDashboardData {
+				house, err := fx.svc.UpsertSpecialDate(t.Context(), model.SpecialDateInput{Name: "House", Date: date.Today().Add(date.Year), Color: "#ff00ff"})
+				if err != nil {
+					t.Fatalf("create special date: %v", err)
+				}
+				setup := fx.setup(fx.savingsSeries(t))
+				setup.Marklines = slices.Insert(setup.Marklines, 1, model.Markline{Date: house.Date, Color: "#ff00ff", Name: "House"})
+				return setup
+			},
+		},
+		"an Account Type without Balance History or an account loses its series": {
+			change: func(t *testing.T, fx *streamFixture) model.ForecastDashboardData {
+				moved := model.AccountInput{ID: fx.savingsAccount.ID, Name: fx.savingsAccount.Name, TypeID: fx.pension.ID}
+				if _, err := fx.svc.UpsertAccount(t.Context(), moved); err != nil {
+					t.Fatalf("update account: %v", err)
+				}
+				pension := fx.pensionSeries()
+				pension.History = fx.savingsSeries(t).History
+				return fx.setup(pension)
+			},
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			fx := newStreamFixture(t)
+			fx.compute = emitting(nil, nil)
+
+			stream := fx.connect(t)
+			expectSetup(stream, fx.setup(fx.savingsSeries(t)))
+			want := tt.change(t, fx)
+			fx.timers.fire()
+			fx.stop()
+
+			expectSetup(stream, want)
+			stream.expect("started")
+			stream.expect("done")
+			stream.expectEnd()
+		})
+	}
+}
+
+func TestDashboardForecastStreamEndsWhenTheSetupCannotBeRefreshed(t *testing.T) {
+	fx := newStreamFixture(t)
+	fx.compute = emitting(nil, nil)
+
+	stream := fx.connect(t)
+	expectSetup(stream, fx.setup(fx.savingsSeries(t)))
+	// Without a database the Forecast Run starts and Fails, and reading the setup fails.
+	if err := fx.svc.DB().Close(); err != nil {
+		t.Fatalf("close the database: %v", err)
+	}
+	fx.timers.fire()
+
+	// The page's EventSource reconnects and gets a full setup instead of a started without one.
 	stream.expectEnd()
 }
