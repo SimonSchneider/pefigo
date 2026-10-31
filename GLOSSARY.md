@@ -103,7 +103,7 @@ An account's balance at the start of a day: its latest Snapshot on or before tha
 _Avoid_: catch-up, estimated balance
 
 **Dashboard Forecast**:
-The Forecast of balances per Account Type from the Forecast Start to the last Special Date, kept up to date in the background using the Forecast Settings. It is empty when there is no Forecast or no Special Date is after the Forecast Start.
+The Forecast of the Baseline's balances per Account Type from the Forecast Start to the last Special Date, kept up to date in the background using the Forecast Settings. It is empty when there is no Forecast or no Special Date is after the Forecast Start.
 _Avoid_: forecast cache, cached forecast
 
 **Forecast Settings**:
@@ -128,3 +128,25 @@ A number that advances every time a Forecast Input is written. It is kept in mem
 **Stale**:
 A Dashboard Forecast is stale when a Forecast Input has changed since it was computed.
 _Avoid_: invalidated, dirty, outdated
+
+### Scenarios
+
+**Baseline**:
+The plans for the future as they are stored, with no Scenario applied. Its Forecast is the Dashboard Forecast.
+_Avoid_: current plan, base scenario, default scenario
+
+**Event**:
+A named group of related changes to the plans for the future that happen around one date, such as buying an apartment. It adds entries, such as Accounts, growth models, Transfer Templates, Salaries and Bills, and ends existing ones: changing an entry is ending it and adding its replacement. Every date in an Event is relative to the Event's date, so moving the Event moves every change in it. An Event is planned when the Baseline holds it at its date, grouping related entries there, and unplanned when only Scenarios use it. Its changes before the Forecast Start don't count, as Transfers before it are taken to be in the Snapshots.
+_Avoid_: life event, decision, plan change, bundle
+
+**Scenario**:
+An alternative future: the Baseline with some Events overridden, planned or not, each put at a date of the Scenario's own or left out. Every other Event is as in the Baseline. A Scenario changes nothing but Events, and never a Snapshot, so every Scenario has the same Forecast Start and they differ only after it. A single change is an Event with one change.
+_Avoid_: what-if, sandbox, copy
+
+**Adopt**:
+To make a Scenario's overrides the Baseline's: each Event it puts at a date becomes planned at that date, and each it leaves out becomes unplanned. The Scenario then matches the Baseline.
+_Avoid_: apply, commit, merge
+
+**Scenario Forecast**:
+A Scenario's counterpart of the Dashboard Forecast: the same Forecast for the Scenario, kept up to date in the background by Forecast Runs and Stale whenever the Dashboard Forecast is, because every Scenario builds on the Baseline.
+_Avoid_: scenario cache, what-if forecast
