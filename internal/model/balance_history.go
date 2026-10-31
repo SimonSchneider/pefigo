@@ -88,7 +88,7 @@ func (s *Service) recordedBalances(ctx context.Context, today date.Date) ([]reco
 		recorded = append(recorded, recordedBalance{accountID: r.AccountID, typeID: r.TypeID, day: date.Date(r.Date), balance: v.Mean()})
 	}
 
-	startupAccounts, err := s.listStartupShareHistories(ctx, nil)
+	startupAccounts, err := s.listStartupShareHistories(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -105,4 +105,48 @@ func (s *Service) recordedBalances(ctx context.Context, today date.Date) ([]reco
 	}
 	slices.SortStableFunc(recorded, func(a, b recordedBalance) int { return cmp.Compare(a.day, b.day) })
 	return recorded, nil
+}
+
+// balanceHistoryDays are the days, in order, that any Account Type has a Balance History point on.
+func balanceHistoryDays(history map[string][]BalancePoint) []date.Date {
+	var days []date.Date
+	for _, points := range history {
+		for _, p := range points {
+			days = append(days, p.Date)
+		}
+	}
+	slices.Sort(days)
+	return slices.Compact(days)
+}
+
+// balancesAsOf is the balance of an Account Type's Balance History points as of each of days, in
+// order: its latest point on or before the day, or 0 before its first.
+func balancesAsOf(points []BalancePoint, days []date.Date) []float64 {
+	balances := make([]float64, len(days))
+	var balance float64
+	next := 0
+	for i, day := range days {
+		for ; next < len(points) && !points[next].Date.After(day); next++ {
+			balance = points[next].Balance
+		}
+		balances[i] = balance
+	}
+	return balances
+}
+
+// totalBalanceHistory is the sum of every Account Type's Balance History, as of each day any of
+// them has a point.
+func totalBalanceHistory(history map[string][]BalancePoint) []BalancePoint {
+	days := balanceHistoryDays(history)
+	totals := make([]float64, len(days))
+	for _, typeID := range slices.Sorted(maps.Keys(history)) {
+		for i, balance := range balancesAsOf(history[typeID], days) {
+			totals[i] += balance
+		}
+	}
+	points := make([]BalancePoint, len(days))
+	for i, day := range days {
+		points[i] = BalancePoint{Date: day, Balance: totals[i]}
+	}
+	return points
 }

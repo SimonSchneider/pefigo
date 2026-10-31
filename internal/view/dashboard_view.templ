@@ -34,12 +34,12 @@ templ DashboardMainContent(view *model.DashboardView) {
 					</div>
 				</div>
 			</div>
-			if len(view.SnapshotHistoryChart.Dates) > 0 {
+			if len(view.BalanceHistoryChart.Dates) > 0 {
 				<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
 					<div class="card bg-base-100 shadow-sm border border-base-300">
 						<div class="card-body">
 							<h2 class="card-title">Balance history</h2>
-							<div id="dashboard-snapshot-history-chart" style="width: 100%; height: 400px;"></div>
+							<div id="dashboard-balance-history-chart" style="width: 100%; height: 400px;"></div>
 						</div>
 					</div>
 					<div class="card bg-base-100 shadow-sm border border-base-300">
@@ -86,7 +86,7 @@ templ DashboardMainContent(view *model.DashboardView) {
 			}
 			@ItemsTooltipScript()
 			@templ.JSONScript("dashboard-accounts-data", view.AccountChartData)
-			@templ.JSONScript("dashboard-snapshot-history-data", view.SnapshotHistoryChart)
+			@templ.JSONScript("dashboard-balance-history-data", view.BalanceHistoryChart)
 			@DashboardChartsScript()
 		</div>
 	</main>
@@ -256,9 +256,9 @@ templ DashboardChartsScript() {
 				});
 			}
 
-			// Snapshot history stacked bar chart (assets stack above 0, liabilities below)
-			var historyDom = document.getElementById('dashboard-snapshot-history-chart');
-			var historyDataEl = document.getElementById('dashboard-snapshot-history-data');
+			// Balance History stacked bar chart (assets stack above 0, liabilities below)
+			var historyDom = document.getElementById('dashboard-balance-history-chart');
+			var historyDataEl = document.getElementById('dashboard-balance-history-data');
 			if (historyDom && historyDataEl) {
 				var historyData = JSON.parse(historyDataEl.textContent);
 				if (historyData.dates && historyData.dates.length > 0) {
