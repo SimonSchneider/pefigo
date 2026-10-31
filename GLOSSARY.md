@@ -31,6 +31,17 @@ _Avoid_: unknown, no type
 The balance per Account Type on each day, up to today, that an account's balance was recorded, with every account counting at its latest recorded balance.
 _Avoid_: snapshot history, historic snapshots
 
+**Net Worth**:
+The sum of every Account's current balance: its latest Snapshot, or a Startup Share Account's derived balance. Every Account counts, whatever the Account Type filter hides.
+_Avoid_: total balance
+
+**Assets**:
+The sum of the Accounts in Net Worth whose current balance is positive.
+
+**Liabilities**:
+The sum of the Accounts in Net Worth whose current balance is not positive, shown as a positive amount.
+_Avoid_: debts
+
 ### Salaries
 
 **Salary**:
