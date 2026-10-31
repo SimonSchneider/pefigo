@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -214,7 +215,7 @@ func TestClientGetRateExpired(t *testing.T) {
 	}
 }
 
-func TestClientGetRateError(t *testing.T) {
+func TestClientGetRateWithoutAnyRateFetchedFailsNamingThePair(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -223,7 +224,65 @@ func TestClientGetRateError(t *testing.T) {
 	client := currency.NewClient(newMemCache(), currency.WithBaseURL(srv.URL))
 	_, err := client.GetRate(context.Background(), "EUR", "SEK")
 	if err == nil {
-		t.Error("expected error for server error response")
+		t.Fatal("expected error for server error response")
+	}
+	if !strings.Contains(err.Error(), "EUR to SEK") {
+		t.Errorf("expected the error to name the currency pair, got %q", err)
+	}
+}
+
+func TestClientGetRateFallsBackToTheLastRateFetchedWhenAFetchFails(t *testing.T) {
+	var fail atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprint(w, `{"amount":1.0,"base":"EUR","date":"2026-03-25","rates":{"SEK":11.47}}`)
+	}))
+	defer srv.Close()
+
+	cache := newMemCache()
+	client := currency.NewClient(cache, currency.WithBaseURL(srv.URL))
+	if _, err := client.GetRate(context.Background(), "EUR", "SEK"); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	// The rate was fetched a year ago: long expired.
+	entry := cache.entries["exchange_rate:EUR:SEK"]
+	entry.createdAt = time.Now().AddDate(-1, 0, 0)
+	cache.entries["exchange_rate:EUR:SEK"] = entry
+	fail.Store(true)
+
+	rate, err := client.GetRate(context.Background(), "EUR", "SEK")
+	if err != nil {
+		t.Fatalf("expected the year-old rate when the fetch fails, got %v", err)
+	}
+	if rate != 11.47 {
+		t.Errorf("rate = %v, want 11.47", rate)
+	}
+}
+
+func TestClientGetRateDoesNotKeepAResponseWithoutTheRate(t *testing.T) {
+	var missing atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if missing.Load() {
+			fmt.Fprint(w, `{"amount":1.0,"base":"EUR","date":"2026-03-26","rates":{}}`)
+			return
+		}
+		fmt.Fprint(w, `{"amount":1.0,"base":"EUR","date":"2026-03-25","rates":{"SEK":11.47}}`)
+	}))
+	defer srv.Close()
+
+	client := currency.NewClient(newMemCache(), currency.WithBaseURL(srv.URL), currency.WithTTL(0))
+	if _, err := client.GetRate(context.Background(), "EUR", "SEK"); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	missing.Store(true)
+	for range 2 {
+		rate, err := client.GetRate(context.Background(), "EUR", "SEK")
+		if err != nil || rate != 11.47 {
+			t.Fatalf("expected the last rate fetched, 11.47, got %v (%v)", rate, err)
+		}
 	}
 }
 
