@@ -256,17 +256,23 @@ func (d *TransferScheduleDay) Monthly() []ScheduledTransfer {
 	return monthly
 }
 
-// TransferScheduleRow is one row of the Transfer Template table: a Transfer Template, or a group of the
-// Transfer Templates that share a name, priority, recurrence and Accounts, such as the segments of a
-// Bill. A group spans its Members' dates, is Active when one of them is, is Disabled when all of them
-// are, and its Amount is their total.
+// TransferScheduleRow is one row of the Transfer Template table: a Transfer Template, or a group of
+// rows. The Transfer Templates that share a name, priority, recurrence and Accounts, such as the
+// segments of a Bill, are one group, and the Bills of a Bill Account are one group of those rows. A
+// group spans its Members' dates, is Active when one of them is, is Disabled when all of them are, and
+// its Amount is their total.
 type TransferScheduleRow struct {
 	ScheduledTransfer
-	Members []ScheduledTransfer
+	Members []TransferScheduleRow
 }
 
 func (r TransferScheduleRow) IsGroup() bool {
 	return len(r.Members) > 0
+}
+
+// isBillAccount reports whether the row is the group of a Bill Account's Bills.
+func (r TransferScheduleRow) isBillAccount() bool {
+	return r.Source.Type == TransferSourceBill && r.Source.EntityID == ""
 }
 
 // Rows groups the evaluated Transfer Templates for display, so grouping changes no amount.
@@ -277,31 +283,61 @@ func (d *TransferScheduleDay) Rows() []TransferScheduleRow {
 		recurrence date.Cron
 		from, to   string
 	}
-	groups := make(map[groupKey][]ScheduledTransfer)
+	groups := make(map[groupKey][]TransferScheduleRow)
 	var order []groupKey
 	for _, t := range d.transfers {
 		k := groupKey{name: t.Name, priority: t.Priority, recurrence: t.Recurrence, from: t.FromAccountID, to: t.ToAccountID}
 		if _, ok := groups[k]; !ok {
 			order = append(order, k)
 		}
-		groups[k] = append(groups[k], t)
+		groups[k] = append(groups[k], TransferScheduleRow{ScheduledTransfer: t})
 	}
 	rows := make([]TransferScheduleRow, 0, len(order))
 	for _, k := range order {
 		if members := groups[k]; len(members) == 1 {
-			rows = append(rows, TransferScheduleRow{ScheduledTransfer: members[0]})
+			rows = append(rows, members[0])
 		} else {
-			rows = append(rows, groupRow(members))
+			rows = append(rows, groupRow("group-"+members[0].ID, members))
 		}
 	}
-	return rows
+	return foldBillAccounts(rows)
 }
 
-func groupRow(members []ScheduledTransfer) TransferScheduleRow {
+// foldBillAccounts puts the rows of each Bill Account's Bills in one group, named after the Bill
+// Account, where its first Bill was.
+func foldBillAccounts(rows []TransferScheduleRow) []TransferScheduleRow {
+	bills := make(map[string][]TransferScheduleRow)
+	for _, row := range rows {
+		if row.Source.Type == TransferSourceBill {
+			bills[row.Source.BillAccountID] = append(bills[row.Source.BillAccountID], row)
+		}
+	}
+	folded := make([]TransferScheduleRow, 0, len(rows))
+	for _, row := range rows {
+		if row.Source.Type != TransferSourceBill {
+			folded = append(folded, row)
+			continue
+		}
+		members, ok := bills[row.Source.BillAccountID]
+		if !ok {
+			continue
+		}
+		delete(bills, row.Source.BillAccountID)
+		group := groupRow("bill-account-"+row.Source.BillAccountID, members)
+		group.Name = row.Source.BillAccountName
+		group.BudgetCategoryID = nil
+		group.Source = TransferTemplateSource{Type: TransferSourceBill, Label: row.Source.BillAccountName, BillAccountID: row.Source.BillAccountID}
+		folded = append(folded, group)
+	}
+	return folded
+}
+
+// groupRow is the group id of members, named and placed as its first member.
+func groupRow(id string, members []TransferScheduleRow) TransferScheduleRow {
 	first := members[0]
 	group := ScheduledTransfer{
 		TransferTemplate: TransferTemplate{
-			ID:               "group-" + first.ID,
+			ID:               id,
 			Name:             first.Name,
 			FromAccountID:    first.FromAccountID,
 			ToAccountID:      first.ToAccountID,

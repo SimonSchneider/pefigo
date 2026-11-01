@@ -27,8 +27,10 @@ type TransferTemplateSource struct {
 	Type     string // "" for a stored Transfer Template, TransferSourceSalary or TransferSourceBill
 	EntityID string // the ID of the Salary or Bill
 	Label    string
-	// BillAccountID is the Bill Account of a Bill source, which lists the Bill.
-	BillAccountID string
+	// BillAccountID is the Bill Account of a Bill source, which lists the Bill, and BillAccountName
+	// its name.
+	BillAccountID   string
+	BillAccountName string
 
 	// recurrenceRow names the stored row a generated Transfer Template's recurrence is from, such as
 	// its Bill account, for an error about it.
@@ -362,6 +364,20 @@ func (v *TransferTemplatesView) GetEvent(id string) *Event {
 		return nil
 	}
 	return &ev
+}
+
+// TemplateCount is the number of Transfer Templates the table lists: a Bill, or the Transfer Templates
+// of one row, count once.
+func (v *TransferTemplatesView) TemplateCount() int {
+	n := 0
+	for _, row := range v.Rows {
+		if row.isBillAccount() {
+			n += len(row.Members)
+		} else {
+			n++
+		}
+	}
+	return n
 }
 
 func (v *TransferTemplatesView) GetBudgetCategory(id *string) *TransferTemplateCategory {

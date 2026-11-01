@@ -244,7 +244,10 @@ func TestTransferScheduleRowsGroupTransferTemplatesAfterEvaluatingThem(t *testin
 		rowsTotal += row.Amount
 	}
 	if len(rows) != 3 {
-		t.Fatalf("expected rows Music, Rent and Gym, got %v", rows)
+		t.Fatalf("expected rows Music bills, Rent and Gym, got %v", rows)
+	}
+	if music := rows["Music bills"].Members; len(music) != 1 || music[0].Name != "Music" || len(music[0].Members) != 2 || music[0].Amount != 200 {
+		t.Errorf("expected the Bill Account Music bills to hold Music, one row of its 2 amounts charging 200, got %+v", music)
 	}
 	for _, want := range []struct {
 		name    string
@@ -252,7 +255,7 @@ func TestTransferScheduleRowsGroupTransferTemplatesAfterEvaluatingThem(t *testin
 		amount  float64
 		state   model.TransferState
 	}{
-		{"Music", 2, 200, model.TransferActive},
+		{"Music bills", 1, 200, model.TransferActive},
 		{"Rent", 0, 1200, model.TransferActive},
 		{"Gym", 2, 0, model.TransferInactive},
 	} {

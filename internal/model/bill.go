@@ -173,11 +173,12 @@ func (b Bill) GenerateTransferTemplates(ba BillAccount) []TransferTemplate {
 	}
 
 	source := TransferTemplateSource{
-		Type:          TransferSourceBill,
-		EntityID:      b.ID,
-		Label:         b.Name,
-		BillAccountID: ba.ID,
-		recurrenceRow: "bill account " + ba.ID,
+		Type:            TransferSourceBill,
+		EntityID:        b.ID,
+		Label:           b.Name,
+		BillAccountID:   ba.ID,
+		BillAccountName: ba.Name,
+		recurrenceRow:   "bill account " + ba.ID,
 	}
 
 	enabled := ba.Enabled && b.Enabled
