@@ -51,6 +51,29 @@ func TestTheEventsPageListsTheSalariesBillsAndPartsAnEventAdds(t *testing.T) {
 	}
 }
 
+func TestAnEventListsWhatItAddsByDate(t *testing.T) {
+	svc := newTestService(t)
+	checking := mustAccount(t, svc, "Checking")
+	salary := mustSalary(t, svc, model.Salary{Name: "Salary A", ToAccountID: checking.ID, Recurrence: "*-*-25"})
+	child := mustEvent(t, svc, model.EventInput{Name: "Second child", Date: mustParseDate("2027-06-01")})
+	if _, err := svc.UpsertPartialParentalLeave(t.Context(), model.PartialParentalLeave{SalaryID: salary.ID, EventID: child.ID, StartOffset: days(183), EndOffset: days(365)}); err != nil {
+		t.Fatalf("save partial parental leave: %v", err)
+	}
+	mustFullParentalLeave(t, svc, model.FullParentalLeave{SalaryID: salary.ID, EventID: child.ID, StartOffset: days(0), EndOffset: days(183)})
+
+	page, err := svc.GetEventsPageData(t.Context())
+	if err != nil {
+		t.Fatalf("events page: %v", err)
+	}
+	var kinds []model.EventEntryKind
+	for _, p := range page.Events[0].Parts {
+		kinds = append(kinds, p.Kind)
+	}
+	if want := []model.EventEntryKind{model.EventEntryFullParentalLeave, model.EventEntryPartialParentalLeave}; !slices.Equal(kinds, want) {
+		t.Errorf("expected the full parental leave from +0 before the partial from +183, got %v", kinds)
+	}
+}
+
 func TestDeletingAnEventDeletesTheSalariesBillsAndPartsItAdds(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()

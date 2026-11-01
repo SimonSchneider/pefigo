@@ -586,7 +586,7 @@ type EventView struct {
 	GrowthModels      []EventGrowthModel
 	TransferTemplates []EventTransferTemplate
 	// Parts are the Salaries and Bills it adds, and what it adds to Salaries, Bills and Startup Share
-	// accounts, in or outside it: by kind and date.
+	// accounts, in or outside it: by date, a Salary or Bill first, then by kind.
 	Parts []EventPart
 }
 
@@ -815,8 +815,8 @@ func (e *eventEntries) view(ev Event) EventView {
 	}
 	slices.SortStableFunc(v.Parts, func(a, b EventPart) int {
 		return cmp.Or(
-			cmp.Compare(slices.Index(eventEntryKinds, string(a.Kind)), slices.Index(eventEntryKinds, string(b.Kind))),
 			cmp.Compare(ptrOrZero(a.StartDate), ptrOrZero(b.StartDate)),
+			cmp.Compare(slices.Index(eventEntryKinds, string(a.Kind)), slices.Index(eventEntryKinds, string(b.Kind))),
 			cmp.Compare(a.OwnerName, b.OwnerName),
 		)
 	})
