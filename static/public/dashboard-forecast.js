@@ -33,6 +33,11 @@
         return neg ? '-' + out : out;
     }
 
+    // A row of date line labels is MARKLINE_ROW_HEIGHT high. Labels below the
+    // chart start MARKLINE_BOTTOM_OFFSET under it, past the axis labels.
+    var MARKLINE_ROW_HEIGHT = 15;
+    var MARKLINE_BOTTOM_OFFSET = 24;
+
     var dom = document.getElementById('dashboard-forecast-chart');
     if (!dom) return;
 
@@ -150,6 +155,9 @@
             };
         });
         var marklines = [];
+        // Each row of labels, above or below the chart, alternates between two
+        // heights so that names of nearby lines don't overlap.
+        var rows = { top: 0, bottom: 0 };
         allMarklines.forEach(function(m, idx) {
             if (!inRange(m.date)) return;
             var color = m.color || theme.baseContent;
@@ -162,17 +170,40 @@
                     data: [{
                         xAxis: m.date,
                         lineStyle: { color: color, type: 'dashed' },
-                        label: {
-                            offset: [0, idx % 2 !== 0 ? 0 : -15],
-                            formatter: m.name,
-                            color: color,
-                            textBorderWidth: 0
-                        }
+                        label: marklineLabel(m, m.bottom ? rows.bottom++ : rows.top++, color)
                     }]
                 }
             });
         });
         return lines.concat(marklines);
+    }
+
+    // marklineLabel names a date line above the chart, or below the axis
+    // labels for a line labelled at the bottom, such as an Event's. n is the
+    // line's place in its row.
+    function marklineLabel(m, n, color) {
+        if (m.bottom) {
+            return {
+                position: 'start',
+                offset: [0, n % 2 === 0 ? MARKLINE_BOTTOM_OFFSET : MARKLINE_BOTTOM_OFFSET + MARKLINE_ROW_HEIGHT],
+                formatter: m.name,
+                color: color,
+                textBorderWidth: 0
+            };
+        }
+        return {
+            offset: [0, n % 2 !== 0 ? 0 : -MARKLINE_ROW_HEIGHT],
+            formatter: m.name,
+            color: color,
+            textBorderWidth: 0
+        };
+    }
+
+    // hasBottomMarklines reports whether a date line in range is labelled
+    // below the chart, which then needs room under its axis labels.
+    function hasBottomMarklines() {
+        var maxDate = getMaxDate();
+        return allMarklines.some(function(m) { return m.bottom && (!maxDate || m.date <= maxDate); });
     }
 
     function updateChart() {
@@ -214,7 +245,7 @@
             grid: {
                 left: '3%',
                 right: '4%',
-                bottom: '15%',
+                bottom: hasBottomMarklines() ? 90 : '15%',
                 containLabel: true
             },
             xAxis: {

@@ -248,12 +248,18 @@ evtSource.addEventListener('setup', (event) => {
     const today2 = new Date();
     today2.setDate(today2.getUTCDate() + 1000);
     const themeText = getThemeColor('--color-base-content', '#333333');
+    // Each row of labels, above or below the chart, alternates between two
+    // heights so that names of nearby lines don't overlap.
+    const rows = { top: 0, bottom: 0 };
+    const hasBottom = data.marklines.some(m => m.bottom && (!data.max || m.date <= data.max));
     myChart.setOption({
         legend: {
             data: data.entities.map(e => ({ name: e.name })),
         },
-        xAxis: { max: data.max },
-        series: Object.values(series).concat(data.marklines.map((m, idx) => ({
+        // Labels below the chart go between the axis labels and the axis name.
+        xAxis: { max: data.max, nameGap: hasBottom ? MARKLINE_BOTTOM_OFFSET + 2 * MARKLINE_ROW_HEIGHT + 6 : 30 },
+        grid: { bottom: hasBottom ? 86 : 50 },
+        series: Object.values(series).concat(data.marklines.map((m) => ({
             id: m.name,
             name: m.name,
             type: 'line',
@@ -266,12 +272,7 @@ evtSource.addEventListener('setup', (event) => {
                             color: m.color || themeText,
                             type: 'dashed',
                         },
-                        label: {
-                            offset: [0, idx % 2 !== 0 ? 0 : -15],
-                            formatter: m.name,
-                            color: m.color || themeText,
-                            textBorderWidth: 0,
-                        }
+                        label: marklineLabel(m, m.bottom ? rows.bottom++ : rows.top++, m.color || themeText),
                     }
                 ]
             }
@@ -285,3 +286,29 @@ evtSource.addEventListener('close', (event) => {
     clearInterval(intervalUpdate);
     runUpdateBatch();
 });
+
+// A row of date line labels is MARKLINE_ROW_HEIGHT high. Labels below the chart
+// start MARKLINE_BOTTOM_OFFSET under it, past the axis labels.
+const MARKLINE_ROW_HEIGHT = 15;
+const MARKLINE_BOTTOM_OFFSET = 24;
+
+// marklineLabel names a date line above the chart, or below the axis labels for
+// a line labelled at the bottom, such as an Event's. n is the line's place in
+// its row.
+function marklineLabel(m, n, color) {
+    if (m.bottom) {
+        return {
+            position: 'start',
+            offset: [0, n % 2 === 0 ? MARKLINE_BOTTOM_OFFSET : MARKLINE_BOTTOM_OFFSET + MARKLINE_ROW_HEIGHT],
+            formatter: m.name,
+            color: color,
+            textBorderWidth: 0,
+        };
+    }
+    return {
+        offset: [0, n % 2 !== 0 ? 0 : -MARKLINE_ROW_HEIGHT],
+        formatter: m.name,
+        color: color,
+        textBorderWidth: 0,
+    };
+}

@@ -376,3 +376,24 @@ func TestAnUnplannedEventsAccountsAreLeftOutOfTheDashboardForecastSeriesAndTheCa
 		t.Errorf("expected a Dashboard Forecast series for the planned Event's Account Type")
 	}
 }
+
+func TestEventMarkersAreLabelledBelowTheChartSoTheyDontCollideWithSpecialDates(t *testing.T) {
+	svc := newTestService(t)
+	mustEvent(t, svc, model.EventInput{Name: "Apartment", Date: mustParseDate("2040-01-10")})
+	if _, err := svc.UpsertSpecialDate(t.Context(), model.SpecialDateInput{Name: "Retirement", Date: mustParseDate("2040-01-01")}); err != nil {
+		t.Fatalf("create special date: %v", err)
+	}
+
+	check := func(chart string, lines []model.Markline) {
+		t.Helper()
+		bottom := map[string]bool{}
+		for _, m := range lines {
+			bottom[m.Name] = m.Bottom
+		}
+		if len(bottom) != 3 || !bottom["Apartment"] || bottom["Retirement"] || bottom["Today"] {
+			t.Errorf("expected the %s to label the Apartment below the chart and Today and Retirement above it, got %+v", chart, lines)
+		}
+	}
+	check("dashboard", dashboardForecastHistory(t, svc, nil).Marklines)
+	check("forecast chart", runPrediction(t, svc, model.GroupByType).setup.Marklines)
+}

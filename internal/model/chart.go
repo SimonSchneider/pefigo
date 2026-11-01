@@ -101,13 +101,16 @@ type Markline struct {
 	Date  date.Date `json:"date"`
 	Color string    `json:"color"`
 	Name  string    `json:"name"`
+	// Bottom labels the line below the chart, as an Event's is, so its name doesn't collide with the
+	// names of today and the Special Dates above it.
+	Bottom bool `json:"bottom"`
 }
 
 // eventMarklineColor is the color of an Event's date line.
 const eventMarklineColor = "#7c3aed"
 
 // dateLines are the date lines of a forecast chart: today, every Special Date and every placed Event
-// at the date it is placed at, by date.
+// at the date it is placed at, labelled below the chart, by date.
 func dateLines(specialDates []SpecialDate, events []Event, today date.Date) []Markline {
 	lines := make([]Markline, 0, len(specialDates)+len(events)+1)
 	lines = append(lines, Markline{Date: today, Name: "Today"})
@@ -115,7 +118,7 @@ func dateLines(specialDates []SpecialDate, events []Event, today date.Date) []Ma
 		lines = append(lines, Markline{Date: sd.Date, Color: sd.Color, Name: sd.Name})
 	}
 	for _, ev := range events {
-		lines = append(lines, Markline{Date: ev.Date, Color: eventMarklineColor, Name: ev.Name})
+		lines = append(lines, Markline{Date: ev.Date, Color: eventMarklineColor, Name: ev.Name, Bottom: true})
 	}
 	slices.SortStableFunc(lines, func(a, b Markline) int { return cmp.Compare(a.Date, b.Date) })
 	return lines
