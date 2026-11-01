@@ -1,8 +1,8 @@
 package model
 
 import (
+	"cmp"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -29,8 +29,11 @@ type InvestmentRound struct {
 	Valuation      float64
 	PreMoneyShares float64
 	Investment     float64
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// EventID is the Event the investment round is in, or "" in the Baseline. In an Event its date is
+	// stored as days after the Event's date.
+	EventID   string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // hasSharesAndPrice reports whether the investment round values shares: it has shares and a price per
@@ -73,8 +76,11 @@ type ShareChange struct {
 	Date        date.Date
 	DeltaShares float64
 	TotalPrice  float64
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// EventID is the Event the share change is in, or "" in the Baseline. In an Event its date is
+	// stored as days after the Event's date.
+	EventID   string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 func (sc ShareChange) GetDateString() string {
@@ -178,6 +184,9 @@ func fractionOrDefault(field string, given *float64, def float64) (float64, erro
 	return *given, nil
 }
 
+// InvestmentRoundInput is an investment round to save. In an Event its date may be given as days
+// after the Event's date, it is the Event's date when it isn't given, and it is saved as an offset from
+// the Event's date.
 type InvestmentRoundInput struct {
 	ID             string
 	AccountID      string
@@ -185,14 +194,23 @@ type InvestmentRoundInput struct {
 	Valuation      float64
 	PreMoneyShares float64
 	Investment     float64
+	EventID        string
+	// DateOffset, when set, gives the date in an Event as days after the date of OffsetEventID, the
+	// Event the form showed it for, or of EventID when that is blank.
+	DateOffset    *date.Duration
+	OffsetEventID string
 }
 
+// ShareChangeInput is a share change to save, dated as an InvestmentRoundInput is.
 type ShareChangeInput struct {
-	ID          string
-	AccountID   string
-	Date        date.Date
-	DeltaShares float64
-	TotalPrice  float64
+	ID            string
+	AccountID     string
+	Date          date.Date
+	DeltaShares   float64
+	TotalPrice    float64
+	EventID       string
+	DateOffset    *date.Duration
+	OffsetEventID string
 }
 
 type StartupShareOptionInput struct {
@@ -219,26 +237,30 @@ func startupShareAccountFromDB(s pdb.StartupShareAccount) StartupShareAccount {
 	}
 }
 
-func investmentRoundFromDB(i pdb.InvestmentRound) InvestmentRound {
+// investmentRoundFromDB is the stored investment round i with its Event at at.
+func investmentRoundFromDB(i pdb.InvestmentRound, at date.Date) InvestmentRound {
 	return InvestmentRound{
 		ID:             i.ID,
 		AccountID:      i.AccountID,
-		Date:           date.Date(i.Date),
+		Date:           placeDate(i.Date, at),
 		Valuation:      i.Valuation,
 		PreMoneyShares: i.PreMoneyShares,
 		Investment:     i.Investment,
+		EventID:        ui.OrDefault(i.EventID),
 		CreatedAt:      time.UnixMilli(i.CreatedAt),
 		UpdatedAt:      time.UnixMilli(i.UpdatedAt),
 	}
 }
 
-func shareChangeFromDB(s pdb.ShareChange) ShareChange {
+// shareChangeFromDB is the stored share change s with its Event at at.
+func shareChangeFromDB(s pdb.ShareChange, at date.Date) ShareChange {
 	return ShareChange{
 		ID:          s.ID,
 		AccountID:   s.AccountID,
-		Date:        date.Date(s.Date),
+		Date:        placeDate(s.Date, at),
 		DeltaShares: s.DeltaShares,
 		TotalPrice:  s.TotalPrice,
+		EventID:     ui.OrDefault(s.EventID),
 		CreatedAt:   time.UnixMilli(s.CreatedAt),
 		UpdatedAt:   time.UnixMilli(s.UpdatedAt),
 	}
@@ -295,6 +317,13 @@ func (s *Service) DeleteStartupShareAccount(ctx context.Context, accountID strin
 }
 
 func (s *Service) UpsertInvestmentRound(ctx context.Context, inp InvestmentRoundInput) (InvestmentRound, error) {
+	dating, err := s.entryDating(ctx, inp.EventID, inp.OffsetEventID)
+	if err != nil {
+		return InvestmentRound{}, err
+	}
+	if inp.Date, err = dating.startDate("date", inp.Date, inp.DateOffset); err != nil {
+		return InvestmentRound{}, err
+	}
 	if err := errors.Join(checkRequired("account", inp.AccountID), checkRequired("date", inp.Date)); err != nil {
 		return InvestmentRound{}, err
 	}
@@ -304,51 +333,63 @@ func (s *Service) UpsertInvestmentRound(ctx context.Context, inp InvestmentRound
 	ir, err := s.q.UpsertInvestmentRound(ctx, pdb.UpsertInvestmentRoundParams{
 		ID:             inp.ID,
 		AccountID:      inp.AccountID,
-		Date:           int64(inp.Date),
+		Date:           dating.store(inp.Date),
 		Valuation:      inp.Valuation,
 		PreMoneyShares: inp.PreMoneyShares,
 		Investment:     inp.Investment,
+		EventID:        ui.WithDefaultNull(inp.EventID),
 		CreatedAt:      time.Now().UnixMilli(),
 		UpdatedAt:      time.Now().UnixMilli(),
 	})
 	if err != nil {
 		return InvestmentRound{}, fmt.Errorf("failed to upsert investment round: %w", err)
 	}
-	return investmentRoundFromDB(ir), nil
+	return investmentRoundFromDB(ir, dating.at), nil
 }
 
+// GetInvestmentRound returns the investment round id, in an Event at the Event's date.
 func (s *Service) GetInvestmentRound(ctx context.Context, id string) (InvestmentRound, error) {
 	ir, err := s.q.GetInvestmentRound(ctx, id)
 	if err != nil {
 		return InvestmentRound{}, fmt.Errorf("failed to get investment round: %w", err)
 	}
-	return investmentRoundFromDB(ir), nil
+	at, err := s.eventDate(ctx, ui.OrDefault(ir.EventID))
+	if err != nil {
+		return InvestmentRound{}, err
+	}
+	return investmentRoundFromDB(ir, at), nil
 }
 
+// input is the investment round as an input that saves it unchanged.
+func (ir InvestmentRound) input() InvestmentRoundInput {
+	return InvestmentRoundInput{
+		ID: ir.ID, AccountID: ir.AccountID, Date: ir.Date, Valuation: ir.Valuation, PreMoneyShares: ir.PreMoneyShares, Investment: ir.Investment, EventID: ir.EventID,
+	}
+}
+
+// ListInvestmentRounds returns the account's investment rounds, latest first, each in an Event at the
+// Event's date.
 func (s *Service) ListInvestmentRounds(ctx context.Context, accountID string) ([]InvestmentRound, error) {
 	rounds, err := s.q.ListInvestmentRounds(ctx, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list investment rounds: %w", err)
 	}
+	dates, err := s.eventDates(ctx)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]InvestmentRound, len(rounds))
 	for i, r := range rounds {
-		result[i] = investmentRoundFromDB(r)
+		result[i] = investmentRoundFromDB(r, ownDate(dates, r.EventID))
 	}
+	slices.SortStableFunc(result, func(a, b InvestmentRound) int { return compareInvestmentRounds(b, a) })
 	return result, nil
 }
 
-func (s *Service) GetLatestInvestmentRound(ctx context.Context, accountID string, d date.Date) (InvestmentRound, error) {
-	ir, err := s.q.GetLatestInvestmentRound(ctx, pdb.GetLatestInvestmentRoundParams{
-		AccountID: accountID,
-		Date:      int64(d),
-	})
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return InvestmentRound{}, sql.ErrNoRows
-		}
-		return InvestmentRound{}, fmt.Errorf("failed to get latest investment round: %w", err)
-	}
-	return investmentRoundFromDB(ir), nil
+// compareInvestmentRounds orders investment rounds by date and ID: of two on the same day, the one with
+// the later ID applies, in an Event or not.
+func compareInvestmentRounds(a, b InvestmentRound) int {
+	return cmp.Or(cmp.Compare(a.Date, b.Date), cmp.Compare(a.ID, b.ID))
 }
 
 func (s *Service) DeleteInvestmentRound(ctx context.Context, id string) error {
@@ -359,6 +400,13 @@ func (s *Service) DeleteInvestmentRound(ctx context.Context, id string) error {
 }
 
 func (s *Service) UpsertShareChange(ctx context.Context, inp ShareChangeInput) (ShareChange, error) {
+	dating, err := s.entryDating(ctx, inp.EventID, inp.OffsetEventID)
+	if err != nil {
+		return ShareChange{}, err
+	}
+	if inp.Date, err = dating.startDate("date", inp.Date, inp.DateOffset); err != nil {
+		return ShareChange{}, err
+	}
 	if err := errors.Join(checkRequired("account", inp.AccountID), checkRequired("date", inp.Date)); err != nil {
 		return ShareChange{}, err
 	}
@@ -368,36 +416,59 @@ func (s *Service) UpsertShareChange(ctx context.Context, inp ShareChangeInput) (
 	sc, err := s.q.UpsertShareChange(ctx, pdb.UpsertShareChangeParams{
 		ID:          inp.ID,
 		AccountID:   inp.AccountID,
-		Date:        int64(inp.Date),
+		Date:        dating.store(inp.Date),
 		DeltaShares: inp.DeltaShares,
 		TotalPrice:  inp.TotalPrice,
+		EventID:     ui.WithDefaultNull(inp.EventID),
 		CreatedAt:   time.Now().UnixMilli(),
 		UpdatedAt:   time.Now().UnixMilli(),
 	})
 	if err != nil {
 		return ShareChange{}, fmt.Errorf("failed to upsert share change: %w", err)
 	}
-	return shareChangeFromDB(sc), nil
+	return shareChangeFromDB(sc, dating.at), nil
 }
 
+// GetShareChange returns the share change id, in an Event at the Event's date.
 func (s *Service) GetShareChange(ctx context.Context, id string) (ShareChange, error) {
 	sc, err := s.q.GetShareChange(ctx, id)
 	if err != nil {
 		return ShareChange{}, fmt.Errorf("failed to get share change: %w", err)
 	}
-	return shareChangeFromDB(sc), nil
+	at, err := s.eventDate(ctx, ui.OrDefault(sc.EventID))
+	if err != nil {
+		return ShareChange{}, err
+	}
+	return shareChangeFromDB(sc, at), nil
 }
 
+// input is the share change as an input that saves it unchanged.
+func (sc ShareChange) input() ShareChangeInput {
+	return ShareChangeInput{ID: sc.ID, AccountID: sc.AccountID, Date: sc.Date, DeltaShares: sc.DeltaShares, TotalPrice: sc.TotalPrice, EventID: sc.EventID}
+}
+
+// ListShareChanges returns the account's share changes by date and ID, each in an Event at the Event's
+// date.
 func (s *Service) ListShareChanges(ctx context.Context, accountID string) ([]ShareChange, error) {
 	changes, err := s.q.ListShareChanges(ctx, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list share changes: %w", err)
 	}
+	dates, err := s.eventDates(ctx)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]ShareChange, len(changes))
 	for i, c := range changes {
-		result[i] = shareChangeFromDB(c)
+		result[i] = shareChangeFromDB(c, ownDate(dates, c.EventID))
 	}
+	slices.SortStableFunc(result, compareShareChanges)
 	return result, nil
+}
+
+// compareShareChanges orders share changes by date and ID.
+func compareShareChanges(a, b ShareChange) int {
+	return cmp.Or(cmp.Compare(a.Date, b.Date), cmp.Compare(a.ID, b.ID))
 }
 
 func (s *Service) DeleteShareChange(ctx context.Context, id string) error {
@@ -514,47 +585,6 @@ type startupShares struct {
 	options      []StartupShareOption // by grant date and ID
 }
 
-// listStartupShares returns every Startup Share account, keyed by account ID, with a fixed number of
-// queries.
-func (s *Service) listStartupShares(ctx context.Context) (map[string]*startupShares, error) {
-	accounts, err := s.q.ListStartupShareAccounts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing startup share accounts: %w", err)
-	}
-	rounds, err := s.q.ListAllInvestmentRounds(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing investment rounds: %w", err)
-	}
-	changes, err := s.q.ListAllShareChanges(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing share changes: %w", err)
-	}
-	options, err := s.q.ListAllStartupShareOptions(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing startup share options: %w", err)
-	}
-	byAccount := make(map[string]*startupShares, len(accounts))
-	for _, a := range accounts {
-		byAccount[a.AccountID] = &startupShares{StartupShareAccount: startupShareAccountFromDB(a)}
-	}
-	for _, r := range rounds {
-		if ss, ok := byAccount[r.AccountID]; ok {
-			ss.rounds = append(ss.rounds, investmentRoundFromDB(r))
-		}
-	}
-	for _, c := range changes {
-		if ss, ok := byAccount[c.AccountID]; ok {
-			ss.shareChanges = append(ss.shareChanges, shareChangeFromDB(c))
-		}
-	}
-	for _, o := range options {
-		if ss, ok := byAccount[o.AccountID]; ok {
-			ss.options = append(ss.options, startupShareOptionFromDB(o))
-		}
-	}
-	return byAccount, nil
-}
-
 // latestRoundOn is the latest investment round on or before day with shares and a price per share,
 // or nil without one.
 func (ss *startupShares) latestRoundOn(day date.Date) *InvestmentRound {
@@ -651,48 +681,14 @@ func (ss *startupShares) history(ucfg *uncertain.Config, start date.Date, isFore
 	return history
 }
 
-// startupShareHistory is a Startup Share account without regular snapshots: its balance is derived
-// from its investment rounds and share changes.
-type startupShareHistory struct {
-	typeID       string // "" for Uncategorized
-	rounds       []pdb.ListStartupShareSnapshotHistoryRow
-	shareChanges []ShareChange
-}
-
-// listStartupShareHistories returns the Startup Share accounts with investment rounds, keyed by
-// account ID.
-func (s *Service) listStartupShareHistories(ctx context.Context) (map[string]*startupShareHistory, error) {
-	rows, err := s.q.ListStartupShareSnapshotHistory(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing startup share snapshot history: %w", err)
-	}
-	histories := make(map[string]*startupShareHistory)
-	for _, r := range rows {
-		h, ok := histories[r.AccountID]
-		if !ok {
-			h = &startupShareHistory{typeID: r.TypeID}
-			histories[r.AccountID] = h
-		}
-		h.rounds = append(h.rounds, r)
-	}
-	for accountID, h := range histories {
-		changes, err := s.ListShareChanges(ctx, accountID)
-		if err != nil {
-			return nil, fmt.Errorf("listing share changes for %s: %w", accountID, err)
-		}
-		h.shareChanges = changes
-	}
-	return histories, nil
-}
-
 // balanceOn is the account's balance on day, the mean of the value derived from its latest
 // investment round and its share changes on or before day. ok is false when there is no such
 // investment round, or it has no shares or no price per share.
-func (h *startupShareHistory) balanceOn(ucfg *uncertain.Config, day date.Date) (balance float64, ok bool) {
-	var best *pdb.ListStartupShareSnapshotHistoryRow
-	for i := range h.rounds {
-		if date.Date(h.rounds[i].Date) <= day {
-			best = &h.rounds[i]
+func (ss *startupShares) balanceOn(ucfg *uncertain.Config, day date.Date) (balance float64, ok bool) {
+	var best *InvestmentRound
+	for i := range ss.rounds {
+		if !ss.rounds[i].Date.After(day) {
+			best = &ss.rounds[i]
 		}
 	}
 	if best == nil {
@@ -702,14 +698,52 @@ func (h *startupShareHistory) balanceOn(ucfg *uncertain.Config, day date.Date) (
 	if !(postMoneyShares > 0) { // NaN when the round has neither a valuation nor an investment
 		return 0, false
 	}
-	sharesOwned, avgPurchasePrice := DeriveShareState(h.shareChanges, day)
+	sharesOwned, avgPurchasePrice := DeriveShareState(ss.shareChanges, day)
 	return CalculateStartupShareBalance(
 		ucfg,
 		uncertain.NewFixed(postMoneyValuation),
 		sharesOwned,
 		avgPurchasePrice,
-		best.TaxRate,
+		ss.TaxRate,
 		postMoneyShares,
-		best.ValuationDiscountFactor,
+		ss.ValuationDiscountFactor,
 	).Mean(), true
+}
+
+// summaryOn is what the account holds on day: the shares of its share changes on or before day, and the
+// total shares after its latest investment round on or before day.
+func (ss *startupShares) summaryOn(day date.Date) DerivedStartupShareSummary {
+	var totalShares float64
+	for _, r := range ss.rounds {
+		if !r.Date.After(day) {
+			_, totalShares = PostMoneyValuationAndShares(r.Valuation, r.PreMoneyShares, r.Investment)
+		}
+	}
+	sharesOwned, avgPrice := DeriveShareState(ss.shareChanges, day)
+	return DerivedStartupShareSummary{SharesOwned: sharesOwned, TotalShares: totalShares, AvgPurchasePricePerShare: avgPrice}
+}
+
+// startupShareSummary is what the Startup Share account accountID holds on day in the Baseline, or,
+// when the Baseline leaves it out, with every Event at its own date. It is nil for an account that
+// isn't a Startup Share account.
+func (s *Service) startupShareSummary(ctx context.Context, accountID string, day date.Date) (*DerivedStartupShareSummary, error) {
+	events, err := s.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stored, err := s.loadStoredEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, placements := range []EventPlacements{nil, asStored(events)} {
+		p, err := placeEntries(events, stored, placements)
+		if err != nil {
+			return nil, err
+		}
+		if ss, ok := p.startupShares[accountID]; ok {
+			summary := ss.summaryOn(day)
+			return &summary, nil
+		}
+	}
+	return nil, nil
 }

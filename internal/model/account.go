@@ -298,14 +298,8 @@ func (s *Service) ListAccountsDetailed(ctx context.Context, today date.Date) ([]
 	if err != nil {
 		return nil, err
 	}
-	startupShares, err := s.listStartupShares(ctx)
-	if err != nil {
-		return nil, err
-	}
-	startupShareAccounts := make(map[string]StartupShareAccount, len(startupShares))
 	ucfg := uncertain.NewConfig(time.Now().UnixMilli(), 1)
-	for accountID, ss := range startupShares {
-		startupShareAccounts[accountID] = ss.StartupShareAccount
+	for accountID, ss := range p.startupShares {
 		if _, hasSnapshot := snapshots[accountID]; hasSnapshot {
 			continue
 		}
@@ -313,7 +307,7 @@ func (s *Service) ListAccountsDetailed(ctx context.Context, today date.Date) ([]
 			snapshots[accountID] = AccountSnapshot{AccountID: accountID, Date: round.Date, Balance: ss.growthOn(today).Balance(ucfg)}
 		}
 	}
-	return accountsDetailed(accs, snapshots, growthModelsAppliedOn(p, today), startupShareAccounts), nil
+	return accountsDetailed(accs, snapshots, growthModelsAppliedOn(p, today), p.startupShareAccounts), nil
 }
 
 type AccountsView struct {
@@ -525,21 +519,8 @@ func (s *Service) GetAccountEditPageData(ctx context.Context, accountID string, 
 		if err != nil {
 			return nil, fmt.Errorf("listing startup share options: %w", err)
 		}
-		today := date.Today()
-		var postShares float64
-		round, roundErr := s.GetLatestInvestmentRound(ctx, acc.ID, today)
-		if roundErr != nil {
-			if !errors.Is(roundErr, sql.ErrNoRows) {
-				return nil, fmt.Errorf("getting latest investment round: %w", roundErr)
-			}
-		} else {
-			_, postShares = PostMoneyValuationAndShares(round.Valuation, round.PreMoneyShares, round.Investment)
-		}
-		sharesOwned, avgPrice := DeriveShareState(shareChanges, today)
-		derivedSummary = &DerivedStartupShareSummary{
-			SharesOwned:              sharesOwned,
-			TotalShares:              postShares,
-			AvgPurchasePricePerShare: avgPrice,
+		if derivedSummary, err = s.startupShareSummary(ctx, acc.ID, date.Today()); err != nil {
+			return nil, err
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("getting startup share account: %w", err)

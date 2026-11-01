@@ -35,7 +35,7 @@ func (s *Service) TransferSchedule(ctx context.Context) (*TransferSchedule, erro
 // transferSchedule is the Transfer Schedule of p: its Transfer Templates with those generated from
 // Salaries and Bills, but those that use an Account p leaves out.
 func (s *Service) transferSchedule(ctx context.Context, p *plans) (*TransferSchedule, error) {
-	salaryTemplates, err := s.generateSalaryTransferTemplates(ctx)
+	salaryTemplates, err := s.salaryTransferTemplates(ctx, p.salaries)
 	if err != nil {
 		return nil, fmt.Errorf("generating salary transfer templates: %w", err)
 	}

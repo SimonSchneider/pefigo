@@ -176,6 +176,56 @@ func (s *Service) offsetEvent(ctx context.Context, offsetEventID, eventID string
 	return offsetEventID, d, err
 }
 
+// entryDating is how an entry input in an Event gives its dates and how they are stored: offsets in its
+// form are days after the date of the Event its form showed them for, and its dates are stored as days
+// after its own Event's date.
+type entryDating struct {
+	eventID       string
+	at            date.Date // the date its dates are stored after: its Event's, or day 0
+	offsetEventID string
+	offsetAt      date.Date
+}
+
+// entryDating is how an input in the Event eventID gives and stores its dates, with offsets given
+// after offsetEventID, or eventID when blank. An Event that doesn't exist is invalid input.
+func (s *Service) entryDating(ctx context.Context, eventID, offsetEventID string) (entryDating, error) {
+	at, err := s.eventDate(ctx, eventID)
+	if err != nil {
+		return entryDating{}, err
+	}
+	offsetEventID, offsetAt, err := s.offsetEvent(ctx, offsetEventID, eventID, at)
+	if err != nil {
+		return entryDating{}, err
+	}
+	return entryDating{eventID: eventID, at: at, offsetEventID: offsetEventID, offsetAt: offsetAt}, nil
+}
+
+// date is the date d an input gives, or offset days after the date its form showed them for. what
+// names the date in an error.
+func (d entryDating) date(what string, given date.Date, offset *date.Duration) (date.Date, error) {
+	return givenDate(what, given, offset, d.offsetEventID, d.offsetAt)
+}
+
+// startDate is the date an input gives for the first day it applies: in an Event, the Event's date
+// when none is given.
+func (d entryDating) startDate(what string, given date.Date, offset *date.Duration) (date.Date, error) {
+	day, err := d.date(what, given, offset)
+	if err == nil && d.eventID != "" && day.IsZero() {
+		day = d.at
+	}
+	return day, err
+}
+
+// endDate is the End Date an input gives, which may be none.
+func (d entryDating) endDate(given *date.Date, offset *date.Duration) (*date.Date, error) {
+	return givenEndDate(given, offset, d.offsetEventID, d.offsetAt)
+}
+
+// store is day as stored: days after the entry's Event's date.
+func (d entryDating) store(day date.Date) int64 {
+	return storeDate(day, d.at)
+}
+
 // givenEndDate is givenDate for an End Date, which may be none.
 func givenEndDate(d *date.Date, offset *date.Duration, eventID string, at date.Date) (*date.Date, error) {
 	if offset == nil {
@@ -330,24 +380,93 @@ func (s *Service) setEntryEvent(ctx context.Context, entry EventEntry, eventID s
 // storedEntries are every stored entry an Event can add, as stored: the dates of an Event's entries
 // are offsets from its date.
 type storedEntries struct {
-	accounts          []pdb.Account
-	growthModels      []pdb.GrowthModel
-	transferTemplates []pdb.TransferTemplate
+	accounts              []pdb.Account
+	growthModels          []pdb.GrowthModel
+	transferTemplates     []pdb.TransferTemplate
+	salaries              []pdb.Salary
+	salaryAmounts         []pdb.SalaryAmount
+	salaryAdjustments     []pdb.SalaryAdjustment
+	partialParentalLeaves []pdb.PartialParentalLeave
+	fullParentalLeaves    []pdb.FullParentalLeave
+	salaryEnds            []pdb.SalaryEnd
+	bills                 []pdb.Bill
+	billAmounts           []pdb.BillAmount
+	billEnds              []pdb.BillEnd
+	startupShareAccounts  []pdb.StartupShareAccount
+	investmentRounds      []pdb.InvestmentRound
+	shareChanges          []pdb.ShareChange
+	startupShareOptions   []pdb.StartupShareOption
 }
 
 func (s *Service) loadStoredEntries(ctx context.Context) (storedEntries, error) {
 	var st storedEntries
-	var err error
-	if st.accounts, err = s.q.ListAccounts(ctx); err != nil {
-		return st, fmt.Errorf("listing accounts: %w", err)
-	}
-	if st.growthModels, err = s.q.ListGrowthModels(ctx); err != nil {
-		return st, fmt.Errorf("listing growth models: %w", err)
-	}
-	if st.transferTemplates, err = s.q.GetTransferTemplates(ctx); err != nil {
-		return st, fmt.Errorf("listing transfer templates: %w", err)
+	for _, load := range []func() error{
+		func() (err error) { st.accounts, err = s.q.ListAccounts(ctx); return wrap(err, "listing accounts") },
+		func() (err error) {
+			st.growthModels, err = s.q.ListGrowthModels(ctx)
+			return wrap(err, "listing growth models")
+		},
+		func() (err error) {
+			st.transferTemplates, err = s.q.GetTransferTemplates(ctx)
+			return wrap(err, "listing transfer templates")
+		},
+		func() (err error) { st.salaries, err = s.q.ListSalaries(ctx); return wrap(err, "listing salaries") },
+		func() (err error) {
+			st.salaryAmounts, err = s.q.ListAllSalaryAmounts(ctx)
+			return wrap(err, "listing salary amounts")
+		},
+		func() (err error) {
+			st.salaryAdjustments, err = s.q.ListAllSalaryAdjustments(ctx)
+			return wrap(err, "listing salary adjustments")
+		},
+		func() (err error) {
+			st.partialParentalLeaves, err = s.q.ListAllPartialParentalLeaves(ctx)
+			return wrap(err, "listing partial parental leaves")
+		},
+		func() (err error) {
+			st.fullParentalLeaves, err = s.q.ListAllFullParentalLeaves(ctx)
+			return wrap(err, "listing full parental leaves")
+		},
+		func() (err error) {
+			st.salaryEnds, err = s.q.ListAllSalaryEnds(ctx)
+			return wrap(err, "listing salary ends")
+		},
+		func() (err error) { st.bills, err = s.q.ListAllBills(ctx); return wrap(err, "listing bills") },
+		func() (err error) {
+			st.billAmounts, err = s.q.ListAllBillAmounts(ctx)
+			return wrap(err, "listing bill amounts")
+		},
+		func() (err error) { st.billEnds, err = s.q.ListAllBillEnds(ctx); return wrap(err, "listing bill ends") },
+		func() (err error) {
+			st.startupShareAccounts, err = s.q.ListStartupShareAccounts(ctx)
+			return wrap(err, "listing startup share accounts")
+		},
+		func() (err error) {
+			st.investmentRounds, err = s.q.ListAllInvestmentRounds(ctx)
+			return wrap(err, "listing investment rounds")
+		},
+		func() (err error) {
+			st.shareChanges, err = s.q.ListAllShareChanges(ctx)
+			return wrap(err, "listing share changes")
+		},
+		func() (err error) {
+			st.startupShareOptions, err = s.q.ListAllStartupShareOptions(ctx)
+			return wrap(err, "listing startup share options")
+		},
+	} {
+		if err := load(); err != nil {
+			return st, err
+		}
 	}
 	return st, nil
+}
+
+// wrap is err, if any, with what was being done.
+func wrap(err error, doing string) error {
+	if err != nil {
+		return fmt.Errorf("%s: %w", doing, err)
+	}
+	return nil
 }
 
 // EventGrowthModel is a growth model of an Event, at the Event's date.

@@ -58,10 +58,11 @@ INSERT INTO bill (
     enabled,
     notes,
     url,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET bill_account_id = EXCLUDED.bill_account_id,
   name = EXCLUDED.name,
@@ -69,6 +70,7 @@ SET bill_account_id = EXCLUDED.bill_account_id,
   enabled = EXCLUDED.enabled,
   notes = EXCLUDED.notes,
   url = EXCLUDED.url,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
 RETURNING *;
 
@@ -80,12 +82,12 @@ WHERE id = ?;
 SELECT *
 FROM bill_amount
 WHERE bill_id = ?
-ORDER BY start_date, id;
+ORDER BY id;
 
 -- name: ListAllBillAmounts :many
 SELECT *
 FROM bill_amount
-ORDER BY bill_id, start_date, id;
+ORDER BY bill_id, id;
 
 -- name: UpsertBillAmount :one
 INSERT INTO bill_amount (
@@ -96,10 +98,11 @@ INSERT INTO bill_amount (
     currency,
     start_date,
     end_date,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET bill_id = EXCLUDED.bill_id,
   amount = EXCLUDED.amount,
@@ -107,9 +110,39 @@ SET bill_id = EXCLUDED.bill_id,
   currency = EXCLUDED.currency,
   start_date = EXCLUDED.start_date,
   end_date = EXCLUDED.end_date,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
 RETURNING *;
 
 -- name: DeleteBillAmount :exec
 DELETE FROM bill_amount
+WHERE id = ?;
+
+-- name: GetBillAmount :one
+SELECT *
+FROM bill_amount
+WHERE id = ?;
+
+-- name: ListAllBillEnds :many
+SELECT *
+FROM bill_end
+ORDER BY bill_id, id;
+
+-- name: GetBillEnd :one
+SELECT *
+FROM bill_end
+WHERE id = ?;
+
+-- name: UpsertBillEnd :one
+INSERT INTO bill_end (id, bill_id, date, event_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+UPDATE
+SET bill_id = EXCLUDED.bill_id,
+  date = EXCLUDED.date,
+  event_id = EXCLUDED.event_id,
+  updated_at = EXCLUDED.updated_at
+RETURNING *;
+
+-- name: DeleteBillEnd :exec
+DELETE FROM bill_end
 WHERE id = ?;

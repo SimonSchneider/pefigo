@@ -27,6 +27,7 @@ type forecastInputIDs struct {
 	salaryAdjustment      string
 	partialParentalLeave  string
 	fullParentalLeave     string
+	salaryEnd             string
 	billAccount           string
 	bill                  string
 	billAmount            string
@@ -142,6 +143,12 @@ func forecastInputMutations() []forecastInputMutation {
 		}},
 		{"DeleteFullParentalLeave", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.DeleteFullParentalLeave(ctx, ids.fullParentalLeave)
+		}},
+		{"UpsertSalaryEnd", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return discard(svc.UpsertSalaryEnd(ctx, model.SalaryEnd{SalaryID: ids.salary, Date: mustParseDate("2030-01-01")}))
+		}},
+		{"DeleteSalaryEnd", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return svc.DeleteSalaryEnd(ctx, ids.salaryEnd)
 		}},
 		// settings.go
 		{"SetDefaultCurrency", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
@@ -437,6 +444,9 @@ func seedForecastInputs(t *testing.T, svc *model.Service) forecastInputIDs {
 	})
 	must("full parental leave", err)
 	ids.fullParentalLeave = fpl.ID
+	end, err := svc.UpsertSalaryEnd(ctx, model.SalaryEnd{SalaryID: sal.ID, Date: mustParseDate("2031-01-01")})
+	must("salary end", err)
+	ids.salaryEnd = end.ID
 
 	ba, err := svc.UpsertBillAccount(ctx, model.BillAccount{Name: "Bills", FromAccountID: acc.ID, Recurrence: "*-*-01", Enabled: true})
 	must("bill account", err)

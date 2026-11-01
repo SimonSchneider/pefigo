@@ -3,7 +3,6 @@ package model
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/pkg/finance"
@@ -41,10 +40,6 @@ func (s *Service) loadForecast(ctx context.Context, placements EventPlacements) 
 	if err != nil {
 		return nil, fmt.Errorf("placing the events: %w", err)
 	}
-	allStartupShares, err := s.listStartupShares(ctx)
-	if err != nil {
-		return nil, err
-	}
 	snapshotRows, err := s.q.ListSnapshots(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing snapshots: %w", err)
@@ -72,24 +67,13 @@ func (s *Service) loadForecast(ctx context.Context, placements EventPlacements) 
 		accounts:      p.accounts,
 		snapshots:     make(map[string][]AccountSnapshot),
 		growthModels:  make(map[string]finance.GrowthModel, len(p.accounts)),
-		startupShares: make(map[string]*startupShares, len(allStartupShares)),
+		startupShares: p.startupShares,
 		sweParams:     sweParams,
 		schedule:      schedule,
 	}
-	for accountID, ss := range allStartupShares {
-		if p.leftOutAccounts[accountID] {
-			continue
-		}
-		// An Option funded by a left-out Account is left out with it, as a Transfer Template from it is.
-		placed := *ss
-		placed.options = slices.DeleteFunc(slices.Clone(ss.options), func(o StartupShareOption) bool {
-			return p.leftOutAccounts[o.SourceAccountID]
-		})
-		f.startupShares[accountID] = &placed
-	}
 	// A Startup Share account's balance is derived, so its Snapshots are ignored.
 	for _, row := range snapshotRows {
-		if _, ok := allStartupShares[row.AccountID]; ok {
+		if _, ok := p.startupShareAccounts[row.AccountID]; ok {
 			continue
 		}
 		snap := accountSnapshotFromDB(row)

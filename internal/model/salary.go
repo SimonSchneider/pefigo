@@ -1,7 +1,9 @@
 package model
 
 import (
+	"cmp"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -30,15 +32,68 @@ type Salary struct {
 	Forsamling            string
 	ChurchMember          bool
 	IsGross               bool
+	// EventID is the Event the Salary is in, or "" in the Baseline. A Salary has no dates of its own:
+	// when its Event is left out, it is left out with every part of it.
+	EventID               string
 	Amounts               []SalaryAmount
 	Adjustments           []SalaryAdjustment
 	PartialParentalLeaves []PartialParentalLeave
 	FullParentalLeaves    []FullParentalLeave
+	// Ends are the days the Salary may end on: it pays nothing from the earliest of them.
+	Ends []SalaryEnd
 
 	// segments are a loaded Gross Salary's Salary Segments, unless segmentsErr kept them from being
 	// computed. See Service.loadSalaries.
 	segments    []SalarySegment
 	segmentsErr error
+	// paid is how the Baseline pays a Salary loaded for its pages, whose parts are each at their own
+	// Event's date: a Salary without parts when the Baseline leaves it out. It is nil for a Salary as it
+	// is paid. See Salary.payment.
+	paid *Salary
+}
+
+// SalaryEnd is a day a Salary may end on: from it, no Salary Amount applies and nothing of the Salary
+// is paid. In an Event its date is stored as days after the Event's date.
+type SalaryEnd struct {
+	ID       string
+	SalaryID string
+	Date     date.Date
+	EventID  string
+	// DateOffset, when set, gives the date in an Event as days after the date of OffsetEventID, the
+	// Event the form showed it for, or of EventID when that is blank.
+	DateOffset    *date.Duration
+	OffsetEventID string
+}
+
+// payment is the Salary as it is paid: how the Baseline pays it when it is loaded for its pages, and
+// the Salary itself otherwise.
+func (s Salary) payment() Salary {
+	if s.paid != nil {
+		return *s.paid
+	}
+	return s
+}
+
+// InBaseline reports whether the Baseline pays the Salary: not when its Event is unplanned.
+func (s Salary) InBaseline() bool {
+	return s.paid == nil || s.paid.ID != ""
+}
+
+// End is the first day the Salary pays nothing: the earliest of its Ends, or nil without one.
+func (s Salary) End() *date.Date {
+	var end *date.Date
+	for _, e := range s.Ends {
+		if end == nil || e.Date.Before(*end) {
+			end = &e.Date
+		}
+	}
+	return end
+}
+
+// endsBefore reports whether the Salary has ended by day.
+func (s Salary) endsBefore(day date.Date) bool {
+	end := s.End()
+	return end != nil && !day.Before(*end)
 }
 
 // SalarySegment is a Salary Segment of a Gross Salary: from its Start Date up to its End Date, the
@@ -60,28 +115,38 @@ type SalaryBreakdown struct {
 	PensionContribution *float64
 }
 
-// Segments returns a loaded Gross Salary's Salary Segments, or the error that kept them from being
-// computed. A net Salary has none.
+// Segments returns the Salary Segments a loaded Gross Salary is paid in, or the error that kept them
+// from being computed. A net Salary has none.
 func (s Salary) Segments() ([]SalarySegment, error) {
-	return s.segments, s.segmentsErr
+	paid := s.payment()
+	return paid.segments, paid.segmentsErr
 }
 
 // CurrentSegment is the Salary Segment of a loaded Gross Salary that today is in, or nil without one.
 func (s Salary) CurrentSegment() *SalarySegment {
 	today := date.Today()
-	for i, seg := range s.segments {
+	segments, _ := s.Segments()
+	for i, seg := range segments {
 		if seg.StartDate <= today && (seg.EndDate == nil || today < *seg.EndDate) {
-			return &s.segments[i]
+			return &segments[i]
 		}
 	}
 	return nil
 }
 
+// The dated parts of a Salary each belong to at most one Event, which may differ from the Salary's:
+// an Event may add a part to a Salary outside it. In an Event a part's dates are stored as days after
+// the Event's date, and its form may give them so, after the date of OffsetEventID, the Event the form
+// showed them for, or of EventID when that is blank.
+
 type SalaryAmount struct {
-	ID        string
-	SalaryID  string
-	Amount    uncertain.Value
-	StartDate date.Date
+	ID            string
+	SalaryID      string
+	Amount        uncertain.Value
+	StartDate     date.Date
+	EventID       string
+	StartOffset   *date.Duration
+	OffsetEventID string
 }
 
 type SalaryAdjustment struct {
@@ -92,6 +157,9 @@ type SalaryAdjustment struct {
 	SickDaysPerOccasion  float64
 	SickOccasionsPerYear float64
 	VABDaysPerYear       float64
+	EventID              string
+	ValidFromOffset      *date.Duration
+	OffsetEventID        string
 }
 
 type PartialParentalLeave struct {
@@ -102,6 +170,10 @@ type PartialParentalLeave struct {
 	SjukDaysPerYear        float64
 	LagstaDaysPerYear      float64
 	SkippedWorkDaysPerYear float64
+	EventID                string
+	StartOffset            *date.Duration
+	EndOffset              *date.Duration
+	OffsetEventID          string
 }
 
 type FullParentalLeave struct {
@@ -110,6 +182,10 @@ type FullParentalLeave struct {
 	StartDate       date.Date
 	EndDate         date.Date
 	SjukDaysPerWeek float64
+	EventID         string
+	StartOffset     *date.Duration
+	EndOffset       *date.Duration
+	OffsetEventID   string
 }
 
 // GenerateTransferTemplates returns what the Salary pays: each Salary Amount of a net Salary, and each
@@ -147,9 +223,13 @@ func (s Salary) GenerateTransferTemplates() ([]TransferTemplate, error) {
 		sort.Slice(sorted, func(i, j int) bool {
 			return sorted[i].StartDate < sorted[j].StartDate
 		})
+		end := s.End()
 		for i, amt := range sorted {
-			var endDate *date.Date
-			if i+1 < len(sorted) {
+			if s.endsBefore(amt.StartDate) {
+				break
+			}
+			endDate := end
+			if i+1 < len(sorted) && (endDate == nil || sorted[i+1].StartDate.Before(*endDate)) {
 				ed := sorted[i+1].StartDate
 				endDate = &ed
 			}
@@ -161,8 +241,8 @@ func (s Salary) GenerateTransferTemplates() ([]TransferTemplate, error) {
 	if s.segmentsErr != nil {
 		return nil, fmt.Errorf("salary %q: %w", s.Name, s.segmentsErr)
 	}
-	// A loaded Gross Salary with a Salary Amount has a Salary Segment from its Start Date.
-	if len(s.segments) == 0 && len(s.Amounts) > 0 {
+	// A loaded Gross Salary with a Salary Amount before its End has a Salary Segment from its Start Date.
+	if len(s.segments) == 0 && len(s.segmentStartDates(nil)) > 0 {
 		return nil, fmt.Errorf("salary %q is not loaded: it has no Salary Segments", s.Name)
 	}
 	for i, seg := range s.segments {
@@ -192,10 +272,12 @@ func salaryFromDB(s pdb.Salary) Salary {
 		Forsamling:       s.Forsamling,
 		ChurchMember:     s.ChurchMember,
 		IsGross:          s.IsGross,
+		EventID:          ui.OrDefault(s.EventID),
 	}
 }
 
-func salaryAmountFromDB(a pdb.SalaryAmount) (SalaryAmount, error) {
+// salaryAmountFromDB is the stored Salary Amount a with its Event at at.
+func salaryAmountFromDB(a pdb.SalaryAmount, at date.Date) (SalaryAmount, error) {
 	var amount uncertain.Value
 	if err := amount.Decode(a.Amount); err != nil {
 		return SalaryAmount{}, fmt.Errorf("decoding salary amount: %w", err)
@@ -204,8 +286,14 @@ func salaryAmountFromDB(a pdb.SalaryAmount) (SalaryAmount, error) {
 		ID:        a.ID,
 		SalaryID:  a.SalaryID,
 		Amount:    amount,
-		StartDate: date.Date(a.StartDate),
+		StartDate: placeDate(a.StartDate, at),
+		EventID:   ui.OrDefault(a.EventID),
 	}, nil
+}
+
+// salaryEndFromDB is the stored end e with its Event at at.
+func salaryEndFromDB(e pdb.SalaryEnd, at date.Date) SalaryEnd {
+	return SalaryEnd{ID: e.ID, SalaryID: e.SalaryID, Date: placeDate(e.Date, at), EventID: ui.OrDefault(e.EventID)}
 }
 
 // DefaultSalaryRecurrence is the recurrence of a Salary saved without one: the 25th of every month.
@@ -220,6 +308,9 @@ func (s *Service) UpsertSalary(ctx context.Context, inp Salary) (Salary, error) 
 		taxedBy = errors.Join(checkRequired("kommun", inp.Kommun), checkRequired("församling", inp.Forsamling))
 	}
 	if err := errors.Join(checkRequired("name", inp.Name), checkDatePattern("salary recurrence", inp.Recurrence), taxedBy); err != nil {
+		return Salary{}, err
+	}
+	if _, err := s.eventDate(ctx, inp.EventID); err != nil {
 		return Salary{}, err
 	}
 	if inp.ID == "" {
@@ -239,6 +330,7 @@ func (s *Service) UpsertSalary(ctx context.Context, inp Salary) (Salary, error) 
 		Forsamling:       inp.Forsamling,
 		ChurchMember:     inp.ChurchMember,
 		IsGross:          inp.IsGross,
+		EventID:          ui.WithDefaultNull(inp.EventID),
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	})
@@ -262,82 +354,65 @@ func (s *Service) GetSalary(ctx context.Context, id string) (Salary, error) {
 	return salaries[0], nil
 }
 
-// loadSalaries returns every Salary, or only the Salary id when id isn't empty, with everything it is
-// paid by: its Salary Amounts, adjustments and parental leaves, and a Gross Salary its Salary Segments,
-// segmented once, or the error that kept them from being computed.
+// loadSalaries returns every Salary, or only the Salary id when id isn't empty, with every part of it
+// at its own Event's date, as its forms edit it. What it pays is how the Baseline pays it: its Salary
+// Segments and current amount leave out what unplanned Events add or end, and a Salary in an unplanned
+// Event pays nothing. A Gross Salary the Baseline pays is segmented once, or carries the error that kept
+// it from being segmented.
 func (s *Service) loadSalaries(ctx context.Context, id string) ([]Salary, error) {
-	var rows []pdb.Salary
-	if id == "" {
-		var err error
-		if rows, err = s.q.ListSalaries(ctx); err != nil {
-			return nil, fmt.Errorf("listing salaries: %w", err)
+	events, err := s.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stored, err := s.loadStoredEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	own, err := placeEntries(events, stored, asStored(events))
+	if err != nil {
+		return nil, err
+	}
+	baseline, err := placeEntries(events, stored, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.segmentSalaries(ctx, baseline.salaries); err != nil {
+		return nil, err
+	}
+	paid := make(map[string]*Salary, len(baseline.salaries))
+	for i := range baseline.salaries {
+		paid[baseline.salaries[i].ID] = &baseline.salaries[i]
+	}
+	var salaries []Salary
+	for _, sal := range own.salaries {
+		if id != "" && sal.ID != id {
+			continue
 		}
-	} else {
-		row, err := s.q.GetSalary(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("getting salary: %w", err)
+		sal.paid = paid[sal.ID]
+		if sal.paid == nil {
+			sal.paid = &Salary{}
 		}
-		rows = []pdb.Salary{row}
+		salaries = append(salaries, sal)
 	}
-
-	allAmounts, err := s.q.ListAllSalaryAmounts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing salary amounts: %w", err)
-	}
-	amountsBySalary := make(map[string][]SalaryAmount)
-	for _, a := range allAmounts {
-		parsed, err := salaryAmountFromDB(a)
-		if err != nil {
-			return nil, err
-		}
-		amountsBySalary[a.SalaryID] = append(amountsBySalary[a.SalaryID], parsed)
-	}
-
-	allAdjustments, err := s.q.ListAllSalaryAdjustments(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing salary adjustments: %w", err)
-	}
-	adjustmentsBySalary := make(map[string][]SalaryAdjustment)
-	for _, a := range allAdjustments {
-		adjustmentsBySalary[a.SalaryID] = append(adjustmentsBySalary[a.SalaryID], salaryAdjustmentFromDB(a))
-	}
-
-	allPartialPLs, err := s.q.ListAllPartialParentalLeaves(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing partial parental leaves: %w", err)
-	}
-	partialPLsBySalary := make(map[string][]PartialParentalLeave)
-	for _, a := range allPartialPLs {
-		partialPLsBySalary[a.SalaryID] = append(partialPLsBySalary[a.SalaryID], partialParentalLeaveFromDB(a))
-	}
-
-	allFullPLs, err := s.q.ListAllFullParentalLeaves(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing full parental leaves: %w", err)
-	}
-	fullPLsBySalary := make(map[string][]FullParentalLeave)
-	for _, a := range allFullPLs {
-		fullPLsBySalary[a.SalaryID] = append(fullPLsBySalary[a.SalaryID], fullParentalLeaveFromDB(a))
-	}
-
-	params, err := s.ListSweYearlyParams(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing swe yearly params: %w", err)
-	}
-
-	salaries := make([]Salary, 0, len(rows))
-	for _, row := range rows {
-		salary := salaryFromDB(row)
-		salary.Amounts = amountsBySalary[salary.ID]
-		salary.Adjustments = adjustmentsBySalary[salary.ID]
-		salary.PartialParentalLeaves = partialPLsBySalary[salary.ID]
-		salary.FullParentalLeaves = fullPLsBySalary[salary.ID]
-		if salary.IsGross {
-			salary.segments, salary.segmentsErr = s.segment(ctx, salary, params)
-		}
-		salaries = append(salaries, salary)
+	if id != "" && len(salaries) == 0 {
+		return nil, fmt.Errorf("getting salary: %w", sql.ErrNoRows)
 	}
 	return salaries, nil
+}
+
+// segmentSalaries segments each Gross Salary of salaries, or keeps the error that kept it from being
+// segmented on it.
+func (s *Service) segmentSalaries(ctx context.Context, salaries []Salary) error {
+	params, err := s.ListSweYearlyParams(ctx)
+	if err != nil {
+		return fmt.Errorf("listing swe yearly params: %w", err)
+	}
+	for i := range salaries {
+		if salaries[i].IsGross {
+			salaries[i].segments, salaries[i].segmentsErr = s.segment(ctx, salaries[i], params)
+		}
+	}
+	return nil
 }
 
 func (s *Service) DeleteSalary(ctx context.Context, id string) error {
@@ -348,6 +423,13 @@ func (s *Service) DeleteSalary(ctx context.Context, id string) error {
 }
 
 func (s *Service) UpsertSalaryAmount(ctx context.Context, inp SalaryAmount) (SalaryAmount, error) {
+	dating, err := s.entryDating(ctx, inp.EventID, inp.OffsetEventID)
+	if err != nil {
+		return SalaryAmount{}, err
+	}
+	if inp.StartDate, err = dating.startDate("start", inp.StartDate, inp.StartOffset); err != nil {
+		return SalaryAmount{}, err
+	}
 	if err := errors.Join(checkRequired("salary", inp.SalaryID), checkRequired("start date", inp.StartDate)); err != nil {
 		return SalaryAmount{}, err
 	}
@@ -363,29 +445,50 @@ func (s *Service) UpsertSalaryAmount(ctx context.Context, inp SalaryAmount) (Sal
 		ID:        inp.ID,
 		SalaryID:  inp.SalaryID,
 		Amount:    encoded,
-		StartDate: int64(inp.StartDate),
+		StartDate: dating.store(inp.StartDate),
+		EventID:   ui.WithDefaultNull(inp.EventID),
 		CreatedAt: now,
 		UpdatedAt: now,
 	})
 	if err != nil {
 		return SalaryAmount{}, fmt.Errorf("upserting salary amount: %w", err)
 	}
-	return salaryAmountFromDB(a)
+	return salaryAmountFromDB(a, dating.at)
 }
 
+// GetSalaryAmount returns the Salary Amount id, in an Event at the Event's date.
+func (s *Service) GetSalaryAmount(ctx context.Context, id string) (SalaryAmount, error) {
+	a, err := s.q.GetSalaryAmount(ctx, id)
+	if err != nil {
+		return SalaryAmount{}, fmt.Errorf("getting salary amount: %w", err)
+	}
+	at, err := s.eventDate(ctx, ui.OrDefault(a.EventID))
+	if err != nil {
+		return SalaryAmount{}, err
+	}
+	return salaryAmountFromDB(a, at)
+}
+
+// ListSalaryAmounts returns the Salary's Salary Amounts by Start Date, each in an Event at the Event's
+// date.
 func (s *Service) ListSalaryAmounts(ctx context.Context, salaryID string) ([]SalaryAmount, error) {
 	rows, err := s.q.ListSalaryAmounts(ctx, salaryID)
 	if err != nil {
 		return nil, fmt.Errorf("listing salary amounts: %w", err)
 	}
+	dates, err := s.eventDates(ctx)
+	if err != nil {
+		return nil, err
+	}
 	amounts := make([]SalaryAmount, 0, len(rows))
 	for _, r := range rows {
-		a, err := salaryAmountFromDB(r)
+		a, err := salaryAmountFromDB(r, ownDate(dates, r.EventID))
 		if err != nil {
 			return nil, err
 		}
 		amounts = append(amounts, a)
 	}
+	sortSalaryParts(&Salary{Amounts: amounts})
 	return amounts, nil
 }
 
@@ -396,19 +499,28 @@ func (s *Service) DeleteSalaryAmount(ctx context.Context, id string) error {
 	return nil
 }
 
-func salaryAdjustmentFromDB(a pdb.SalaryAdjustment) SalaryAdjustment {
+// salaryAdjustmentFromDB is the stored salary adjustment a with its Event at at.
+func salaryAdjustmentFromDB(a pdb.SalaryAdjustment, at date.Date) SalaryAdjustment {
 	return SalaryAdjustment{
 		ID:                   a.ID,
 		SalaryID:             a.SalaryID,
-		ValidFrom:            date.Date(a.ValidFrom),
+		ValidFrom:            placeDate(a.ValidFrom, at),
 		VacationDaysPerYear:  a.VacationDaysPerYear,
 		SickDaysPerOccasion:  a.SickDaysPerOccasion,
 		SickOccasionsPerYear: a.SickOccasionsPerYear,
 		VABDaysPerYear:       a.VabDaysPerYear,
+		EventID:              ui.OrDefault(a.EventID),
 	}
 }
 
 func (s *Service) UpsertSalaryAdjustment(ctx context.Context, inp SalaryAdjustment) (SalaryAdjustment, error) {
+	dating, err := s.entryDating(ctx, inp.EventID, inp.OffsetEventID)
+	if err != nil {
+		return SalaryAdjustment{}, err
+	}
+	if inp.ValidFrom, err = dating.startDate("valid from", inp.ValidFrom, inp.ValidFromOffset); err != nil {
+		return SalaryAdjustment{}, err
+	}
 	if err := errors.Join(checkRequired("salary", inp.SalaryID), checkRequired("valid from", inp.ValidFrom)); err != nil {
 		return SalaryAdjustment{}, err
 	}
@@ -419,29 +531,50 @@ func (s *Service) UpsertSalaryAdjustment(ctx context.Context, inp SalaryAdjustme
 	a, err := s.q.UpsertSalaryAdjustment(ctx, pdb.UpsertSalaryAdjustmentParams{
 		ID:                   inp.ID,
 		SalaryID:             inp.SalaryID,
-		ValidFrom:            int64(inp.ValidFrom),
+		ValidFrom:            dating.store(inp.ValidFrom),
 		VacationDaysPerYear:  inp.VacationDaysPerYear,
 		SickDaysPerOccasion:  inp.SickDaysPerOccasion,
 		SickOccasionsPerYear: inp.SickOccasionsPerYear,
 		VabDaysPerYear:       inp.VABDaysPerYear,
+		EventID:              ui.WithDefaultNull(inp.EventID),
 		CreatedAt:            now,
 		UpdatedAt:            now,
 	})
 	if err != nil {
 		return SalaryAdjustment{}, fmt.Errorf("upserting salary adjustment: %w", err)
 	}
-	return salaryAdjustmentFromDB(a), nil
+	return salaryAdjustmentFromDB(a, dating.at), nil
 }
 
+// GetSalaryAdjustment returns the salary adjustment id, in an Event at the Event's date.
+func (s *Service) GetSalaryAdjustment(ctx context.Context, id string) (SalaryAdjustment, error) {
+	a, err := s.q.GetSalaryAdjustment(ctx, id)
+	if err != nil {
+		return SalaryAdjustment{}, fmt.Errorf("getting salary adjustment: %w", err)
+	}
+	at, err := s.eventDate(ctx, ui.OrDefault(a.EventID))
+	if err != nil {
+		return SalaryAdjustment{}, err
+	}
+	return salaryAdjustmentFromDB(a, at), nil
+}
+
+// ListSalaryAdjustments returns the Salary's adjustments by the day they are valid from, each in an
+// Event at the Event's date.
 func (s *Service) ListSalaryAdjustments(ctx context.Context, salaryID string) ([]SalaryAdjustment, error) {
 	rows, err := s.q.ListSalaryAdjustments(ctx, salaryID)
 	if err != nil {
 		return nil, fmt.Errorf("listing salary adjustments: %w", err)
 	}
+	dates, err := s.eventDates(ctx)
+	if err != nil {
+		return nil, err
+	}
 	adjustments := make([]SalaryAdjustment, 0, len(rows))
 	for _, r := range rows {
-		adjustments = append(adjustments, salaryAdjustmentFromDB(r))
+		adjustments = append(adjustments, salaryAdjustmentFromDB(r, ownDate(dates, r.EventID)))
 	}
+	sortSalaryParts(&Salary{Adjustments: adjustments})
 	return adjustments, nil
 }
 
@@ -460,19 +593,35 @@ func checkParentalLeave(salaryID string, start, end date.Date) error {
 	return checkEndDate(start, &end)
 }
 
-func partialParentalLeaveFromDB(a pdb.PartialParentalLeave) PartialParentalLeave {
+// leaveDates are the Start and End Dates of a parental leave input, as dating gives them.
+func leaveDates(dating entryDating, start, end date.Date, startOffset, endOffset *date.Duration) (date.Date, date.Date, error) {
+	start, startErr := dating.startDate("start", start, startOffset)
+	end, endErr := dating.date("end", end, endOffset)
+	return start, end, errors.Join(startErr, endErr)
+}
+
+// partialParentalLeaveFromDB is the stored partial parental leave a with its Event at at.
+func partialParentalLeaveFromDB(a pdb.PartialParentalLeave, at date.Date) PartialParentalLeave {
 	return PartialParentalLeave{
 		ID:                     a.ID,
 		SalaryID:               a.SalaryID,
-		StartDate:              date.Date(a.StartDate),
-		EndDate:                date.Date(a.EndDate),
+		StartDate:              placeDate(a.StartDate, at),
+		EndDate:                placeDate(a.EndDate, at),
 		SjukDaysPerYear:        a.SjukDaysPerYear,
 		LagstaDaysPerYear:      a.LagstaDaysPerYear,
 		SkippedWorkDaysPerYear: a.SkippedWorkDaysPerYear,
+		EventID:                ui.OrDefault(a.EventID),
 	}
 }
 
 func (s *Service) UpsertPartialParentalLeave(ctx context.Context, inp PartialParentalLeave) (PartialParentalLeave, error) {
+	dating, err := s.entryDating(ctx, inp.EventID, inp.OffsetEventID)
+	if err != nil {
+		return PartialParentalLeave{}, err
+	}
+	if inp.StartDate, inp.EndDate, err = leaveDates(dating, inp.StartDate, inp.EndDate, inp.StartOffset, inp.EndOffset); err != nil {
+		return PartialParentalLeave{}, err
+	}
 	if err := checkParentalLeave(inp.SalaryID, inp.StartDate, inp.EndDate); err != nil {
 		return PartialParentalLeave{}, err
 	}
@@ -483,29 +632,50 @@ func (s *Service) UpsertPartialParentalLeave(ctx context.Context, inp PartialPar
 	a, err := s.q.UpsertPartialParentalLeave(ctx, pdb.UpsertPartialParentalLeaveParams{
 		ID:                     inp.ID,
 		SalaryID:               inp.SalaryID,
-		StartDate:              int64(inp.StartDate),
-		EndDate:                int64(inp.EndDate),
+		StartDate:              dating.store(inp.StartDate),
+		EndDate:                dating.store(inp.EndDate),
 		SjukDaysPerYear:        inp.SjukDaysPerYear,
 		LagstaDaysPerYear:      inp.LagstaDaysPerYear,
 		SkippedWorkDaysPerYear: inp.SkippedWorkDaysPerYear,
+		EventID:                ui.WithDefaultNull(inp.EventID),
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	})
 	if err != nil {
 		return PartialParentalLeave{}, fmt.Errorf("upserting partial parental leave: %w", err)
 	}
-	return partialParentalLeaveFromDB(a), nil
+	return partialParentalLeaveFromDB(a, dating.at), nil
 }
 
+// GetPartialParentalLeave returns the partial parental leave id, in an Event at the Event's date.
+func (s *Service) GetPartialParentalLeave(ctx context.Context, id string) (PartialParentalLeave, error) {
+	a, err := s.q.GetPartialParentalLeave(ctx, id)
+	if err != nil {
+		return PartialParentalLeave{}, fmt.Errorf("getting partial parental leave: %w", err)
+	}
+	at, err := s.eventDate(ctx, ui.OrDefault(a.EventID))
+	if err != nil {
+		return PartialParentalLeave{}, err
+	}
+	return partialParentalLeaveFromDB(a, at), nil
+}
+
+// ListPartialParentalLeaves returns the Salary's partial parental leaves by Start Date, each in an
+// Event at the Event's date.
 func (s *Service) ListPartialParentalLeaves(ctx context.Context, salaryID string) ([]PartialParentalLeave, error) {
 	rows, err := s.q.ListPartialParentalLeaves(ctx, salaryID)
 	if err != nil {
 		return nil, fmt.Errorf("listing partial parental leaves: %w", err)
 	}
+	dates, err := s.eventDates(ctx)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]PartialParentalLeave, len(rows))
 	for i, r := range rows {
-		result[i] = partialParentalLeaveFromDB(r)
+		result[i] = partialParentalLeaveFromDB(r, ownDate(dates, r.EventID))
 	}
+	sortSalaryParts(&Salary{PartialParentalLeaves: result})
 	return result, nil
 }
 
@@ -516,17 +686,26 @@ func (s *Service) DeletePartialParentalLeave(ctx context.Context, id string) err
 	return nil
 }
 
-func fullParentalLeaveFromDB(a pdb.FullParentalLeave) FullParentalLeave {
+// fullParentalLeaveFromDB is the stored full parental leave a with its Event at at.
+func fullParentalLeaveFromDB(a pdb.FullParentalLeave, at date.Date) FullParentalLeave {
 	return FullParentalLeave{
 		ID:              a.ID,
 		SalaryID:        a.SalaryID,
-		StartDate:       date.Date(a.StartDate),
-		EndDate:         date.Date(a.EndDate),
+		StartDate:       placeDate(a.StartDate, at),
+		EndDate:         placeDate(a.EndDate, at),
 		SjukDaysPerWeek: a.SjukDaysPerWeek,
+		EventID:         ui.OrDefault(a.EventID),
 	}
 }
 
 func (s *Service) UpsertFullParentalLeave(ctx context.Context, inp FullParentalLeave) (FullParentalLeave, error) {
+	dating, err := s.entryDating(ctx, inp.EventID, inp.OffsetEventID)
+	if err != nil {
+		return FullParentalLeave{}, err
+	}
+	if inp.StartDate, inp.EndDate, err = leaveDates(dating, inp.StartDate, inp.EndDate, inp.StartOffset, inp.EndOffset); err != nil {
+		return FullParentalLeave{}, err
+	}
 	if err := checkParentalLeave(inp.SalaryID, inp.StartDate, inp.EndDate); err != nil {
 		return FullParentalLeave{}, err
 	}
@@ -537,27 +716,48 @@ func (s *Service) UpsertFullParentalLeave(ctx context.Context, inp FullParentalL
 	a, err := s.q.UpsertFullParentalLeave(ctx, pdb.UpsertFullParentalLeaveParams{
 		ID:              inp.ID,
 		SalaryID:        inp.SalaryID,
-		StartDate:       int64(inp.StartDate),
-		EndDate:         int64(inp.EndDate),
+		StartDate:       dating.store(inp.StartDate),
+		EndDate:         dating.store(inp.EndDate),
 		SjukDaysPerWeek: inp.SjukDaysPerWeek,
+		EventID:         ui.WithDefaultNull(inp.EventID),
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	})
 	if err != nil {
 		return FullParentalLeave{}, fmt.Errorf("upserting full parental leave: %w", err)
 	}
-	return fullParentalLeaveFromDB(a), nil
+	return fullParentalLeaveFromDB(a, dating.at), nil
 }
 
+// GetFullParentalLeave returns the full parental leave id, in an Event at the Event's date.
+func (s *Service) GetFullParentalLeave(ctx context.Context, id string) (FullParentalLeave, error) {
+	a, err := s.q.GetFullParentalLeave(ctx, id)
+	if err != nil {
+		return FullParentalLeave{}, fmt.Errorf("getting full parental leave: %w", err)
+	}
+	at, err := s.eventDate(ctx, ui.OrDefault(a.EventID))
+	if err != nil {
+		return FullParentalLeave{}, err
+	}
+	return fullParentalLeaveFromDB(a, at), nil
+}
+
+// ListFullParentalLeaves returns the Salary's full parental leaves by Start Date, each in an Event at
+// the Event's date.
 func (s *Service) ListFullParentalLeaves(ctx context.Context, salaryID string) ([]FullParentalLeave, error) {
 	rows, err := s.q.ListFullParentalLeaves(ctx, salaryID)
 	if err != nil {
 		return nil, fmt.Errorf("listing full parental leaves: %w", err)
 	}
+	dates, err := s.eventDates(ctx)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]FullParentalLeave, len(rows))
 	for i, r := range rows {
-		result[i] = fullParentalLeaveFromDB(r)
+		result[i] = fullParentalLeaveFromDB(r, ownDate(dates, r.EventID))
 	}
+	sortSalaryParts(&Salary{FullParentalLeaves: result})
 	return result, nil
 }
 
@@ -566,6 +766,75 @@ func (s *Service) DeleteFullParentalLeave(ctx context.Context, id string) error 
 		return fmt.Errorf("deleting full parental leave: %w", err)
 	}
 	return nil
+}
+
+func (s *Service) UpsertSalaryEnd(ctx context.Context, inp SalaryEnd) (SalaryEnd, error) {
+	dating, err := s.entryDating(ctx, inp.EventID, inp.OffsetEventID)
+	if err != nil {
+		return SalaryEnd{}, err
+	}
+	if inp.Date, err = dating.startDate("end", inp.Date, inp.DateOffset); err != nil {
+		return SalaryEnd{}, err
+	}
+	if err := errors.Join(checkRequired("salary", inp.SalaryID), checkRequired("end date", inp.Date)); err != nil {
+		return SalaryEnd{}, err
+	}
+	if inp.ID == "" {
+		inp.ID = sid.MustNewString(32)
+	}
+	now := time.Now().Unix()
+	e, err := s.q.UpsertSalaryEnd(ctx, pdb.UpsertSalaryEndParams{
+		ID:        inp.ID,
+		SalaryID:  inp.SalaryID,
+		Date:      dating.store(inp.Date),
+		EventID:   ui.WithDefaultNull(inp.EventID),
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	if err != nil {
+		return SalaryEnd{}, fmt.Errorf("upserting salary end: %w", err)
+	}
+	return salaryEndFromDB(e, dating.at), nil
+}
+
+// GetSalaryEnd returns the Salary's end id, in an Event at the Event's date.
+func (s *Service) GetSalaryEnd(ctx context.Context, id string) (SalaryEnd, error) {
+	e, err := s.q.GetSalaryEnd(ctx, id)
+	if err != nil {
+		return SalaryEnd{}, fmt.Errorf("getting salary end: %w", err)
+	}
+	at, err := s.eventDate(ctx, ui.OrDefault(e.EventID))
+	if err != nil {
+		return SalaryEnd{}, err
+	}
+	return salaryEndFromDB(e, at), nil
+}
+
+func (s *Service) DeleteSalaryEnd(ctx context.Context, id string) error {
+	if err := s.q.DeleteSalaryEnd(ctx, id); err != nil {
+		return fmt.Errorf("deleting salary end: %w", err)
+	}
+	return nil
+}
+
+// sortSalaryParts orders each of the Salary's parts by date and ID: stored offsets don't sort as the
+// dates they place at. Of two parts on the same day, the one with the later ID applies.
+func sortSalaryParts(sal *Salary) {
+	slices.SortStableFunc(sal.Amounts, func(a, b SalaryAmount) int {
+		return cmp.Or(cmp.Compare(a.StartDate, b.StartDate), cmp.Compare(a.ID, b.ID))
+	})
+	slices.SortStableFunc(sal.Adjustments, func(a, b SalaryAdjustment) int {
+		return cmp.Or(cmp.Compare(a.ValidFrom, b.ValidFrom), cmp.Compare(a.ID, b.ID))
+	})
+	slices.SortStableFunc(sal.PartialParentalLeaves, func(a, b PartialParentalLeave) int {
+		return cmp.Or(cmp.Compare(a.StartDate, b.StartDate), cmp.Compare(a.ID, b.ID))
+	})
+	slices.SortStableFunc(sal.FullParentalLeaves, func(a, b FullParentalLeave) int {
+		return cmp.Or(cmp.Compare(a.StartDate, b.StartDate), cmp.Compare(a.ID, b.ID))
+	})
+	slices.SortStableFunc(sal.Ends, func(a, b SalaryEnd) int {
+		return cmp.Or(cmp.Compare(a.Date, b.Date), cmp.Compare(a.ID, b.ID))
+	})
 }
 
 func (ppl PartialParentalLeave) GetStartDateString() string {
@@ -646,13 +915,18 @@ func (sa SalaryAmount) GetAmountString() string {
 	return sa.Amount.SimpleEncode()
 }
 
+// CurrentAmount is the Salary Amount the Salary is paid by today: 0 before its first or after its End.
 func (s Salary) CurrentAmount() float64 {
+	paid := s.payment()
 	today := date.Today()
+	if paid.endsBefore(today) {
+		return 0
+	}
 	var current *SalaryAmount
-	for i := range s.Amounts {
-		if s.Amounts[i].StartDate <= today {
-			if current == nil || s.Amounts[i].StartDate > current.StartDate {
-				current = &s.Amounts[i]
+	for i := range paid.Amounts {
+		if paid.Amounts[i].StartDate <= today {
+			if current == nil || paid.Amounts[i].StartDate >= current.StartDate {
+				current = &paid.Amounts[i]
 			}
 		}
 	}
@@ -666,17 +940,48 @@ type SalaryEditView struct {
 	Salary     Salary
 	Accounts   []Account
 	Categories []TransferTemplateCategory
+	Events     []Event
 }
 
 func (v SalaryEditView) IsEdit() bool {
 	return v.Salary.ID != ""
 }
 
-func (s *Service) GetSalariesPageData(ctx context.Context) ([]Salary, error) {
-	return s.ListSalaries(ctx)
+// PartEventID is the Event a new part of the Salary is in, unless its form picks another: the
+// Salary's.
+func (v SalaryEditView) PartEventID() string {
+	return v.Salary.EventID
 }
 
-func (s *Service) GetSalaryNewPageData(ctx context.Context) (*SalaryEditView, error) {
+// SalariesView is the Salaries page: every Salary, each with what the Baseline pays it, and the Events
+// they and their parts are in.
+type SalariesView struct {
+	Salaries []Salary
+	Events   map[string]Event
+}
+
+// GetEvent is the Event id, or nil for "" or an Event that doesn't exist.
+func (v *SalariesView) GetEvent(id string) *Event {
+	if ev, ok := v.Events[id]; ok {
+		return &ev
+	}
+	return nil
+}
+
+func (s *Service) GetSalariesPageData(ctx context.Context) (*SalariesView, error) {
+	salaries, err := s.ListSalaries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	events, err := s.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &SalariesView{Salaries: salaries, Events: KeyBy(events, func(e Event) string { return e.ID })}, nil
+}
+
+// GetSalaryNewPageData is the page of a new Salary in the Event eventID, or in the Baseline for "".
+func (s *Service) GetSalaryNewPageData(ctx context.Context, eventID string) (*SalaryEditView, error) {
 	accs, err := s.ListAccounts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing accounts: %w", err)
@@ -685,9 +990,15 @@ func (s *Service) GetSalaryNewPageData(ctx context.Context) (*SalaryEditView, er
 	if err != nil {
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
+	events, err := s.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return &SalaryEditView{
+		Salary:     Salary{EventID: eventID},
 		Accounts:   accs,
 		Categories: categories,
+		Events:     events,
 	}, nil
 }
 
@@ -704,16 +1015,22 @@ func (s *Service) GetSalaryEditPageData(ctx context.Context, id string) (*Salary
 	if err != nil {
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
+	events, err := s.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return &SalaryEditView{
 		Salary:     sal,
 		Accounts:   accs,
 		Categories: categories,
+		Events:     events,
 	}, nil
 }
 
-func (s *Service) generateSalaryTransferTemplates(ctx context.Context) ([]TransferTemplate, error) {
-	salaries, err := s.ListSalaries(ctx)
-	if err != nil {
+// salaryTransferTemplates are what salaries, with the Events placed, pay: each Gross Salary segmented.
+func (s *Service) salaryTransferTemplates(ctx context.Context, salaries []Salary) ([]TransferTemplate, error) {
+	salaries = slices.Clone(salaries)
+	if err := s.segmentSalaries(ctx, salaries); err != nil {
 		return nil, err
 	}
 	var templates []TransferTemplate
@@ -740,11 +1057,8 @@ func (s *Service) segment(ctx context.Context, sal Salary, params []SweYearlyPar
 		return nil, errors.New("no kommun and församling to look up its tax in")
 	}
 
-	sorted := make([]SalaryAmount, len(sal.Amounts))
-	copy(sorted, sal.Amounts)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].StartDate < sorted[j].StartDate
-	})
+	sorted := slices.Clone(sal.Amounts)
+	slices.SortStableFunc(sorted, func(a, b SalaryAmount) int { return cmp.Compare(a.StartDate, b.StartDate) })
 
 	calculators := make(map[int]func(float64) swe.NetSalaryResult)
 	segments := make([]SalarySegment, 0, len(dates))
@@ -776,6 +1090,8 @@ func (s *Service) segment(ctx context.Context, sal Salary, params []SweYearlyPar
 		if i+1 < len(dates) {
 			ed := dates[i+1]
 			seg.EndDate = &ed
+		} else {
+			seg.EndDate = sal.End()
 		}
 		if ibb := activeIBBAt(params, d); ibb != 0 {
 			pension := uncertain.NewMapped(func(cfg *uncertain.Config) float64 {
@@ -803,7 +1119,7 @@ func (s Salary) segmentStartDates(params []SweYearlyParams) []date.Date {
 	}
 	dateSet := make(map[date.Date]struct{})
 	add := func(d date.Date) {
-		if d >= first {
+		if d >= first && !s.endsBefore(d) {
 			dateSet[d] = struct{}{}
 		}
 	}

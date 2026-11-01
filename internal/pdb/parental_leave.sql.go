@@ -29,10 +29,56 @@ func (q *Queries) DeletePartialParentalLeave(ctx context.Context, id string) err
 	return err
 }
 
-const listAllFullParentalLeaves = `-- name: ListAllFullParentalLeaves :many
-SELECT id, salary_id, start_date, end_date, sjuk_days_per_week, created_at, updated_at
+const getFullParentalLeave = `-- name: GetFullParentalLeave :one
+SELECT id, salary_id, start_date, end_date, sjuk_days_per_week, created_at, updated_at, event_id
 FROM full_parental_leave
-ORDER BY salary_id, start_date, id
+WHERE id = ?
+`
+
+func (q *Queries) GetFullParentalLeave(ctx context.Context, id string) (FullParentalLeave, error) {
+	row := q.db.QueryRowContext(ctx, getFullParentalLeave, id)
+	var i FullParentalLeave
+	err := row.Scan(
+		&i.ID,
+		&i.SalaryID,
+		&i.StartDate,
+		&i.EndDate,
+		&i.SjukDaysPerWeek,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EventID,
+	)
+	return i, err
+}
+
+const getPartialParentalLeave = `-- name: GetPartialParentalLeave :one
+SELECT id, salary_id, start_date, end_date, sjuk_days_per_year, lagsta_days_per_year, skipped_work_days_per_year, created_at, updated_at, event_id
+FROM partial_parental_leave
+WHERE id = ?
+`
+
+func (q *Queries) GetPartialParentalLeave(ctx context.Context, id string) (PartialParentalLeave, error) {
+	row := q.db.QueryRowContext(ctx, getPartialParentalLeave, id)
+	var i PartialParentalLeave
+	err := row.Scan(
+		&i.ID,
+		&i.SalaryID,
+		&i.StartDate,
+		&i.EndDate,
+		&i.SjukDaysPerYear,
+		&i.LagstaDaysPerYear,
+		&i.SkippedWorkDaysPerYear,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EventID,
+	)
+	return i, err
+}
+
+const listAllFullParentalLeaves = `-- name: ListAllFullParentalLeaves :many
+SELECT id, salary_id, start_date, end_date, sjuk_days_per_week, created_at, updated_at, event_id
+FROM full_parental_leave
+ORDER BY salary_id, id
 `
 
 func (q *Queries) ListAllFullParentalLeaves(ctx context.Context) ([]FullParentalLeave, error) {
@@ -52,6 +98,7 @@ func (q *Queries) ListAllFullParentalLeaves(ctx context.Context) ([]FullParental
 			&i.SjukDaysPerWeek,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -67,9 +114,9 @@ func (q *Queries) ListAllFullParentalLeaves(ctx context.Context) ([]FullParental
 }
 
 const listAllPartialParentalLeaves = `-- name: ListAllPartialParentalLeaves :many
-SELECT id, salary_id, start_date, end_date, sjuk_days_per_year, lagsta_days_per_year, skipped_work_days_per_year, created_at, updated_at
+SELECT id, salary_id, start_date, end_date, sjuk_days_per_year, lagsta_days_per_year, skipped_work_days_per_year, created_at, updated_at, event_id
 FROM partial_parental_leave
-ORDER BY salary_id, start_date, id
+ORDER BY salary_id, id
 `
 
 func (q *Queries) ListAllPartialParentalLeaves(ctx context.Context) ([]PartialParentalLeave, error) {
@@ -91,6 +138,7 @@ func (q *Queries) ListAllPartialParentalLeaves(ctx context.Context) ([]PartialPa
 			&i.SkippedWorkDaysPerYear,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -106,10 +154,10 @@ func (q *Queries) ListAllPartialParentalLeaves(ctx context.Context) ([]PartialPa
 }
 
 const listFullParentalLeaves = `-- name: ListFullParentalLeaves :many
-SELECT id, salary_id, start_date, end_date, sjuk_days_per_week, created_at, updated_at
+SELECT id, salary_id, start_date, end_date, sjuk_days_per_week, created_at, updated_at, event_id
 FROM full_parental_leave
 WHERE salary_id = ?
-ORDER BY start_date, id
+ORDER BY id
 `
 
 func (q *Queries) ListFullParentalLeaves(ctx context.Context, salaryID string) ([]FullParentalLeave, error) {
@@ -129,6 +177,7 @@ func (q *Queries) ListFullParentalLeaves(ctx context.Context, salaryID string) (
 			&i.SjukDaysPerWeek,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -144,10 +193,10 @@ func (q *Queries) ListFullParentalLeaves(ctx context.Context, salaryID string) (
 }
 
 const listPartialParentalLeaves = `-- name: ListPartialParentalLeaves :many
-SELECT id, salary_id, start_date, end_date, sjuk_days_per_year, lagsta_days_per_year, skipped_work_days_per_year, created_at, updated_at
+SELECT id, salary_id, start_date, end_date, sjuk_days_per_year, lagsta_days_per_year, skipped_work_days_per_year, created_at, updated_at, event_id
 FROM partial_parental_leave
 WHERE salary_id = ?
-ORDER BY start_date, id
+ORDER BY id
 `
 
 func (q *Queries) ListPartialParentalLeaves(ctx context.Context, salaryID string) ([]PartialParentalLeave, error) {
@@ -169,6 +218,7 @@ func (q *Queries) ListPartialParentalLeaves(ctx context.Context, salaryID string
 			&i.SkippedWorkDaysPerYear,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -190,17 +240,19 @@ INSERT INTO full_parental_leave (
     start_date,
     end_date,
     sjuk_days_per_week,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET salary_id = EXCLUDED.salary_id,
   start_date = EXCLUDED.start_date,
   end_date = EXCLUDED.end_date,
   sjuk_days_per_week = EXCLUDED.sjuk_days_per_week,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
-RETURNING id, salary_id, start_date, end_date, sjuk_days_per_week, created_at, updated_at
+RETURNING id, salary_id, start_date, end_date, sjuk_days_per_week, created_at, updated_at, event_id
 `
 
 type UpsertFullParentalLeaveParams struct {
@@ -209,6 +261,7 @@ type UpsertFullParentalLeaveParams struct {
 	StartDate       int64
 	EndDate         int64
 	SjukDaysPerWeek float64
+	EventID         *string
 	CreatedAt       int64
 	UpdatedAt       int64
 }
@@ -220,6 +273,7 @@ func (q *Queries) UpsertFullParentalLeave(ctx context.Context, arg UpsertFullPar
 		arg.StartDate,
 		arg.EndDate,
 		arg.SjukDaysPerWeek,
+		arg.EventID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -232,6 +286,7 @@ func (q *Queries) UpsertFullParentalLeave(ctx context.Context, arg UpsertFullPar
 		&i.SjukDaysPerWeek,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EventID,
 	)
 	return i, err
 }
@@ -245,10 +300,11 @@ INSERT INTO partial_parental_leave (
     sjuk_days_per_year,
     lagsta_days_per_year,
     skipped_work_days_per_year,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET salary_id = EXCLUDED.salary_id,
   start_date = EXCLUDED.start_date,
@@ -256,8 +312,9 @@ SET salary_id = EXCLUDED.salary_id,
   sjuk_days_per_year = EXCLUDED.sjuk_days_per_year,
   lagsta_days_per_year = EXCLUDED.lagsta_days_per_year,
   skipped_work_days_per_year = EXCLUDED.skipped_work_days_per_year,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
-RETURNING id, salary_id, start_date, end_date, sjuk_days_per_year, lagsta_days_per_year, skipped_work_days_per_year, created_at, updated_at
+RETURNING id, salary_id, start_date, end_date, sjuk_days_per_year, lagsta_days_per_year, skipped_work_days_per_year, created_at, updated_at, event_id
 `
 
 type UpsertPartialParentalLeaveParams struct {
@@ -268,6 +325,7 @@ type UpsertPartialParentalLeaveParams struct {
 	SjukDaysPerYear        float64
 	LagstaDaysPerYear      float64
 	SkippedWorkDaysPerYear float64
+	EventID                *string
 	CreatedAt              int64
 	UpdatedAt              int64
 }
@@ -281,6 +339,7 @@ func (q *Queries) UpsertPartialParentalLeave(ctx context.Context, arg UpsertPart
 		arg.SjukDaysPerYear,
 		arg.LagstaDaysPerYear,
 		arg.SkippedWorkDaysPerYear,
+		arg.EventID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -295,6 +354,7 @@ func (q *Queries) UpsertPartialParentalLeave(ctx context.Context, arg UpsertPart
 		&i.SkippedWorkDaysPerYear,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EventID,
 	)
 	return i, err
 }

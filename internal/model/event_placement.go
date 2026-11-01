@@ -27,6 +27,16 @@ func (placements EventPlacements) placementOf(ev Event) EventPlacement {
 	return EventPlacement{Date: ev.Date, LeftOut: !ev.Planned}
 }
 
+// asStored places every Event at its own date, planned or not: every entry is at the dates it is
+// stored relative to, and none is left out. The pages that edit entries show them so.
+func asStored(events []Event) EventPlacements {
+	placements := make(EventPlacements, len(events))
+	for _, ev := range events {
+		placements[ev.ID] = EventPlacement{Date: ev.Date}
+	}
+	return placements
+}
+
 // placedEvents are the Events placements don't leave out, each at the date it is placed at.
 func placedEvents(events []Event, placements EventPlacements) []Event {
 	var placed []Event
@@ -52,6 +62,14 @@ type plans struct {
 	// own date.
 	leftOutTransferTemplates []TransferTemplate
 	leftOutAccounts          map[string]bool
+	// salaries are the placed Salaries, by name and ID, each with its placed parts by date and ID. A
+	// Gross Salary isn't segmented yet.
+	salaries []Salary
+	// startupShareAccounts are every Startup Share account, placed or not, by account ID.
+	startupShareAccounts map[string]StartupShareAccount
+	// startupShares are the placed Startup Share accounts, by account ID, with their placed investment
+	// rounds and share changes, and their Options but those funded by a left-out Account.
+	startupShares map[string]*startupShares
 }
 
 // usesLeftOutAccount reports whether t moves money from or to an Account that is left out, which
@@ -144,5 +162,100 @@ func placeEntries(events []Event, stored storedEntries, placements EventPlacemen
 		p.transferTemplates = append(p.transferTemplates, tt)
 	}
 
+	placeStartupShares(p, stored, placed)
+	if err := placeSalaries(p, stored, placed); err != nil {
+		return nil, err
+	}
 	return p, nil
+}
+
+// placeSalaries places the Salaries of stored whose Events placed places, each with the parts whose
+// own Events it places: a part an Event adds to a Salary outside it is left out with that Event alone.
+func placeSalaries(p *plans, stored storedEntries, placed func(eventID *string) (date.Date, bool)) error {
+	index := make(map[string]int, len(stored.salaries))
+	for _, row := range stored.salaries {
+		if _, ok := placed(row.EventID); ok {
+			index[row.ID] = len(p.salaries)
+			p.salaries = append(p.salaries, salaryFromDB(row))
+		}
+	}
+	// part is the placed Salary salaryID a part in the Event eventID belongs to, with the date the part's
+	// dates are stored after. ok is false when either is left out.
+	part := func(salaryID string, eventID *string) (sal *Salary, day date.Date, ok bool) {
+		i, found := index[salaryID]
+		if day, ok = placed(eventID); !ok || !found {
+			return nil, 0, false
+		}
+		return &p.salaries[i], day, true
+	}
+	for _, row := range stored.salaryAmounts {
+		if sal, day, ok := part(row.SalaryID, row.EventID); ok {
+			amt, err := salaryAmountFromDB(row, day)
+			if err != nil {
+				return err
+			}
+			sal.Amounts = append(sal.Amounts, amt)
+		}
+	}
+	for _, row := range stored.salaryAdjustments {
+		if sal, day, ok := part(row.SalaryID, row.EventID); ok {
+			sal.Adjustments = append(sal.Adjustments, salaryAdjustmentFromDB(row, day))
+		}
+	}
+	for _, row := range stored.partialParentalLeaves {
+		if sal, day, ok := part(row.SalaryID, row.EventID); ok {
+			sal.PartialParentalLeaves = append(sal.PartialParentalLeaves, partialParentalLeaveFromDB(row, day))
+		}
+	}
+	for _, row := range stored.fullParentalLeaves {
+		if sal, day, ok := part(row.SalaryID, row.EventID); ok {
+			sal.FullParentalLeaves = append(sal.FullParentalLeaves, fullParentalLeaveFromDB(row, day))
+		}
+	}
+	for _, row := range stored.salaryEnds {
+		if sal, day, ok := part(row.SalaryID, row.EventID); ok {
+			sal.Ends = append(sal.Ends, salaryEndFromDB(row, day))
+		}
+	}
+	for i := range p.salaries {
+		sortSalaryParts(&p.salaries[i])
+	}
+	return nil
+}
+
+// placeStartupShares places the Startup Share accounts of stored that p keeps, with the investment
+// rounds and share changes whose Events placed places. An Option funded by a left-out Account is left
+// out with it, as a Transfer Template from it is.
+func placeStartupShares(p *plans, stored storedEntries, placed func(eventID *string) (date.Date, bool)) {
+	p.startupShareAccounts = make(map[string]StartupShareAccount, len(stored.startupShareAccounts))
+	p.startupShares = make(map[string]*startupShares, len(stored.startupShareAccounts))
+	for _, row := range stored.startupShareAccounts {
+		ssa := startupShareAccountFromDB(row)
+		p.startupShareAccounts[ssa.AccountID] = ssa
+		if !p.leftOutAccounts[ssa.AccountID] {
+			p.startupShares[ssa.AccountID] = &startupShares{StartupShareAccount: ssa}
+		}
+	}
+	for _, row := range stored.investmentRounds {
+		day, ok := placed(row.EventID)
+		if ss := p.startupShares[row.AccountID]; ok && ss != nil {
+			ss.rounds = append(ss.rounds, investmentRoundFromDB(row, day))
+		}
+	}
+	for _, row := range stored.shareChanges {
+		day, ok := placed(row.EventID)
+		if ss := p.startupShares[row.AccountID]; ok && ss != nil {
+			ss.shareChanges = append(ss.shareChanges, shareChangeFromDB(row, day))
+		}
+	}
+	for _, row := range stored.startupShareOptions {
+		if ss := p.startupShares[row.AccountID]; ss != nil && !p.leftOutAccounts[row.SourceAccountID] {
+			ss.options = append(ss.options, startupShareOptionFromDB(row))
+		}
+	}
+	// Stored offsets don't sort as the dates they place at.
+	for _, ss := range p.startupShares {
+		slices.SortStableFunc(ss.rounds, compareInvestmentRounds)
+		slices.SortStableFunc(ss.shareChanges, compareShareChanges)
+	}
 }

@@ -62,9 +62,10 @@ func TestMigratingToExclusiveEndDatesKeepsChargingOnTheOldEndDate(t *testing.T) 
 	tt := model.TransferTemplate{ID: "gym"}
 	exec(`INSERT INTO transfer_template (id, name, from_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, end_date, enabled, created_at, updated_at)
 		VALUES (?, 'Gym', ?, 'fixed', ?, 0, 0, '*-*-01', ?, ?, TRUE, 0, 0)`, tt.ID, checking.ID, encoded(300), int64(start), int64(lastDay))
-	mustBill(t, old, checking.ID, "*-*-01", model.Bill{Name: "Music"},
-		model.BillAmount{Amount: newFixedValue(100), StartDate: start, EndDate: &lastDay},
-	)
+	exec(`INSERT INTO bill_account (id, name, from_account_id, recurrence, created_at, updated_at) VALUES ('music-account', 'Music', ?, '*-*-01', 0, 0)`, checking.ID)
+	exec(`INSERT INTO bill (id, bill_account_id, name, created_at, updated_at) VALUES ('music', 'music-account', 'Music', 0, 0)`)
+	exec(`INSERT INTO bill_amount (id, bill_id, amount, start_date, end_date, created_at, updated_at) VALUES ('music-amount', 'music', ?, ?, ?, 0, 0)`,
+		encoded(100), int64(start), int64(lastDay))
 	gm := model.GrowthModel{ID: "growth"}
 	exec(`INSERT INTO growth_model (id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at)
 		VALUES (?, ?, 'fixed', ?, ?, ?, ?, 0, 0)`, gm.ID, checking.ID, encoded(0.05), encoded(0), int64(start), int64(lastDay))

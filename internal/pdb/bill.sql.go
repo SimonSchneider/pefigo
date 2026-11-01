@@ -39,8 +39,18 @@ func (q *Queries) DeleteBillAmount(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteBillEnd = `-- name: DeleteBillEnd :exec
+DELETE FROM bill_end
+WHERE id = ?
+`
+
+func (q *Queries) DeleteBillEnd(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteBillEnd, id)
+	return err
+}
+
 const getBill = `-- name: GetBill :one
-SELECT id, bill_account_id, name, budget_category_id, enabled, notes, url, created_at, updated_at
+SELECT id, bill_account_id, name, budget_category_id, enabled, notes, url, created_at, updated_at, event_id
 FROM bill
 WHERE id = ?
 `
@@ -58,6 +68,7 @@ func (q *Queries) GetBill(ctx context.Context, id string) (Bill, error) {
 		&i.Url,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EventID,
 	)
 	return i, err
 }
@@ -84,10 +95,54 @@ func (q *Queries) GetBillAccount(ctx context.Context, id string) (BillAccount, e
 	return i, err
 }
 
-const listAllBillAmounts = `-- name: ListAllBillAmounts :many
-SELECT id, bill_id, amount, start_date, end_date, created_at, updated_at, period, currency
+const getBillAmount = `-- name: GetBillAmount :one
+SELECT id, bill_id, amount, start_date, end_date, created_at, updated_at, period, currency, event_id
 FROM bill_amount
-ORDER BY bill_id, start_date, id
+WHERE id = ?
+`
+
+func (q *Queries) GetBillAmount(ctx context.Context, id string) (BillAmount, error) {
+	row := q.db.QueryRowContext(ctx, getBillAmount, id)
+	var i BillAmount
+	err := row.Scan(
+		&i.ID,
+		&i.BillID,
+		&i.Amount,
+		&i.StartDate,
+		&i.EndDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Period,
+		&i.Currency,
+		&i.EventID,
+	)
+	return i, err
+}
+
+const getBillEnd = `-- name: GetBillEnd :one
+SELECT id, bill_id, date, event_id, created_at, updated_at
+FROM bill_end
+WHERE id = ?
+`
+
+func (q *Queries) GetBillEnd(ctx context.Context, id string) (BillEnd, error) {
+	row := q.db.QueryRowContext(ctx, getBillEnd, id)
+	var i BillEnd
+	err := row.Scan(
+		&i.ID,
+		&i.BillID,
+		&i.Date,
+		&i.EventID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listAllBillAmounts = `-- name: ListAllBillAmounts :many
+SELECT id, bill_id, amount, start_date, end_date, created_at, updated_at, period, currency, event_id
+FROM bill_amount
+ORDER BY bill_id, id
 `
 
 func (q *Queries) ListAllBillAmounts(ctx context.Context) ([]BillAmount, error) {
@@ -109,6 +164,43 @@ func (q *Queries) ListAllBillAmounts(ctx context.Context) ([]BillAmount, error) 
 			&i.UpdatedAt,
 			&i.Period,
 			&i.Currency,
+			&i.EventID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllBillEnds = `-- name: ListAllBillEnds :many
+SELECT id, bill_id, date, event_id, created_at, updated_at
+FROM bill_end
+ORDER BY bill_id, id
+`
+
+func (q *Queries) ListAllBillEnds(ctx context.Context) ([]BillEnd, error) {
+	rows, err := q.db.QueryContext(ctx, listAllBillEnds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillEnd
+	for rows.Next() {
+		var i BillEnd
+		if err := rows.Scan(
+			&i.ID,
+			&i.BillID,
+			&i.Date,
+			&i.EventID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -124,7 +216,7 @@ func (q *Queries) ListAllBillAmounts(ctx context.Context) ([]BillAmount, error) 
 }
 
 const listAllBills = `-- name: ListAllBills :many
-SELECT id, bill_account_id, name, budget_category_id, enabled, notes, url, created_at, updated_at
+SELECT id, bill_account_id, name, budget_category_id, enabled, notes, url, created_at, updated_at, event_id
 FROM bill
 ORDER BY bill_account_id, name, id
 `
@@ -148,6 +240,7 @@ func (q *Queries) ListAllBills(ctx context.Context) ([]Bill, error) {
 			&i.Url,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -201,10 +294,10 @@ func (q *Queries) ListBillAccounts(ctx context.Context) ([]BillAccount, error) {
 }
 
 const listBillAmounts = `-- name: ListBillAmounts :many
-SELECT id, bill_id, amount, start_date, end_date, created_at, updated_at, period, currency
+SELECT id, bill_id, amount, start_date, end_date, created_at, updated_at, period, currency, event_id
 FROM bill_amount
 WHERE bill_id = ?
-ORDER BY start_date, id
+ORDER BY id
 `
 
 func (q *Queries) ListBillAmounts(ctx context.Context, billID string) ([]BillAmount, error) {
@@ -226,6 +319,7 @@ func (q *Queries) ListBillAmounts(ctx context.Context, billID string) ([]BillAmo
 			&i.UpdatedAt,
 			&i.Period,
 			&i.Currency,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -241,7 +335,7 @@ func (q *Queries) ListBillAmounts(ctx context.Context, billID string) ([]BillAmo
 }
 
 const listBills = `-- name: ListBills :many
-SELECT id, bill_account_id, name, budget_category_id, enabled, notes, url, created_at, updated_at
+SELECT id, bill_account_id, name, budget_category_id, enabled, notes, url, created_at, updated_at, event_id
 FROM bill
 WHERE bill_account_id = ?
 ORDER BY name, id
@@ -266,6 +360,7 @@ func (q *Queries) ListBills(ctx context.Context, billAccountID string) ([]Bill, 
 			&i.Url,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -289,10 +384,11 @@ INSERT INTO bill (
     enabled,
     notes,
     url,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET bill_account_id = EXCLUDED.bill_account_id,
   name = EXCLUDED.name,
@@ -300,8 +396,9 @@ SET bill_account_id = EXCLUDED.bill_account_id,
   enabled = EXCLUDED.enabled,
   notes = EXCLUDED.notes,
   url = EXCLUDED.url,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
-RETURNING id, bill_account_id, name, budget_category_id, enabled, notes, url, created_at, updated_at
+RETURNING id, bill_account_id, name, budget_category_id, enabled, notes, url, created_at, updated_at, event_id
 `
 
 type UpsertBillParams struct {
@@ -312,6 +409,7 @@ type UpsertBillParams struct {
 	Enabled          bool
 	Notes            string
 	Url              string
+	EventID          *string
 	CreatedAt        int64
 	UpdatedAt        int64
 }
@@ -325,6 +423,7 @@ func (q *Queries) UpsertBill(ctx context.Context, arg UpsertBillParams) (Bill, e
 		arg.Enabled,
 		arg.Notes,
 		arg.Url,
+		arg.EventID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -339,6 +438,7 @@ func (q *Queries) UpsertBill(ctx context.Context, arg UpsertBillParams) (Bill, e
 		&i.Url,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EventID,
 	)
 	return i, err
 }
@@ -410,10 +510,11 @@ INSERT INTO bill_amount (
     currency,
     start_date,
     end_date,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET bill_id = EXCLUDED.bill_id,
   amount = EXCLUDED.amount,
@@ -421,8 +522,9 @@ SET bill_id = EXCLUDED.bill_id,
   currency = EXCLUDED.currency,
   start_date = EXCLUDED.start_date,
   end_date = EXCLUDED.end_date,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
-RETURNING id, bill_id, amount, start_date, end_date, created_at, updated_at, period, currency
+RETURNING id, bill_id, amount, start_date, end_date, created_at, updated_at, period, currency, event_id
 `
 
 type UpsertBillAmountParams struct {
@@ -433,6 +535,7 @@ type UpsertBillAmountParams struct {
 	Currency  string
 	StartDate int64
 	EndDate   *int64
+	EventID   *string
 	CreatedAt int64
 	UpdatedAt int64
 }
@@ -446,6 +549,7 @@ func (q *Queries) UpsertBillAmount(ctx context.Context, arg UpsertBillAmountPara
 		arg.Currency,
 		arg.StartDate,
 		arg.EndDate,
+		arg.EventID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -460,6 +564,48 @@ func (q *Queries) UpsertBillAmount(ctx context.Context, arg UpsertBillAmountPara
 		&i.UpdatedAt,
 		&i.Period,
 		&i.Currency,
+		&i.EventID,
+	)
+	return i, err
+}
+
+const upsertBillEnd = `-- name: UpsertBillEnd :one
+INSERT INTO bill_end (id, bill_id, date, event_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+UPDATE
+SET bill_id = EXCLUDED.bill_id,
+  date = EXCLUDED.date,
+  event_id = EXCLUDED.event_id,
+  updated_at = EXCLUDED.updated_at
+RETURNING id, bill_id, date, event_id, created_at, updated_at
+`
+
+type UpsertBillEndParams struct {
+	ID        string
+	BillID    string
+	Date      int64
+	EventID   *string
+	CreatedAt int64
+	UpdatedAt int64
+}
+
+func (q *Queries) UpsertBillEnd(ctx context.Context, arg UpsertBillEndParams) (BillEnd, error) {
+	row := q.db.QueryRowContext(ctx, upsertBillEnd,
+		arg.ID,
+		arg.BillID,
+		arg.Date,
+		arg.EventID,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i BillEnd
+	err := row.Scan(
+		&i.ID,
+		&i.BillID,
+		&i.Date,
+		&i.EventID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

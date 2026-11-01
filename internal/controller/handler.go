@@ -376,7 +376,7 @@ func (h *Handler) salariesPage() http.Handler {
 
 func (h *Handler) salaryNewPage() http.Handler {
 	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		data, err := h.svc.GetSalaryNewPageData(ctx)
+		data, err := h.svc.GetSalaryNewPageData(ctx, r.URL.Query().Get("event_id"))
 		if err != nil {
 			return fmt.Errorf("getting salary new page data: %w", err)
 		}
