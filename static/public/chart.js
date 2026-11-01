@@ -259,8 +259,10 @@ evtSource.addEventListener('setup', (event) => {
         // Labels below the chart go between the axis labels and the axis name.
         xAxis: { max: data.max, nameGap: hasBottom ? MARKLINE_BOTTOM_OFFSET + 2 * MARKLINE_ROW_HEIGHT + 6 : 30 },
         grid: { bottom: hasBottom ? 86 : 50 },
-        series: Object.values(series).concat(data.marklines.map((m) => ({
-            id: m.name,
+        // A marker's ID is its place, not its name: an Event and a Special Date
+        // may share a name, and ECharts rejects series with the same ID.
+        series: Object.values(series).concat(data.marklines.map((m, idx) => ({
+            id: 'markline:' + idx,
             name: m.name,
             type: 'line',
             markLine: {
