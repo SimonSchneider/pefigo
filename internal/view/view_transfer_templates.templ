@@ -41,6 +41,7 @@ templ DeleteTransferTemplateButton(id string) {
 templ TransferTemplateForm(view *model.TransferTemplateEditView) {
 	<form action={ "/transfers/?next=" + templ.EscapeString("/transfer-templates") } method="post">
 		<input type="hidden" name="id" value={ view.TransferTemplate.ID }/>
+		<input type="hidden" name="offset_event_id" value={ view.TransferTemplate.EventID }/>
 		<div class="max-w-4xl mx-auto">
 			<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 				<!-- Basic Information -->
@@ -194,7 +195,7 @@ templ TransferTemplateForm(view *model.TransferTemplateEditView) {
 						<label class="label"><span class="label-text font-medium">Event</span></label>
 						@EventSelect(view.Events, view.TransferTemplate.EventID, "select-bordered")
 						<div class="text-sm text-base-content/60 mt-1">
-							In an Event, give the Start and End as days after its date, such as +20, and they move with it. A blank Start is the Event's date.
+							In an Event, give the Start and End as days after its date, such as +20, and they move with it. A blank Start is the Event's date. Changing the Event keeps the dates it applies on.
 						</div>
 					</div>
 				</div>

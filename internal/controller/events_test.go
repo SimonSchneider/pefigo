@@ -212,3 +212,43 @@ func TestEntryFormsTakeDaysAfterTheirEventsDate(t *testing.T) {
 		t.Errorf("expected days after an Event's date outside an Event to be a bad request, got %d: %s", resp.StatusCode, body)
 	}
 }
+
+func TestAnEntryFormChangingItsEventKeepsTheDatesItShows(t *testing.T) {
+	svc, srv := newSettingsServer(t)
+	ctx := t.Context()
+	ev, err := svc.UpsertEvent(ctx, model.EventInput{Name: "Apartment", Date: mustDate(t, "2027-09-10")})
+	if err != nil {
+		t.Fatalf("create event: %v", err)
+	}
+	accountLocation := postForm(t, srv, "/accounts/", url.Values{"name": {"Property"}})
+	accountID := strings.Split(accountLocation, "/")[2]
+
+	amortization := url.Values{
+		"name": {"Amortization"}, "amount_type": {"fixed"}, "amount_fixed": {"5000"}, "recurrence": {"*-*-25"}, "start_date": {"+20"}, "event_id": {ev.ID}, "enabled": {"on"},
+	}
+	location := postForm(t, srv, "/transfers/", amortization)
+	ttID := strings.Split(location, "/")[2]
+	if page := getPage(t, srv, location); !strings.Contains(page, `name="offset_event_id" value="`+ev.ID+`"`) {
+		t.Fatalf("expected the Transfer Template form to say which Event its +20 is after")
+	}
+	amortization.Set("id", ttID)
+	amortization.Set("event_id", "")
+	amortization.Set("offset_event_id", ev.ID)
+	postForm(t, srv, "/transfers/", amortization)
+	if tt, err := svc.GetTransferTemplate(ctx, ttID); err != nil || tt.EventID != "" || tt.StartDate != mustDate(t, "2027-09-30") {
+		t.Fatalf("expected Amortization out of the Apartment, still from 2027-09-30, got %+v (%v)", tt, err)
+	}
+
+	postForm(t, srv, "/growth-models/", url.Values{"account_id": {accountID}, "type": {"fixed"}, "event_id": {ev.ID}, "start_date": {"-5"}})
+	growth, err := svc.ListAccountGrowthModels(ctx, accountID)
+	if err != nil || len(growth) != 1 {
+		t.Fatalf("expected a growth model, got %+v (%v)", growth, err)
+	}
+	if page := getPage(t, srv, accountLocation); !strings.Contains(page, `name="offset_event_id" value="`+ev.ID+`"`) {
+		t.Fatalf("expected the growth model row to say which Event its -5 is after")
+	}
+	postForm(t, srv, "/growth-models/", url.Values{"id": {growth[0].ID}, "account_id": {accountID}, "type": {"fixed"}, "event_id": {""}, "offset_event_id": {ev.ID}, "start_date": {"-5"}})
+	if gm, err := svc.GetGrowthModel(ctx, growth[0].ID); err != nil || gm.EventID != "" || gm.StartDate != mustDate(t, "2027-09-05") {
+		t.Fatalf("expected the growth model out of the Apartment, still from 2027-09-05, got %+v (%v)", gm, err)
+	}
+}

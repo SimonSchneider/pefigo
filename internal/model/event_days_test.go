@@ -135,3 +135,47 @@ func TestTheTransferTemplateFormGivesAnEntryInAnEventInDaysAfterItsDate(t *testi
 		t.Errorf("expected a new Transfer Template's form in the Apartment to have no Start and name its Event, got %q in %+v", inApartment.StartInput(), inApartment.Event())
 	}
 }
+
+func TestAnEntryChangingItsEventKeepsTheDatesItsFormGave(t *testing.T) {
+	svc := newTestService(t)
+	ctx := t.Context()
+	checking := mustAccount(t, svc, "Checking")
+	apartment := mustEvent(t, svc, model.EventInput{Name: "Apartment", Date: mustParseDate("2027-09-10")})
+	wedding := mustEvent(t, svc, model.EventInput{Name: "Wedding", Date: mustParseDate("2028-01-01")})
+	amortization := model.TransferTemplate{
+		Name: "Amortization", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(5000),
+		Recurrence: "*-*-25", StartOffset: days(20), Enabled: true, EventID: apartment.ID,
+	}
+	amortization = mustTransferTemplate(t, svc, amortization)
+	save := func(eventID, offsetEventID string, start int64) model.TransferTemplate {
+		t.Helper()
+		inp := amortization
+		inp.EventID, inp.OffsetEventID, inp.StartOffset = eventID, offsetEventID, days(start)
+		tt, err := svc.UpsertTransferTemplate(ctx, inp)
+		if err != nil {
+			t.Fatalf("save Amortization: %v", err)
+		}
+		return tt
+	}
+
+	if tt := save(apartment.ID, apartment.ID, 30); tt.StartDate != mustParseDate("2027-10-10") {
+		t.Errorf("expected +30 in the same Event to move the start to 2027-10-10, got %s", tt.StartDate)
+	}
+	if tt := save(wedding.ID, apartment.ID, 30); tt.EventID != wedding.ID || tt.StartDate != mustParseDate("2027-10-10") {
+		t.Errorf("expected joining the Wedding to keep 2027-10-10, got %s in %q", tt.StartDate, tt.EventID)
+	}
+	moveEvent(t, svc, wedding, "2028-01-11")
+	if tt := mustGetTransferTemplate(t, svc, amortization.ID); tt.StartDate != mustParseDate("2027-10-20") {
+		t.Errorf("expected Amortization to move with the Wedding to 2027-10-20, got %s", tt.StartDate)
+	}
+	if tt := save("", wedding.ID, -83); tt.EventID != "" || tt.StartDate != mustParseDate("2027-10-20") {
+		t.Errorf("expected leaving the Wedding to keep 2027-10-20, got %s in %q", tt.StartDate, tt.EventID)
+	}
+
+	property := mustEventAccount(t, svc, "Property", apartment.ID)
+	growth := mustGrowthModel(t, svc, model.AccountGrowthModelInput{AccountID: property.ID, StartOffset: days(-5), EventID: apartment.ID})
+	growth = mustGrowthModel(t, svc, model.AccountGrowthModelInput{ID: growth.ID, AccountID: property.ID, StartOffset: days(-5), OffsetEventID: apartment.ID})
+	if growth.EventID != "" || growth.StartDate != mustParseDate("2027-09-05") {
+		t.Errorf("expected the growth model leaving the Apartment to keep 2027-09-05, got %s in %q", growth.StartDate, growth.EventID)
+	}
+}

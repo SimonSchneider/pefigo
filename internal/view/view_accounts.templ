@@ -426,6 +426,7 @@ templ GrowthModelRow(accountID string, events []model.Event, growthModel model.G
 	<form method="post" action={ "/growth-models/?next=" + templ.EscapeString("/accounts/"+accountID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ growthModel.ID }/>
+			<input type="hidden" name="offset_event_id" value={ growthModel.EventID }/>
 			<input type="hidden" name="account_id" value={ accountID }/>
 			<select class="select select-xs w-full" name="type">
 				<option

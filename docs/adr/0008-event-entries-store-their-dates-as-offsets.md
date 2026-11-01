@@ -14,5 +14,5 @@ A one-off's date is stored as a date that many days after day 0, such as `1970-0
 - Leaving an Event out leaves out its entries, and with its Accounts every entry outside it that uses one: a Transfer Template from or to it, and a growth model of it. A cash flow paid out to one of its Accounts stays in its own Account, as without a destination. Otherwise an unplanned Event would still change the Baseline.
 - An entry joining or leaving an Event keeps the days it applies on: its dates are rebased from the Event's date to day 0, or the other way.
 - Read an Event entry's dates through the model, which places them at a date. The stored values are offsets and mean nothing on their own.
-- The forms give an entry in an Event its dates as days after the Event's date, such as `+20`, as they're stored. A date typed there is turned into days, and days given outside an Event are rejected.
+- The forms give an entry in an Event its dates as days after the Event's date, such as `+20`, as they're stored. A date typed there is turned into days, and days given outside an Event are rejected. The form also sends which Event its days are after, so changing an entry's Event in the form keeps the dates it applies on.
 - A Transfer Template saved without a recurrence is a one-off on its Start Date, so a one-off in an Event is given by its Start alone, such as `+5`.

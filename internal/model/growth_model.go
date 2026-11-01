@@ -63,6 +63,9 @@ type AccountGrowthModelInput struct {
 	// Event's date, in place of StartDate and EndDate.
 	StartOffset *date.Duration
 	EndOffset   *date.Duration
+	// OffsetEventID is the Event StartOffset and EndOffset are days after, as for a Transfer Template.
+	// It is EventID when blank.
+	OffsetEventID string
 }
 
 // input is the growth model as an input that saves it unchanged.
@@ -132,8 +135,12 @@ func (s *Service) UpsertAccountGrowthModel(ctx context.Context, inp AccountGrowt
 	if err != nil {
 		return GrowthModel{}, err
 	}
-	startDate, startErr := givenDate("start", inp.StartDate, inp.StartOffset, inp.EventID, at)
-	endDate, endErr := givenEndDate(inp.EndDate, inp.EndOffset, inp.EventID, at)
+	offsetEventID, offsetAt, err := s.offsetEvent(ctx, inp.OffsetEventID, inp.EventID, at)
+	if err != nil {
+		return GrowthModel{}, err
+	}
+	startDate, startErr := givenDate("start", inp.StartDate, inp.StartOffset, offsetEventID, offsetAt)
+	endDate, endErr := givenEndDate(inp.EndDate, inp.EndOffset, offsetEventID, offsetAt)
 	if err := errors.Join(startErr, endErr); err != nil {
 		return GrowthModel{}, err
 	}

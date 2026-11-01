@@ -79,6 +79,9 @@ type TransferTemplate struct {
 	// so a loaded Transfer Template has none.
 	StartOffset *date.Duration
 	EndOffset   *date.Duration
+	// OffsetEventID is the Event StartOffset and EndOffset are days after: the Event the form showed
+	// them for, which an entry changing its Event leaves. It is EventID when blank.
+	OffsetEventID string
 
 	Source TransferTemplateSource
 }
@@ -153,8 +156,12 @@ func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTempla
 	if err != nil {
 		return TransferTemplate{}, err
 	}
-	startDate, startErr := givenDate("start", inp.StartDate, inp.StartOffset, inp.EventID, at)
-	endDate, endErr := givenEndDate(inp.EndDate, inp.EndOffset, inp.EventID, at)
+	offsetEventID, offsetAt, err := s.offsetEvent(ctx, inp.OffsetEventID, inp.EventID, at)
+	if err != nil {
+		return TransferTemplate{}, err
+	}
+	startDate, startErr := givenDate("start", inp.StartDate, inp.StartOffset, offsetEventID, offsetAt)
+	endDate, endErr := givenEndDate(inp.EndDate, inp.EndOffset, offsetEventID, offsetAt)
 	if err := errors.Join(startErr, endErr); err != nil {
 		return TransferTemplate{}, err
 	}

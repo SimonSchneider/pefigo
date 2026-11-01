@@ -165,6 +165,17 @@ func givenDate(what string, d date.Date, offset *date.Duration, eventID string, 
 	return at.Add(*offset), nil
 }
 
+// offsetEvent is the Event an input's offsets are days after, with its date: offsetEventID, or eventID,
+// whose date is at, when offsetEventID is blank. A form gives the offsets of the Event it showed them
+// for, so an entry changing its Event in the form keeps the dates it applies on.
+func (s *Service) offsetEvent(ctx context.Context, offsetEventID, eventID string, at date.Date) (string, date.Date, error) {
+	if offsetEventID == "" || offsetEventID == eventID {
+		return eventID, at, nil
+	}
+	d, err := s.eventDate(ctx, offsetEventID)
+	return offsetEventID, d, err
+}
+
 // givenEndDate is givenDate for an End Date, which may be none.
 func givenEndDate(d *date.Date, offset *date.Duration, eventID string, at date.Date) (*date.Date, error) {
 	if offset == nil {

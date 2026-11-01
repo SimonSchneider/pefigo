@@ -91,6 +91,7 @@ func (a *accountGrowthModelInputForm) FromForm(r *http.Request) error {
 		return err
 	}
 	a.EventID = r.FormValue("event_id")
+	a.OffsetEventID = r.FormValue("offset_event_id")
 	return nil
 }
 
@@ -275,6 +276,7 @@ func (t *transferTemplateForm) FromForm(r *http.Request) error {
 	t.Enabled = r.FormValue("enabled") == "on"
 	t.BudgetCategoryID = ui.WithDefaultNull(r.FormValue("budget_category_id"))
 	t.EventID = r.FormValue("event_id")
+	t.OffsetEventID = r.FormValue("offset_event_id")
 	return nil
 }
 
