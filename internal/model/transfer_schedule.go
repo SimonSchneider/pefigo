@@ -32,14 +32,97 @@ func (s *Service) TransferSchedule(ctx context.Context) (*TransferSchedule, erro
 	return s.transferSchedule(ctx, p)
 }
 
+// payment is what one Salary pays or one Bill charges, as Transfer Templates, or why it can't be worked
+// out.
+type payment struct {
+	name, eventID string
+	source        TransferTemplateSource
+	templates     []TransferTemplate
+	err           error
+}
+
+// transferTemplatesOf are the Transfer Templates of every payment, or the error of the first that has
+// one.
+func transferTemplatesOf(payments []payment) ([]TransferTemplate, error) {
+	var templates []TransferTemplate
+	for _, pay := range payments {
+		if pay.err != nil {
+			return nil, pay.err
+		}
+		templates = append(templates, pay.templates...)
+	}
+	return templates, nil
+}
+
+// UnavailablePayment is a Salary or Bill of an unplanned Event whose payments can't be worked out, such
+// as a Bill Amount in a currency whose Exchange Rate can't be fetched, and why.
+type UnavailablePayment struct {
+	Name    string
+	EventID string
+	Source  TransferTemplateSource
+	Reason  string
+}
+
+// unplannedPayments are what the Salaries and Bills of unplanned Events would pay and charge, each as
+// the plans of its Event show it (see placings.shownBy) and in its Event, and those whose payments can't
+// be worked out. They count in nothing, so neither fails: they are listed apart.
+func (s *Service) unplannedPayments(ctx context.Context, pl *placings) ([]TransferTemplate, []UnavailablePayment, error) {
+	own, err := pl.atOwnDates()
+	if err != nil {
+		return nil, nil, err
+	}
+	var salaries []Salary
+	for _, sal := range own.salaries {
+		p, inBaseline, err := pl.shownBy(sal.EventID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if shown, ok := p.salary(sal.ID); ok && !inBaseline {
+			salaries = append(salaries, shown)
+		}
+	}
+	var bills []Bill
+	for _, b := range own.bills {
+		p, inBaseline, err := pl.shownBy(b.EventID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if shown, ok := p.bill(b.ID); ok && !inBaseline {
+			bills = append(bills, shown)
+		}
+	}
+	salaryPayments, err := s.salaryPayments(ctx, salaries)
+	if err != nil {
+		return nil, nil, err
+	}
+	billPayments, err := s.billPayments(ctx, bills)
+	if err != nil {
+		return nil, nil, err
+	}
+	var templates []TransferTemplate
+	var unavailable []UnavailablePayment
+	for _, pay := range slices.Concat(salaryPayments, billPayments) {
+		if pay.err != nil {
+			unavailable = append(unavailable, UnavailablePayment{Name: pay.name, EventID: pay.eventID, Source: pay.source, Reason: pay.err.Error()})
+			continue
+		}
+		for _, t := range pay.templates {
+			t.EventID = pay.eventID
+			templates = append(templates, t)
+		}
+	}
+	sortTransferTemplates(templates)
+	return templates, unavailable, nil
+}
+
 // transferSchedule is the Transfer Schedule of p: its Transfer Templates with those generated from
 // Salaries and Bills, but those that use an Account p leaves out.
 func (s *Service) transferSchedule(ctx context.Context, p *plans) (*TransferSchedule, error) {
-	salaryTemplates, err := s.generateSalaryTransferTemplates(ctx)
+	salaryTemplates, err := s.salaryTransferTemplates(ctx, p.salaries)
 	if err != nil {
 		return nil, fmt.Errorf("generating salary transfer templates: %w", err)
 	}
-	billTemplates, err := s.generateBillTransferTemplates(ctx)
+	billTemplates, err := s.billTransferTemplates(ctx, p.bills)
 	if err != nil {
 		return nil, fmt.Errorf("generating bill transfer templates: %w", err)
 	}

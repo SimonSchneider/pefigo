@@ -69,7 +69,7 @@ WHERE account_id = ?
 SELECT *
 FROM growth_model
 WHERE account_id = ?
-ORDER BY start_date, id;
+ORDER BY id;
 -- name: GetGrowthModel :one
 SELECT *
 FROM growth_model
@@ -194,27 +194,10 @@ WHERE (
       )
   )
 ORDER BY type_id;
--- name: ListStartupShareSnapshotHistory :many
--- Returns investment rounds joined with startup share config and account type for balance history.
--- valuation = pre_money_valuation; post_money = valuation + investment; post_money_shares derived in app.
-SELECT ir.account_id,
-  ir.date,
-  ir.valuation,
-  ir.pre_money_shares,
-  ir.investment,
-  ssa.tax_rate,
-  ssa.valuation_discount_factor,
-  COALESCE(a.type_id, '') AS type_id
-FROM investment_round ir
-  JOIN startup_share_account ssa ON ssa.account_id = ir.account_id
-  JOIN account a ON a.id = ir.account_id
-ORDER BY ir.date,
-  a.type_id,
-  ir.account_id;
 -- name: ListGrowthModels :many
 SELECT *
 FROM growth_model
-ORDER BY start_date, id;
+ORDER BY id;
 -- name: UpdateSnapshotDate :many
 UPDATE account_snapshot
 SET date = ?
@@ -305,15 +288,17 @@ INSERT INTO share_change (
     date,
     delta_shares,
     total_price,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET account_id = EXCLUDED.account_id,
   date = EXCLUDED.date,
   delta_shares = EXCLUDED.delta_shares,
   total_price = EXCLUDED.total_price,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
 RETURNING *;
 -- name: GetShareChange :one
@@ -324,13 +309,11 @@ WHERE id = ?;
 SELECT *
 FROM share_change
 WHERE account_id = ?
-ORDER BY date ASC,
-  id;
+ORDER BY id;
 -- name: ListAllShareChanges :many
 SELECT *
 FROM share_change
 ORDER BY account_id,
-  date,
   id;
 -- name: DeleteShareChange :exec
 DELETE FROM share_change
@@ -343,14 +326,18 @@ INSERT INTO investment_round (
     valuation,
     pre_money_shares,
     investment,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (account_id, date) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
-SET valuation = EXCLUDED.valuation,
+SET account_id = EXCLUDED.account_id,
+  date = EXCLUDED.date,
+  valuation = EXCLUDED.valuation,
   pre_money_shares = EXCLUDED.pre_money_shares,
   investment = EXCLUDED.investment,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
 RETURNING *;
 -- name: GetInvestmentRound :one
@@ -361,21 +348,12 @@ WHERE id = ?;
 SELECT *
 FROM investment_round
 WHERE account_id = ?
-ORDER BY date DESC,
-  id;
+ORDER BY id;
 -- name: ListAllInvestmentRounds :many
 SELECT *
 FROM investment_round
 ORDER BY account_id,
-  date,
   id;
--- name: GetLatestInvestmentRound :one
-SELECT *
-FROM investment_round
-WHERE account_id = ?
-  AND date <= ?
-ORDER BY date DESC
-LIMIT 1;
 -- name: DeleteInvestmentRound :exec
 DELETE FROM investment_round
 WHERE id = ?;

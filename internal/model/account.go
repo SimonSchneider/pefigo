@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/SimonSchneider/goslu/date"
@@ -298,14 +299,8 @@ func (s *Service) ListAccountsDetailed(ctx context.Context, today date.Date) ([]
 	if err != nil {
 		return nil, err
 	}
-	startupShares, err := s.listStartupShares(ctx)
-	if err != nil {
-		return nil, err
-	}
-	startupShareAccounts := make(map[string]StartupShareAccount, len(startupShares))
 	ucfg := uncertain.NewConfig(time.Now().UnixMilli(), 1)
-	for accountID, ss := range startupShares {
-		startupShareAccounts[accountID] = ss.StartupShareAccount
+	for accountID, ss := range p.startupShares {
 		if _, hasSnapshot := snapshots[accountID]; hasSnapshot {
 			continue
 		}
@@ -313,7 +308,7 @@ func (s *Service) ListAccountsDetailed(ctx context.Context, today date.Date) ([]
 			snapshots[accountID] = AccountSnapshot{AccountID: accountID, Date: round.Date, Balance: ss.growthOn(today).Balance(ucfg)}
 		}
 	}
-	return accountsDetailed(accs, snapshots, growthModelsAppliedOn(p, today), startupShareAccounts), nil
+	return accountsDetailed(accs, snapshots, growthModelsAppliedOn(p, today), p.startupShareAccounts), nil
 }
 
 type AccountsView struct {
@@ -336,11 +331,7 @@ func NewAccountsView(accounts []AccountDetailed, accountTypes []AccountTypeWithF
 
 // GetEvent is the Event id, or nil for "" or an Event that doesn't exist.
 func (v *AccountsView) GetEvent(id string) *Event {
-	ev, ok := v.Events[id]
-	if !ok {
-		return nil
-	}
-	return &ev
+	return eventByID(v.Events, id)
 }
 
 func (v *AccountsView) GetBudgetCategory(id *string) *TransferTemplateCategory {
@@ -487,83 +478,44 @@ func (s *Service) GetAccountNewPageData(ctx context.Context, excludedTypeIDs []s
 	}, nil
 }
 
+// rowsOf are the stored rows whose account, as accountOf gives it, is accountID, in their order.
+func rowsOf[R any](rows []R, accountID string, accountOf func(R) string) []R {
+	return slices.DeleteFunc(slices.Clone(rows), func(r R) bool { return accountOf(r) != accountID })
+}
+
+// GetAccountEditPageData is the page of the account accountID: its growth models, and for a Startup
+// Share account its investment rounds and share changes, each at its own Event's date, as their forms
+// edit them, and what it holds today, as the plans of its Event show it.
 func (s *Service) GetAccountEditPageData(ctx context.Context, accountID string, excludedTypeIDs []string) (*AccountEditView, error) {
-	accs, err := s.ListAccounts(ctx)
+	pl, err := s.loadPlacings(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("listing accounts: %w", err)
+		return nil, err
 	}
-	acc, err := s.GetAccount(ctx, accountID)
-	if err != nil {
-		return nil, fmt.Errorf("getting account: %w", err)
+	accs := accountsListFromDB(pl.stored.accounts)
+	i := slices.IndexFunc(accs, func(a Account) bool { return a.ID == accountID })
+	if i < 0 {
+		return nil, fmt.Errorf("getting account: %w", sql.ErrNoRows)
 	}
-	growthModels, err := s.ListAccountGrowthModels(ctx, acc.ID)
-	if err != nil {
+	v := &AccountEditView{Account: accs[i], Accounts: accs, Events: pl.events}
+	dates := pl.eventDates()
+	if v.GrowthModels, err = growthModelsOf(rowsOf(pl.stored.growthModels, accountID, func(g pdb.GrowthModel) string { return g.AccountID }), dates); err != nil {
 		return nil, fmt.Errorf("listing growth models: %w", err)
 	}
-	accountTypes, err := s.accountTypesWithExclusions(ctx, excludedTypeIDs)
-	if err != nil {
+	if v.AccountTypes, err = s.accountTypesWithExclusions(ctx, excludedTypeIDs); err != nil {
 		return nil, err
 	}
-
-	var startupShareAccount *StartupShareAccount
-	var investmentRounds []InvestmentRound
-	var shareChanges []ShareChange
-	var options []StartupShareOption
-	var derivedSummary *DerivedStartupShareSummary
-	ssa, err := s.GetStartupShareAccount(ctx, acc.ID)
-	if err == nil {
-		startupShareAccount = &ssa
-		investmentRounds, err = s.ListInvestmentRounds(ctx, acc.ID)
-		if err != nil {
-			return nil, fmt.Errorf("listing investment rounds: %w", err)
+	if j := slices.IndexFunc(pl.stored.startupShareAccounts, func(r pdb.StartupShareAccount) bool { return r.AccountID == accountID }); j >= 0 {
+		ssa := startupShareAccountFromDB(pl.stored.startupShareAccounts[j])
+		v.StartupShareAccount = &ssa
+		v.InvestmentRounds = investmentRoundsOf(rowsOf(pl.stored.investmentRounds, accountID, func(r pdb.InvestmentRound) string { return r.AccountID }), dates)
+		v.ShareChanges = shareChangesOf(rowsOf(pl.stored.shareChanges, accountID, func(c pdb.ShareChange) string { return c.AccountID }), dates)
+		v.Options = startupShareOptionsOf(rowsOf(pl.stored.startupShareOptions, accountID, func(o pdb.StartupShareOption) string { return o.AccountID }))
+		if v.DerivedStartupShareSummary, err = pl.startupShareSummary(v.Account, date.Today()); err != nil {
+			return nil, err
 		}
-		shareChanges, err = s.ListShareChanges(ctx, acc.ID)
-		if err != nil {
-			return nil, fmt.Errorf("listing share changes: %w", err)
-		}
-		options, err = s.ListStartupShareOptions(ctx, acc.ID)
-		if err != nil {
-			return nil, fmt.Errorf("listing startup share options: %w", err)
-		}
-		today := date.Today()
-		var postShares float64
-		round, roundErr := s.GetLatestInvestmentRound(ctx, acc.ID, today)
-		if roundErr != nil {
-			if !errors.Is(roundErr, sql.ErrNoRows) {
-				return nil, fmt.Errorf("getting latest investment round: %w", roundErr)
-			}
-		} else {
-			_, postShares = PostMoneyValuationAndShares(round.Valuation, round.PreMoneyShares, round.Investment)
-		}
-		sharesOwned, avgPrice := DeriveShareState(shareChanges, today)
-		derivedSummary = &DerivedStartupShareSummary{
-			SharesOwned:              sharesOwned,
-			TotalShares:              postShares,
-			AvgPurchasePricePerShare: avgPrice,
-		}
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("getting startup share account: %w", err)
 	}
-
-	categories, err := s.ListCategories(ctx)
-	if err != nil {
+	if v.Categories, err = s.ListCategories(ctx); err != nil {
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
-	events, err := s.ListEvents(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return &AccountEditView{
-		Account:                    acc,
-		Accounts:                   accs,
-		Events:                     events,
-		GrowthModels:               growthModels,
-		AccountTypes:               accountTypes,
-		Categories:                 categories,
-		StartupShareAccount:        startupShareAccount,
-		InvestmentRounds:           investmentRounds,
-		ShareChanges:               shareChanges,
-		Options:                    options,
-		DerivedStartupShareSummary: derivedSummary,
-	}, nil
+	return v, nil
 }

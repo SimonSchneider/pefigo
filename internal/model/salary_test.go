@@ -129,7 +129,7 @@ func TestAGrossSalaryStoredWithoutAKommunIsNeverPaidGross(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected the Salaries list to load, got %v", err)
 	}
-	if _, err := salaries[0].Segments(); err == nil {
+	if _, err := salaries.Salaries[0].Segments(); err == nil {
 		t.Error("expected the listed Salary to carry why it has no Salary Segments")
 	}
 }
@@ -267,7 +267,7 @@ func TestTheSalariesListShowsTodaysNetSalaryAndPensionContribution(t *testing.T)
 	if err != nil {
 		t.Fatalf("get salaries page data: %v", err)
 	}
-	byName := model.KeyBy(salaries, func(s model.Salary) string { return s.Name })
+	byName := model.KeyBy(salaries.Salaries, func(s model.Salary) string { return s.Name })
 
 	today := byName["Acme"].CurrentSegment()
 	if today == nil {

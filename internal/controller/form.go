@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -138,6 +139,20 @@ func parseEntryDate(r *http.Request, field string) (*date.Date, *date.Duration, 
 	return nil, &days, nil
 }
 
+// parseEntryDay parses the form field named field of an entry that may be in an Event into day, a
+// date, or offset, days after the Event's date, as parseEntryDate does. A blank field gives neither.
+func parseEntryDay(r *http.Request, field string, day *date.Date, offset **date.Duration) error {
+	d, days, err := parseEntryDate(r, field)
+	if err != nil {
+		return err
+	}
+	if d != nil {
+		*day = *d
+	}
+	*offset = days
+	return nil
+}
+
 func ptr[T any](v T) *T {
 	return &v
 }
@@ -164,9 +179,10 @@ type investmentRoundInputForm struct {
 func (i *investmentRoundInputForm) FromForm(r *http.Request) error {
 	i.ID = r.FormValue("id")
 	i.AccountID = r.FormValue("account_id")
-	if err := shttp.Parse(&i.Date, date.ParseDate, r.FormValue("date"), date.Date(0)); err != nil {
-		return fmt.Errorf("parsing date: %w", err)
+	if err := parseEntryDay(r, "date", &i.Date, &i.DateOffset); err != nil {
+		return err
 	}
+	i.EventID, i.OffsetEventID = r.FormValue("event_id"), r.FormValue("offset_event_id")
 	if err := shttp.Parse(&i.Valuation, shttp.ParseFloat, r.FormValue("valuation"), 0.0); err != nil {
 		return fmt.Errorf("parsing valuation: %w", err)
 	}
@@ -186,9 +202,10 @@ type shareChangeInputForm struct {
 func (s *shareChangeInputForm) FromForm(r *http.Request) error {
 	s.ID = r.FormValue("id")
 	s.AccountID = r.FormValue("account_id")
-	if err := shttp.Parse(&s.Date, date.ParseDate, r.FormValue("date"), date.Date(0)); err != nil {
-		return fmt.Errorf("parsing date: %w", err)
+	if err := parseEntryDay(r, "date", &s.Date, &s.DateOffset); err != nil {
+		return err
 	}
+	s.EventID, s.OffsetEventID = r.FormValue("event_id"), r.FormValue("offset_event_id")
 	if err := shttp.Parse(&s.DeltaShares, shttp.ParseFloat, r.FormValue("delta_shares"), 0.0); err != nil {
 		return fmt.Errorf("parsing delta_shares: %w", err)
 	}
@@ -312,6 +329,7 @@ func (s *salaryInputForm) FromForm(r *http.Request) error {
 	s.Forsamling = r.FormValue("forsamling")
 	s.ChurchMember = r.FormValue("church_member") == "on"
 	s.BudgetCategoryID = ui.WithDefaultNull(r.FormValue("budget_category_id"))
+	s.EventID = r.FormValue("event_id")
 	return nil
 }
 
@@ -322,12 +340,13 @@ type salaryAmountInputForm struct {
 func (a *salaryAmountInputForm) FromForm(r *http.Request) error {
 	a.ID = r.FormValue("id")
 	a.SalaryID = r.FormValue("salary_id")
-	if err := shttp.Parse(&a.StartDate, date.ParseDate, r.FormValue("start_date"), date.Date(0)); err != nil {
-		return fmt.Errorf("parsing start date: %w", err)
+	if err := parseEntryDay(r, "start_date", &a.StartDate, &a.StartOffset); err != nil {
+		return err
 	}
 	if err := shttp.Parse(&a.Amount, ui.ParseUncertainValue, r.FormValue("amount"), uncertain.Value{}); err != nil {
 		return fmt.Errorf("parsing amount: %w", err)
 	}
+	a.EventID, a.OffsetEventID = r.FormValue("event_id"), r.FormValue("offset_event_id")
 	return nil
 }
 
@@ -338,9 +357,10 @@ type salaryAdjustmentInputForm struct {
 func (a *salaryAdjustmentInputForm) FromForm(r *http.Request) error {
 	a.ID = r.FormValue("id")
 	a.SalaryID = r.FormValue("salary_id")
-	if err := shttp.Parse(&a.ValidFrom, date.ParseDate, r.FormValue("valid_from"), date.Date(0)); err != nil {
-		return fmt.Errorf("parsing valid_from: %w", err)
+	if err := parseEntryDay(r, "valid_from", &a.ValidFrom, &a.ValidFromOffset); err != nil {
+		return err
 	}
+	a.EventID, a.OffsetEventID = r.FormValue("event_id"), r.FormValue("offset_event_id")
 	if err := shttp.Parse(&a.VacationDaysPerYear, shttp.ParseFloat, r.FormValue("vacation_days_per_year"), float64(0)); err != nil {
 		return fmt.Errorf("parsing vacation_days_per_year: %w", err)
 	}
@@ -363,12 +383,10 @@ type partialParentalLeaveInputForm struct {
 func (p *partialParentalLeaveInputForm) FromForm(r *http.Request) error {
 	p.ID = r.FormValue("id")
 	p.SalaryID = r.FormValue("salary_id")
-	if err := shttp.Parse(&p.StartDate, date.ParseDate, r.FormValue("start_date"), date.Date(0)); err != nil {
-		return fmt.Errorf("parsing start_date: %w", err)
+	if err := errors.Join(parseEntryDay(r, "start_date", &p.StartDate, &p.StartOffset), parseEntryDay(r, "end_date", &p.EndDate, &p.EndOffset)); err != nil {
+		return err
 	}
-	if err := shttp.Parse(&p.EndDate, date.ParseDate, r.FormValue("end_date"), date.Date(0)); err != nil {
-		return fmt.Errorf("parsing end_date: %w", err)
-	}
+	p.EventID, p.OffsetEventID = r.FormValue("event_id"), r.FormValue("offset_event_id")
 	if err := shttp.Parse(&p.SjukDaysPerYear, shttp.ParseFloat, r.FormValue("sjuk_days_per_year"), float64(0)); err != nil {
 		return fmt.Errorf("parsing sjuk_days_per_year: %w", err)
 	}
@@ -388,15 +406,27 @@ type fullParentalLeaveInputForm struct {
 func (f *fullParentalLeaveInputForm) FromForm(r *http.Request) error {
 	f.ID = r.FormValue("id")
 	f.SalaryID = r.FormValue("salary_id")
-	if err := shttp.Parse(&f.StartDate, date.ParseDate, r.FormValue("start_date"), date.Date(0)); err != nil {
-		return fmt.Errorf("parsing start_date: %w", err)
+	if err := errors.Join(parseEntryDay(r, "start_date", &f.StartDate, &f.StartOffset), parseEntryDay(r, "end_date", &f.EndDate, &f.EndOffset)); err != nil {
+		return err
 	}
-	if err := shttp.Parse(&f.EndDate, date.ParseDate, r.FormValue("end_date"), date.Date(0)); err != nil {
-		return fmt.Errorf("parsing end_date: %w", err)
-	}
+	f.EventID, f.OffsetEventID = r.FormValue("event_id"), r.FormValue("offset_event_id")
 	if err := shttp.Parse(&f.SjukDaysPerWeek, shttp.ParseFloat, r.FormValue("sjuk_days_per_week"), float64(0)); err != nil {
 		return fmt.Errorf("parsing sjuk_days_per_week: %w", err)
 	}
+	return nil
+}
+
+type salaryEndInputForm struct {
+	model.SalaryEnd
+}
+
+func (e *salaryEndInputForm) FromForm(r *http.Request) error {
+	e.ID = r.FormValue("id")
+	e.SalaryID = r.FormValue("salary_id")
+	if err := parseEntryDay(r, "date", &e.Date, &e.DateOffset); err != nil {
+		return err
+	}
+	e.EventID, e.OffsetEventID = r.FormValue("event_id"), r.FormValue("offset_event_id")
 	return nil
 }
 
@@ -488,6 +518,7 @@ func (b *billInputForm) FromForm(r *http.Request) error {
 	b.Notes = r.FormValue("notes")
 	b.URL = r.FormValue("url")
 	b.BudgetCategoryID = ui.WithDefaultNull(r.FormValue("budget_category_id"))
+	b.EventID = r.FormValue("event_id")
 	return nil
 }
 
@@ -498,17 +529,33 @@ type billAmountInputForm struct {
 func (a *billAmountInputForm) FromForm(r *http.Request) error {
 	a.ID = r.FormValue("id")
 	a.BillID = r.FormValue("bill_id")
-	if err := shttp.Parse(&a.StartDate, date.ParseDate, r.FormValue("start_date"), date.Date(0)); err != nil {
-		return fmt.Errorf("parsing start date: %w", err)
+	if err := parseEntryDay(r, "start_date", &a.StartDate, &a.StartOffset); err != nil {
+		return err
 	}
-	if err := shttp.Parse(&a.EndDate, ui.ParseNullable(date.ParseDate), r.FormValue("end_date"), nil); err != nil {
-		return fmt.Errorf("parsing end date: %w", err)
+	var err error
+	if a.EndDate, a.EndOffset, err = parseEntryDate(r, "end_date"); err != nil {
+		return err
 	}
+	a.EventID, a.OffsetEventID = r.FormValue("event_id"), r.FormValue("offset_event_id")
 	if err := shttp.Parse(&a.Amount, ui.ParseUncertainValue, r.FormValue("amount"), uncertain.Value{}); err != nil {
 		return fmt.Errorf("parsing amount: %w", err)
 	}
 	a.Period = r.FormValue("amount_period")
 	a.Currency = r.FormValue("amount_currency")
+	return nil
+}
+
+type billEndInputForm struct {
+	model.BillEnd
+}
+
+func (e *billEndInputForm) FromForm(r *http.Request) error {
+	e.ID = r.FormValue("id")
+	e.BillID = r.FormValue("bill_id")
+	if err := parseEntryDay(r, "date", &e.Date, &e.DateOffset); err != nil {
+		return err
+	}
+	e.EventID, e.OffsetEventID = r.FormValue("event_id"), r.FormValue("offset_event_id")
 	return nil
 }
 

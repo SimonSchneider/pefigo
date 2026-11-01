@@ -12,7 +12,7 @@ templ PageSalaries(child templ.Component) {
 	@Layout("/salaries", child)
 }
 
-templ SalariesListView(salaries []model.Salary) {
+templ SalariesListView(view *model.SalariesView) {
 	<main class="flex-1 flex flex-col min-h-0">
 		@Header("Salaries", NewButton("/salaries/new", IconPlus("w-4 h-4"), "New Salary"))
 		<div class="flex-1 p-6 overflow-auto bg-base-100">
@@ -34,7 +34,7 @@ templ SalariesListView(salaries []model.Salary) {
 									</tr>
 								</thead>
 								<tbody>
-									if len(salaries) == 0 {
+									if len(view.Salaries) == 0 {
 										<tr>
 											<td colspan="8" class="text-center py-8 text-base-content/70">
 												<div class="flex flex-col items-center gap-2">
@@ -45,12 +45,21 @@ templ SalariesListView(salaries []model.Salary) {
 											</td>
 										</tr>
 									} else {
-										for _, sal := range salaries {
+										for _, sal := range view.Salaries {
 											<tr class="hover:bg-base-200/50 transition-colors">
-												<td class="font-medium">{ sal.Name }</td>
+												<td class="font-medium">
+													<div class="flex items-center gap-2">
+														<span>{ sal.Name }</span>
+														@EventBadge(view.GetEvent(sal.EventID))
+													</div>
+												</td>
 												<td><code class="text-sm">{ string(sal.Recurrence) }</code></td>
 												<td>
-													@BalanceBadge(sal.CurrentAmount(), false, "")
+													if sal.InBaseline() {
+														@BalanceBadge(sal.CurrentAmount(), false, "")
+													} else {
+														@WouldPayBadge(sal.CurrentAmount(), true)
+													}
 												</td>
 												@salaryTodayCells(sal)
 												<td>
@@ -102,15 +111,25 @@ templ salaryTodayCells(sal model.Salary) {
 		<td>–</td>
 	} else {
 		<td>
-			@BalanceBadge(today.Breakdown.NetMonthly, false, "")
+			@salaryAmountBadge(sal, today.Breakdown.NetMonthly)
 		</td>
 		<td>
 			if today.Breakdown.PensionContribution != nil {
-				@BalanceBadge(*today.Breakdown.PensionContribution, false, "")
+				@salaryAmountBadge(sal, *today.Breakdown.PensionContribution)
 			} else {
 				–
 			}
 		</td>
+	}
+}
+
+// salaryAmountBadge is an amount the Salary pays today: muted when only its unplanned Event would pay
+// it.
+templ salaryAmountBadge(sal model.Salary, amount float64) {
+	if sal.InBaseline() {
+		@BalanceBadge(amount, false, "")
+	} else {
+		@WouldPayBadge(amount, false)
 	}
 }
 
@@ -126,6 +145,11 @@ templ SalaryEditContent(view *model.SalaryEditView) {
 			@Header("New Salary", BackButton("/salaries"))
 		}
 		{{ segments, segmentsErr := view.Salary.Segments() }}
+		if !view.Salary.InBaseline() {
+			<div role="alert" class="alert alert-info alert-soft text-sm m-4 mb-0">
+				<span>Its Event is unplanned, so the Baseline pays nothing of this Salary. It shows what the Salary would pay with its Event planned.</span>
+			</div>
+		}
 		if len(segments) > 0 || segmentsErr != nil {
 			<div class="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
 				<div class="flex-1 overflow-auto min-h-0">
@@ -200,6 +224,10 @@ templ SalaryForm(view *model.SalaryEditView) {
 										>{ cat.Name }</option>
 									}
 								</select>
+							</div>
+							<div class="form-control">
+								<label class="label label-text text-xs pb-1">Event</label>
+								@EventSelect(view.Events, view.Salary.EventID, "select-sm")
 							</div>
 							<div class="form-control">
 								<label class="label label-text text-xs pb-1">Pension Account</label>
@@ -333,18 +361,20 @@ templ SalaryForm(view *model.SalaryEditView) {
 								Net Amounts
 							}
 						</h3>
-						<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr auto auto">
+						<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr auto auto">
 							<div class="text-xs text-base-content/50">Start Date</div>
 							<div class="text-xs text-base-content/50">Amount</div>
+							<div class="text-xs text-base-content/50">Event</div>
 							<div></div>
 							<div></div>
 							for _, amt := range view.Salary.Amounts {
-								@SalaryAmountRow(view.Salary.ID, amt)
+								@SalaryAmountRow(view, amt)
 							}
-							@SalaryAmountRow(view.Salary.ID, model.SalaryAmount{})
+							@SalaryAmountRow(view, model.SalaryAmount{})
 						</div>
 					</div>
 				</div>
+				@SalaryEndsCard(view)
 			if view.Salary.IsGross {
 				for _, adj := range view.Salary.Adjustments {
 					<form id={ "delete-salary-adj-form-" + adj.ID } action={ "/salary-adjustments/" + adj.ID + "/delete?next=" + templ.EscapeString("/salaries/"+view.Salary.ID+"/edit") } method="post" onsubmit="return confirm('Delete this adjustment?')"></form>
@@ -352,18 +382,19 @@ templ SalaryForm(view *model.SalaryEditView) {
 				<div class="mt-3 card bg-base-100 shadow-sm border border-base-300">
 					<div class="card-body p-3">
 						<h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Adjustments</h3>
-						<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr 1fr 1fr auto auto">
+						<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr auto auto">
 							<div class="text-xs text-base-content/50">Valid From</div>
 							<div class="text-xs text-base-content/50">Vacation days/yr</div>
 							<div class="text-xs text-base-content/50">Sick days/occ</div>
 							<div class="text-xs text-base-content/50">Sick occ/yr</div>
 							<div class="text-xs text-base-content/50">VAB days/yr</div>
+							<div class="text-xs text-base-content/50">Event</div>
 							<div></div>
 							<div></div>
 							for _, adj := range view.Salary.Adjustments {
-								@SalaryAdjustmentRow(view.Salary.ID, adj)
+								@SalaryAdjustmentRow(view, adj)
 							}
-							@SalaryAdjustmentRow(view.Salary.ID, model.SalaryAdjustment{})
+							@SalaryAdjustmentRow(view, model.SalaryAdjustment{})
 						</div>
 					</div>
 				</div>
@@ -373,18 +404,19 @@ templ SalaryForm(view *model.SalaryEditView) {
 				<div class="mt-3 card bg-base-100 shadow-sm border border-base-300">
 					<div class="card-body p-3">
 						<h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Partial Parental Leave</h3>
-						<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr 1fr 1fr auto auto">
+						<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr auto auto">
 							<div class="text-xs text-base-content/50">Start Date</div>
 							@EndDateColumnHeader()
 							<div class="text-xs text-base-content/50">Sjukpenning days/yr</div>
 							<div class="text-xs text-base-content/50">Lägsta days/yr</div>
 							<div class="text-xs text-base-content/50">Skipped work days/yr</div>
+							<div class="text-xs text-base-content/50">Event</div>
 							<div></div>
 							<div></div>
 							for _, ppl := range view.Salary.PartialParentalLeaves {
-								@PartialParentalLeaveRow(view.Salary.ID, ppl)
+								@PartialParentalLeaveRow(view, ppl)
 							}
-							@PartialParentalLeaveRow(view.Salary.ID, model.PartialParentalLeave{})
+							@PartialParentalLeaveRow(view, model.PartialParentalLeave{})
 						</div>
 					</div>
 				</div>
@@ -394,16 +426,17 @@ templ SalaryForm(view *model.SalaryEditView) {
 				<div class="mt-3 card bg-base-100 shadow-sm border border-base-300">
 					<div class="card-body p-3">
 						<h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Full Parental Leave</h3>
-						<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr auto auto">
+						<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr 1fr auto auto">
 							<div class="text-xs text-base-content/50">Start Date</div>
 							@EndDateColumnHeader()
 							<div class="text-xs text-base-content/50">Sjukpenning days/wk</div>
+							<div class="text-xs text-base-content/50">Event</div>
 							<div></div>
 							<div></div>
 							for _, fpl := range view.Salary.FullParentalLeaves {
-								@FullParentalLeaveRow(view.Salary.ID, fpl)
+								@FullParentalLeaveRow(view, fpl)
 							}
-							@FullParentalLeaveRow(view.Salary.ID, model.FullParentalLeave{})
+							@FullParentalLeaveRow(view, model.FullParentalLeave{})
 						</div>
 					</div>
 				</div>
@@ -413,110 +446,126 @@ templ SalaryForm(view *model.SalaryEditView) {
 	</div>
 }
 
-templ SalaryAmountRow(salaryID string, amt model.SalaryAmount) {
-	<form method="post" action={ "/salary-amounts/?next=" + templ.EscapeString("/salaries/"+salaryID+"/edit") } style="display:contents">
+templ SalaryAmountRow(view *model.SalaryEditView, amt model.SalaryAmount) {
+	{{ eventID := partEventID(amt.ID, amt.EventID, view.PartEventID()) }}
+	<form method="post" action={ "/salary-amounts/?next=" + templ.EscapeString("/salaries/"+view.Salary.ID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ amt.ID }/>
-			<input type="hidden" name="salary_id" value={ salaryID }/>
-			<input type="text" class="input input-xs w-full" placeholder="2024-01-01" name="start_date" value={ amt.GetStartDateString() }/>
+			<input type="hidden" name="offset_event_id" value={ amt.EventID }/>
+			<input type="hidden" name="salary_id" value={ view.Salary.ID }/>
+			@EntryDateInput(view.Events, amt.EventID, "start_date", partDate(amt.ID, amt.StartDate), partStartPlaceholder(amt.ID, amt.EventID, view.PartEventID(), "2024-01-01"))
 		</div>
 		<div><input type="text" class="input input-xs w-full" placeholder="30000" name="amount" value={ amt.GetAmountString() }/></div>
-		<button type="submit" class="btn btn-xs btn-square btn-primary btn-ghost" title={ rowActionTitle(amt.ID != "") }>
-			if amt.ID != "" {
-				@IconCheck("w-3.5 h-3.5")
-			} else {
-				@IconPlus("w-3.5 h-3.5")
-			}
-		</button>
-		if amt.ID != "" {
-			<button type="submit" form={ "delete-salary-amount-form-" + amt.ID } class="btn btn-xs btn-square btn-ghost text-error" title="Delete">
-				@IconX("w-3.5 h-3.5")
-			</button>
-		} else {
-			<div></div>
-		}
+		<div>@EventSelect(view.Events, eventID, "select-xs")</div>
+		@partRowButtons(amt.ID, "delete-salary-amount-form-")
 	</form>
 }
 
-templ SalaryAdjustmentRow(salaryID string, adj model.SalaryAdjustment) {
-	<form method="post" action={ "/salary-adjustments/?next=" + templ.EscapeString("/salaries/"+salaryID+"/edit") } style="display:contents">
+// partRowButtons save the row of the part id, and delete it with the form deleteFormPrefix+id.
+templ partRowButtons(id, deleteFormPrefix string) {
+	<button type="submit" class="btn btn-xs btn-square btn-primary btn-ghost" title={ rowActionTitle(id != "") }>
+		if id != "" {
+			@IconCheck("w-3.5 h-3.5")
+		} else {
+			@IconPlus("w-3.5 h-3.5")
+		}
+	</button>
+	if id != "" {
+		<button type="submit" form={ deleteFormPrefix + id } class="btn btn-xs btn-square btn-ghost text-error" title="Delete">
+			@IconX("w-3.5 h-3.5")
+		</button>
+	} else {
+		<div></div>
+	}
+}
+
+templ SalaryAdjustmentRow(view *model.SalaryEditView, adj model.SalaryAdjustment) {
+	{{ eventID := partEventID(adj.ID, adj.EventID, view.PartEventID()) }}
+	<form method="post" action={ "/salary-adjustments/?next=" + templ.EscapeString("/salaries/"+view.Salary.ID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ adj.ID }/>
-			<input type="hidden" name="salary_id" value={ salaryID }/>
-			<input type="text" class="input input-xs w-full" placeholder="2024-01-01" name="valid_from" value={ adj.GetValidFromString() }/>
+			<input type="hidden" name="offset_event_id" value={ adj.EventID }/>
+			<input type="hidden" name="salary_id" value={ view.Salary.ID }/>
+			@EntryDateInput(view.Events, adj.EventID, "valid_from", partDate(adj.ID, adj.ValidFrom), partStartPlaceholder(adj.ID, adj.EventID, view.PartEventID(), "2024-01-01"))
 		</div>
 		<div><input type="text" class="input input-xs w-full" placeholder="25" name="vacation_days_per_year" value={ formatAdjFloat(adj.VacationDaysPerYear) }/></div>
 		<div><input type="text" class="input input-xs w-full" placeholder="3" name="sick_days_per_occasion" value={ formatAdjFloat(adj.SickDaysPerOccasion) }/></div>
 		<div><input type="text" class="input input-xs w-full" placeholder="4" name="sick_occasions_per_year" value={ formatAdjFloat(adj.SickOccasionsPerYear) }/></div>
 		<div><input type="text" class="input input-xs w-full" placeholder="10" name="vab_days_per_year" value={ formatAdjFloat(adj.VABDaysPerYear) }/></div>
-		<button type="submit" class="btn btn-xs btn-square btn-primary btn-ghost" title={ rowActionTitle(adj.ID != "") }>
-			if adj.ID != "" {
-				@IconCheck("w-3.5 h-3.5")
-			} else {
-				@IconPlus("w-3.5 h-3.5")
-			}
-		</button>
-		if adj.ID != "" {
-			<button type="submit" form={ "delete-salary-adj-form-" + adj.ID } class="btn btn-xs btn-square btn-ghost text-error" title="Delete">
-				@IconX("w-3.5 h-3.5")
-			</button>
-		} else {
-			<div></div>
-		}
+		<div>@EventSelect(view.Events, eventID, "select-xs")</div>
+		@partRowButtons(adj.ID, "delete-salary-adj-form-")
 	</form>
 }
 
-templ PartialParentalLeaveRow(salaryID string, ppl model.PartialParentalLeave) {
-	<form method="post" action={ "/partial-parental-leaves/?next=" + templ.EscapeString("/salaries/"+salaryID+"/edit") } style="display:contents">
+templ PartialParentalLeaveRow(view *model.SalaryEditView, ppl model.PartialParentalLeave) {
+	{{ eventID := partEventID(ppl.ID, ppl.EventID, view.PartEventID()) }}
+	<form method="post" action={ "/partial-parental-leaves/?next=" + templ.EscapeString("/salaries/"+view.Salary.ID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ ppl.ID }/>
-			<input type="hidden" name="salary_id" value={ salaryID }/>
-			<input type="text" class="input input-xs w-full" placeholder="2024-01-01" name="start_date" value={ ppl.GetStartDateString() }/>
+			<input type="hidden" name="offset_event_id" value={ ppl.EventID }/>
+			<input type="hidden" name="salary_id" value={ view.Salary.ID }/>
+			@EntryDateInput(view.Events, ppl.EventID, "start_date", partDate(ppl.ID, ppl.StartDate), partStartPlaceholder(ppl.ID, ppl.EventID, view.PartEventID(), "2024-01-01"))
 		</div>
-		<div><input type="text" class="input input-xs w-full" placeholder="2025-01-01" name="end_date" value={ ppl.GetEndDateString() }/></div>
+		<div>@EntryDateInput(view.Events, ppl.EventID, "end_date", partDate(ppl.ID, ppl.EndDate), partEndPlaceholder(ppl.ID, ppl.EventID, view.PartEventID(), "2025-01-01"))</div>
 		<div><input type="text" class="input input-xs w-full" placeholder="40" name="sjuk_days_per_year" value={ formatAdjFloat(ppl.SjukDaysPerYear) }/></div>
 		<div><input type="text" class="input input-xs w-full" placeholder="10" name="lagsta_days_per_year" value={ formatAdjFloat(ppl.LagstaDaysPerYear) }/></div>
 		<div><input type="text" class="input input-xs w-full" placeholder="50" name="skipped_work_days_per_year" value={ formatAdjFloat(ppl.SkippedWorkDaysPerYear) }/></div>
-		<button type="submit" class="btn btn-xs btn-square btn-primary btn-ghost" title={ rowActionTitle(ppl.ID != "") }>
-			if ppl.ID != "" {
-				@IconCheck("w-3.5 h-3.5")
-			} else {
-				@IconPlus("w-3.5 h-3.5")
-			}
-		</button>
-		if ppl.ID != "" {
-			<button type="submit" form={ "delete-partial-pl-form-" + ppl.ID } class="btn btn-xs btn-square btn-ghost text-error" title="Delete">
-				@IconX("w-3.5 h-3.5")
-			</button>
-		} else {
-			<div></div>
-		}
+		<div>@EventSelect(view.Events, eventID, "select-xs")</div>
+		@partRowButtons(ppl.ID, "delete-partial-pl-form-")
 	</form>
 }
 
-templ FullParentalLeaveRow(salaryID string, fpl model.FullParentalLeave) {
-	<form method="post" action={ "/full-parental-leaves/?next=" + templ.EscapeString("/salaries/"+salaryID+"/edit") } style="display:contents">
+templ FullParentalLeaveRow(view *model.SalaryEditView, fpl model.FullParentalLeave) {
+	{{ eventID := partEventID(fpl.ID, fpl.EventID, view.PartEventID()) }}
+	<form method="post" action={ "/full-parental-leaves/?next=" + templ.EscapeString("/salaries/"+view.Salary.ID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ fpl.ID }/>
-			<input type="hidden" name="salary_id" value={ salaryID }/>
-			<input type="text" class="input input-xs w-full" placeholder="2025-06-01" name="start_date" value={ fpl.GetStartDateString() }/>
+			<input type="hidden" name="offset_event_id" value={ fpl.EventID }/>
+			<input type="hidden" name="salary_id" value={ view.Salary.ID }/>
+			@EntryDateInput(view.Events, fpl.EventID, "start_date", partDate(fpl.ID, fpl.StartDate), partStartPlaceholder(fpl.ID, fpl.EventID, view.PartEventID(), "2025-06-01"))
 		</div>
-		<div><input type="text" class="input input-xs w-full" placeholder="2026-06-01" name="end_date" value={ fpl.GetEndDateString() }/></div>
+		<div>@EntryDateInput(view.Events, fpl.EventID, "end_date", partDate(fpl.ID, fpl.EndDate), partEndPlaceholder(fpl.ID, fpl.EventID, view.PartEventID(), "2026-06-01"))</div>
 		<div><input type="text" class="input input-xs w-full" placeholder="5" name="sjuk_days_per_week" value={ formatAdjFloat(fpl.SjukDaysPerWeek) }/></div>
-		<button type="submit" class="btn btn-xs btn-square btn-primary btn-ghost" title={ rowActionTitle(fpl.ID != "") }>
-			if fpl.ID != "" {
-				@IconCheck("w-3.5 h-3.5")
-			} else {
-				@IconPlus("w-3.5 h-3.5")
-			}
-		</button>
-		if fpl.ID != "" {
-			<button type="submit" form={ "delete-full-pl-form-" + fpl.ID } class="btn btn-xs btn-square btn-ghost text-error" title="Delete">
-				@IconX("w-3.5 h-3.5")
-			</button>
-		} else {
-			<div></div>
-		}
+		<div>@EventSelect(view.Events, eventID, "select-xs")</div>
+		@partRowButtons(fpl.ID, "delete-full-pl-form-")
+	</form>
+}
+
+// SalaryEndsCard lists the days the Salary may end on, each in an Event or not: it pays nothing from
+// the earliest one the Baseline places.
+templ SalaryEndsCard(view *model.SalaryEditView) {
+	for _, end := range view.Salary.Ends {
+		<form id={ "delete-salary-end-form-" + end.ID } action={ "/salary-ends/" + end.ID + "/delete?next=" + templ.EscapeString("/salaries/"+view.Salary.ID+"/edit") } method="post" onsubmit="return confirm('Delete this end?')"></form>
+	}
+	<div class="mt-3 card bg-base-100 shadow-sm border border-base-300">
+		<div class="card-body p-3">
+			<h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Ends</h3>
+			<p class="text-xs text-base-content/60">From the earliest end, nothing of the Salary is paid. An end in an unplanned Event counts only where a Scenario places it.</p>
+			<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr auto auto">
+				<div class="text-xs text-base-content/50">End Date</div>
+				<div class="text-xs text-base-content/50">Event</div>
+				<div></div>
+				<div></div>
+				for _, end := range view.Salary.Ends {
+					@SalaryEndRow(view, end)
+				}
+				@SalaryEndRow(view, model.SalaryEnd{})
+			</div>
+		</div>
+	</div>
+}
+
+templ SalaryEndRow(view *model.SalaryEditView, end model.SalaryEnd) {
+	{{ eventID := partEventID(end.ID, end.EventID, view.PartEventID()) }}
+	<form method="post" action={ "/salary-ends/?next=" + templ.EscapeString("/salaries/"+view.Salary.ID+"/edit") } style="display:contents">
+		<div>
+			<input type="hidden" name="id" value={ end.ID }/>
+			<input type="hidden" name="offset_event_id" value={ end.EventID }/>
+			<input type="hidden" name="salary_id" value={ view.Salary.ID }/>
+			@EntryDateInput(view.Events, end.EventID, "date", partDate(end.ID, end.Date), partStartPlaceholder(end.ID, end.EventID, view.PartEventID(), "2028-01-01"))
+		</div>
+		<div>@EventSelect(view.Events, eventID, "select-xs")</div>
+		@partRowButtons(end.ID, "delete-salary-end-form-")
 	</form>
 }
 

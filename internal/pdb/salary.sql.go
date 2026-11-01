@@ -39,8 +39,18 @@ func (q *Queries) DeleteSalaryAmount(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteSalaryEnd = `-- name: DeleteSalaryEnd :exec
+DELETE FROM salary_end
+WHERE id = ?
+`
+
+func (q *Queries) DeleteSalaryEnd(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteSalaryEnd, id)
+	return err
+}
+
 const getSalary = `-- name: GetSalary :one
-SELECT id, name, to_account_id, priority, recurrence, budget_category_id, enabled, created_at, updated_at, pension_account_id, kommun, forsamling, church_member, is_gross
+SELECT id, name, to_account_id, priority, recurrence, budget_category_id, enabled, created_at, updated_at, pension_account_id, kommun, forsamling, church_member, is_gross, event_id
 FROM salary
 WHERE id = ?
 `
@@ -63,12 +73,37 @@ func (q *Queries) GetSalary(ctx context.Context, id string) (Salary, error) {
 		&i.Forsamling,
 		&i.ChurchMember,
 		&i.IsGross,
+		&i.EventID,
+	)
+	return i, err
+}
+
+const getSalaryAdjustment = `-- name: GetSalaryAdjustment :one
+SELECT id, salary_id, valid_from, vacation_days_per_year, sick_days_per_occasion, sick_occasions_per_year, vab_days_per_year, created_at, updated_at, event_id
+FROM salary_adjustment
+WHERE id = ?
+`
+
+func (q *Queries) GetSalaryAdjustment(ctx context.Context, id string) (SalaryAdjustment, error) {
+	row := q.db.QueryRowContext(ctx, getSalaryAdjustment, id)
+	var i SalaryAdjustment
+	err := row.Scan(
+		&i.ID,
+		&i.SalaryID,
+		&i.ValidFrom,
+		&i.VacationDaysPerYear,
+		&i.SickDaysPerOccasion,
+		&i.SickOccasionsPerYear,
+		&i.VabDaysPerYear,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EventID,
 	)
 	return i, err
 }
 
 const getSalaryAmount = `-- name: GetSalaryAmount :one
-SELECT id, salary_id, amount, start_date, created_at, updated_at
+SELECT id, salary_id, amount, start_date, created_at, updated_at, event_id
 FROM salary_amount
 WHERE id = ?
 `
@@ -83,14 +118,35 @@ func (q *Queries) GetSalaryAmount(ctx context.Context, id string) (SalaryAmount,
 		&i.StartDate,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EventID,
+	)
+	return i, err
+}
+
+const getSalaryEnd = `-- name: GetSalaryEnd :one
+SELECT id, salary_id, date, event_id, created_at, updated_at
+FROM salary_end
+WHERE id = ?
+`
+
+func (q *Queries) GetSalaryEnd(ctx context.Context, id string) (SalaryEnd, error) {
+	row := q.db.QueryRowContext(ctx, getSalaryEnd, id)
+	var i SalaryEnd
+	err := row.Scan(
+		&i.ID,
+		&i.SalaryID,
+		&i.Date,
+		&i.EventID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const listAllSalaryAdjustments = `-- name: ListAllSalaryAdjustments :many
-SELECT id, salary_id, valid_from, vacation_days_per_year, sick_days_per_occasion, sick_occasions_per_year, vab_days_per_year, created_at, updated_at
+SELECT id, salary_id, valid_from, vacation_days_per_year, sick_days_per_occasion, sick_occasions_per_year, vab_days_per_year, created_at, updated_at, event_id
 FROM salary_adjustment
-ORDER BY salary_id, valid_from, id
+ORDER BY salary_id, id
 `
 
 func (q *Queries) ListAllSalaryAdjustments(ctx context.Context) ([]SalaryAdjustment, error) {
@@ -112,6 +168,7 @@ func (q *Queries) ListAllSalaryAdjustments(ctx context.Context) ([]SalaryAdjustm
 			&i.VabDaysPerYear,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -127,9 +184,9 @@ func (q *Queries) ListAllSalaryAdjustments(ctx context.Context) ([]SalaryAdjustm
 }
 
 const listAllSalaryAmounts = `-- name: ListAllSalaryAmounts :many
-SELECT id, salary_id, amount, start_date, created_at, updated_at
+SELECT id, salary_id, amount, start_date, created_at, updated_at, event_id
 FROM salary_amount
-ORDER BY salary_id, start_date, id
+ORDER BY salary_id, id
 `
 
 func (q *Queries) ListAllSalaryAmounts(ctx context.Context) ([]SalaryAmount, error) {
@@ -148,6 +205,43 @@ func (q *Queries) ListAllSalaryAmounts(ctx context.Context) ([]SalaryAmount, err
 			&i.StartDate,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllSalaryEnds = `-- name: ListAllSalaryEnds :many
+SELECT id, salary_id, date, event_id, created_at, updated_at
+FROM salary_end
+ORDER BY salary_id, id
+`
+
+func (q *Queries) ListAllSalaryEnds(ctx context.Context) ([]SalaryEnd, error) {
+	rows, err := q.db.QueryContext(ctx, listAllSalaryEnds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SalaryEnd
+	for rows.Next() {
+		var i SalaryEnd
+		if err := rows.Scan(
+			&i.ID,
+			&i.SalaryID,
+			&i.Date,
+			&i.EventID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -163,7 +257,7 @@ func (q *Queries) ListAllSalaryAmounts(ctx context.Context) ([]SalaryAmount, err
 }
 
 const listSalaries = `-- name: ListSalaries :many
-SELECT id, name, to_account_id, priority, recurrence, budget_category_id, enabled, created_at, updated_at, pension_account_id, kommun, forsamling, church_member, is_gross
+SELECT id, name, to_account_id, priority, recurrence, budget_category_id, enabled, created_at, updated_at, pension_account_id, kommun, forsamling, church_member, is_gross, event_id
 FROM salary
 ORDER BY name, id
 `
@@ -192,6 +286,7 @@ func (q *Queries) ListSalaries(ctx context.Context) ([]Salary, error) {
 			&i.Forsamling,
 			&i.ChurchMember,
 			&i.IsGross,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -207,10 +302,10 @@ func (q *Queries) ListSalaries(ctx context.Context) ([]Salary, error) {
 }
 
 const listSalaryAdjustments = `-- name: ListSalaryAdjustments :many
-SELECT id, salary_id, valid_from, vacation_days_per_year, sick_days_per_occasion, sick_occasions_per_year, vab_days_per_year, created_at, updated_at
+SELECT id, salary_id, valid_from, vacation_days_per_year, sick_days_per_occasion, sick_occasions_per_year, vab_days_per_year, created_at, updated_at, event_id
 FROM salary_adjustment
 WHERE salary_id = ?
-ORDER BY valid_from, id
+ORDER BY id
 `
 
 func (q *Queries) ListSalaryAdjustments(ctx context.Context, salaryID string) ([]SalaryAdjustment, error) {
@@ -232,6 +327,7 @@ func (q *Queries) ListSalaryAdjustments(ctx context.Context, salaryID string) ([
 			&i.VabDaysPerYear,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -247,10 +343,10 @@ func (q *Queries) ListSalaryAdjustments(ctx context.Context, salaryID string) ([
 }
 
 const listSalaryAmounts = `-- name: ListSalaryAmounts :many
-SELECT id, salary_id, amount, start_date, created_at, updated_at
+SELECT id, salary_id, amount, start_date, created_at, updated_at, event_id
 FROM salary_amount
 WHERE salary_id = ?
-ORDER BY start_date, id
+ORDER BY id
 `
 
 func (q *Queries) ListSalaryAmounts(ctx context.Context, salaryID string) ([]SalaryAmount, error) {
@@ -269,6 +365,7 @@ func (q *Queries) ListSalaryAmounts(ctx context.Context, salaryID string) ([]Sal
 			&i.StartDate,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -297,10 +394,11 @@ INSERT INTO salary (
     forsamling,
     church_member,
     is_gross,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET name = EXCLUDED.name,
   to_account_id = EXCLUDED.to_account_id,
@@ -313,8 +411,9 @@ SET name = EXCLUDED.name,
   forsamling = EXCLUDED.forsamling,
   church_member = EXCLUDED.church_member,
   is_gross = EXCLUDED.is_gross,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
-RETURNING id, name, to_account_id, priority, recurrence, budget_category_id, enabled, created_at, updated_at, pension_account_id, kommun, forsamling, church_member, is_gross
+RETURNING id, name, to_account_id, priority, recurrence, budget_category_id, enabled, created_at, updated_at, pension_account_id, kommun, forsamling, church_member, is_gross, event_id
 `
 
 type UpsertSalaryParams struct {
@@ -330,6 +429,7 @@ type UpsertSalaryParams struct {
 	Forsamling       string
 	ChurchMember     bool
 	IsGross          bool
+	EventID          *string
 	CreatedAt        int64
 	UpdatedAt        int64
 }
@@ -348,6 +448,7 @@ func (q *Queries) UpsertSalary(ctx context.Context, arg UpsertSalaryParams) (Sal
 		arg.Forsamling,
 		arg.ChurchMember,
 		arg.IsGross,
+		arg.EventID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -367,6 +468,7 @@ func (q *Queries) UpsertSalary(ctx context.Context, arg UpsertSalaryParams) (Sal
 		&i.Forsamling,
 		&i.ChurchMember,
 		&i.IsGross,
+		&i.EventID,
 	)
 	return i, err
 }
@@ -380,10 +482,11 @@ INSERT INTO salary_adjustment (
     sick_days_per_occasion,
     sick_occasions_per_year,
     vab_days_per_year,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET salary_id = EXCLUDED.salary_id,
   valid_from = EXCLUDED.valid_from,
@@ -391,8 +494,9 @@ SET salary_id = EXCLUDED.salary_id,
   sick_days_per_occasion = EXCLUDED.sick_days_per_occasion,
   sick_occasions_per_year = EXCLUDED.sick_occasions_per_year,
   vab_days_per_year = EXCLUDED.vab_days_per_year,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
-RETURNING id, salary_id, valid_from, vacation_days_per_year, sick_days_per_occasion, sick_occasions_per_year, vab_days_per_year, created_at, updated_at
+RETURNING id, salary_id, valid_from, vacation_days_per_year, sick_days_per_occasion, sick_occasions_per_year, vab_days_per_year, created_at, updated_at, event_id
 `
 
 type UpsertSalaryAdjustmentParams struct {
@@ -403,6 +507,7 @@ type UpsertSalaryAdjustmentParams struct {
 	SickDaysPerOccasion  float64
 	SickOccasionsPerYear float64
 	VabDaysPerYear       float64
+	EventID              *string
 	CreatedAt            int64
 	UpdatedAt            int64
 }
@@ -416,6 +521,7 @@ func (q *Queries) UpsertSalaryAdjustment(ctx context.Context, arg UpsertSalaryAd
 		arg.SickDaysPerOccasion,
 		arg.SickOccasionsPerYear,
 		arg.VabDaysPerYear,
+		arg.EventID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -430,6 +536,7 @@ func (q *Queries) UpsertSalaryAdjustment(ctx context.Context, arg UpsertSalaryAd
 		&i.VabDaysPerYear,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EventID,
 	)
 	return i, err
 }
@@ -440,16 +547,18 @@ INSERT INTO salary_amount (
     salary_id,
     amount,
     start_date,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET salary_id = EXCLUDED.salary_id,
   amount = EXCLUDED.amount,
   start_date = EXCLUDED.start_date,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
-RETURNING id, salary_id, amount, start_date, created_at, updated_at
+RETURNING id, salary_id, amount, start_date, created_at, updated_at, event_id
 `
 
 type UpsertSalaryAmountParams struct {
@@ -457,6 +566,7 @@ type UpsertSalaryAmountParams struct {
 	SalaryID  string
 	Amount    string
 	StartDate int64
+	EventID   *string
 	CreatedAt int64
 	UpdatedAt int64
 }
@@ -467,6 +577,7 @@ func (q *Queries) UpsertSalaryAmount(ctx context.Context, arg UpsertSalaryAmount
 		arg.SalaryID,
 		arg.Amount,
 		arg.StartDate,
+		arg.EventID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -476,6 +587,48 @@ func (q *Queries) UpsertSalaryAmount(ctx context.Context, arg UpsertSalaryAmount
 		&i.SalaryID,
 		&i.Amount,
 		&i.StartDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EventID,
+	)
+	return i, err
+}
+
+const upsertSalaryEnd = `-- name: UpsertSalaryEnd :one
+INSERT INTO salary_end (id, salary_id, date, event_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+UPDATE
+SET salary_id = EXCLUDED.salary_id,
+  date = EXCLUDED.date,
+  event_id = EXCLUDED.event_id,
+  updated_at = EXCLUDED.updated_at
+RETURNING id, salary_id, date, event_id, created_at, updated_at
+`
+
+type UpsertSalaryEndParams struct {
+	ID        string
+	SalaryID  string
+	Date      int64
+	EventID   *string
+	CreatedAt int64
+	UpdatedAt int64
+}
+
+func (q *Queries) UpsertSalaryEnd(ctx context.Context, arg UpsertSalaryEndParams) (SalaryEnd, error) {
+	row := q.db.QueryRowContext(ctx, upsertSalaryEnd,
+		arg.ID,
+		arg.SalaryID,
+		arg.Date,
+		arg.EventID,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i SalaryEnd
+	err := row.Scan(
+		&i.ID,
+		&i.SalaryID,
+		&i.Date,
+		&i.EventID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

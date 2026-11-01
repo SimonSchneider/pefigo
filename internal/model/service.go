@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"flag"
+	"fmt"
 	"io/fs"
 
 	"github.com/SimonSchneider/goslu/config"
@@ -16,8 +17,10 @@ import (
 )
 
 type Service struct {
-	db                *sql.DB
-	q                 *pdb.Queries
+	db *sql.DB
+	q  *pdb.Queries
+	// tx is the transaction q is in, or nil outside one. See Service.inTx.
+	tx                *sql.Tx
 	sweClient         *swe.Client
 	currencyClient    *currency.Client
 	forecastInputs    *forecastInputWatcher
@@ -81,6 +84,28 @@ func Open(ctx context.Context, dir fs.FS, path string, conn string, opts ...Serv
 		o(s)
 	}
 	return s, nil
+}
+
+// inTx runs f with the Service in one transaction, and keeps what f writes only when it succeeds: all
+// of it, or none. Within a transaction already, f runs in it.
+func (s *Service) inTx(ctx context.Context, f func(tx *Service) error) error {
+	if s.tx != nil {
+		return f(s)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning a transaction: %w", err)
+	}
+	defer tx.Rollback()
+	in := *s
+	in.q, in.tx = s.q.WithTx(tx), tx
+	if err := f(&in); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing a transaction: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) SweClient() *swe.Client {

@@ -14,6 +14,10 @@ _Avoid_: effective from, valid from
 The first day a dated entry no longer applies: it applies up to, but not on, its End Date. Without an End Date it applies indefinitely.
 _Avoid_: effective to, until, last day
 
+**End**:
+A dated part of a Salary or Bill: a day from which it pays or charges nothing. A Salary's or Bill's End Date is the earliest of its Ends.
+_Avoid_: termination, stop, end entry
+
 ### Accounts
 
 **Snapshot**:
@@ -21,7 +25,7 @@ An account's balance recorded at the start of a day, before that day's Transfers
 _Avoid_: balance record
 
 **Startup Share Account**:
-An account holding shares in a startup. It has no Snapshots: its balance on a day is derived from its latest investment round with shares and a price per share, and its share changes, up to that day. Without such a round it is 0.
+An account holding shares in a startup. It has no Snapshots: its balance on a day is derived from its latest investment round with shares and a price per share, and its share changes, up to that day. Of several such rounds on one day, the one saved last counts. Without such a round it is 0.
 
 **Uncategorized**:
 The Account Type that accounts without one are grouped under.
@@ -45,7 +49,7 @@ _Avoid_: debts
 ### Salaries
 
 **Salary**:
-Income paid into an account on a recurrence. Its Salary Amounts each apply from their Start Date until the next one starts.
+Income paid into an account on a recurrence. Its Salary Amounts each apply from their Start Date until the next one starts, and none from its End Date, the earliest of its Ends.
 
 **Salary Amount**:
 What a Salary pays on each recurrence from its Start Date: before tax for a Gross Salary, after tax otherwise.
@@ -136,7 +140,7 @@ The plans for the future as they are stored, with no Scenario applied. Its Forec
 _Avoid_: current plan, base scenario, default scenario
 
 **Event**:
-A named group of related changes to the plans for the future that happen around one date, such as buying an apartment. It adds entries, such as Accounts, growth models, Transfer Templates, Salaries and Bills. Every date in an Event is relative to the Event's date, so moving the Event moves every change in it. An Event is planned when the Baseline holds it at its date, grouping related entries there, and unplanned when only Scenarios use it. Its changes before the Forecast Start don't count, as Transfers before it are taken to be in the Snapshots.
+A named group of related changes to the plans for the future that happen around one date, such as buying an apartment. It adds entries, such as Accounts, growth models, Transfer Templates, Salaries and Bills, and dated parts to Salaries, Bills and Startup Share Accounts outside it, such as parental leave, an investment round or an End. Every date in an Event is relative to the Event's date, so moving the Event moves every change in it. An Event is planned when the Baseline holds it at its date, grouping related entries there, and unplanned when only Scenarios use it. Its changes before the Forecast Start don't count, as Transfers before it are taken to be in the Snapshots.
 _Avoid_: life event, decision, plan change, bundle
 
 **Scenario**:

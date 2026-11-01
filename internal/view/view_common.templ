@@ -43,6 +43,17 @@ templ BalanceBadge(val float64, coloring bool, class string) {
 	>{ ui.FormatWithThousands(val) }</span>
 }
 
+// WouldPayBadge is what an entry of an unplanned Event would pay or charge with its Event planned:
+// muted, and, when labelled, marked as not in the Baseline, as it counts in no total.
+templ WouldPayBadge(val float64, labelled bool) {
+	<span class="text-base-content/50" title="Its Event is unplanned: the Baseline pays or charges none of this">
+		@BalanceBadge(val, false, "")
+	</span>
+	if labelled {
+		<div class="text-xs text-base-content/50 whitespace-nowrap">not in the Baseline</div>
+	}
+}
+
 templ ItemsTooltip() {
 	<div class="hidden group-hover:block fixed z-50 bg-base-100 border border-base-300 rounded-lg shadow-lg p-3 min-w-[250px]" data-tooltip>
 		{ children... }

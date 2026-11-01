@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -328,7 +329,9 @@ type TransferTemplatesView struct {
 	Rows []TransferScheduleRow
 	// LeftOut are the Transfer Templates the Events leave out of the Baseline, at their Events' own
 	// dates. They count in nothing.
-	LeftOut         []TransferTemplate
+	LeftOut []TransferTemplate
+	// Unavailable are the Salaries and Bills of unplanned Events whose payments can't be worked out.
+	Unavailable     []UnavailablePayment
 	Accounts        map[string]Account
 	Categories      map[string]TransferTemplateCategory
 	Events          map[string]Event
@@ -358,11 +361,7 @@ func newTransferTemplatesView(schedule *TransferSchedule, day date.Date, account
 
 // GetEvent is the Event id, or nil for "" or an Event that doesn't exist.
 func (v *TransferTemplatesView) GetEvent(id string) *Event {
-	ev, ok := v.Events[id]
-	if !ok {
-		return nil
-	}
-	return &ev
+	return eventByID(v.Events, id)
 }
 
 // TemplateCount is the number of Transfer Templates the table lists: a Bill, or the Transfer Templates
@@ -395,24 +394,35 @@ func (v *TransferTemplatesView) GetAccount(id string) *Account {
 	return &a
 }
 
+// GetTransferTemplatesPageData is the Baseline's Transfer Templates, and apart from them, what the
+// Events leave out: their stored Transfer Templates and those using their accounts, and what their
+// Salaries and Bills would pay and charge, or why that can't be worked out.
 func (s *Service) GetTransferTemplatesPageData(ctx context.Context) (*TransferTemplatesView, error) {
-	schedule, err := s.TransferSchedule(ctx)
+	pl, err := s.loadPlacings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	baseline, err := pl.inBaseline()
+	if err != nil {
+		return nil, fmt.Errorf("placing the events: %w", err)
+	}
+	schedule, err := s.transferSchedule(ctx, baseline)
 	if err != nil {
 		return nil, fmt.Errorf("loading transfer schedule: %w", err)
 	}
-	accounts, err := s.ListAccounts(ctx)
+	unplanned, unavailable, err := s.unplannedPayments(ctx, pl)
 	if err != nil {
-		return nil, fmt.Errorf("listing accounts: %w", err)
+		return nil, err
 	}
 	categories, err := s.ListCategories(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
-	events, err := s.ListEvents(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return newTransferTemplatesView(schedule, date.Today(), accounts, categories, events), nil
+	v := newTransferTemplatesView(schedule, date.Today(), accountsListFromDB(pl.stored.accounts), categories, pl.events)
+	v.LeftOut = slices.Concat(v.LeftOut, unplanned)
+	sortTransferTemplates(v.LeftOut)
+	v.Unavailable = unavailable
+	return v, nil
 }
 
 // GetTransferTemplateNewPageData is the page of a new Transfer Template in the Event eventID, or in the

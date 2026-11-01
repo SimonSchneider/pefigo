@@ -66,18 +66,15 @@ func (s *Service) recordedBalances(ctx context.Context, today date.Date) ([]reco
 	if err != nil {
 		return nil, fmt.Errorf("listing snapshot history: %w", err)
 	}
-	startupShareAccounts, err := s.q.ListStartupShareAccounts(ctx)
+	// The Startup Share accounts are valued by the Baseline's investment rounds and share changes.
+	p, err := s.placeEvents(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("listing startup share accounts: %w", err)
-	}
-	isStartupShare := make(map[string]bool, len(startupShareAccounts))
-	for _, a := range startupShareAccounts {
-		isStartupShare[a.AccountID] = true
+		return nil, err
 	}
 	recorded := make([]recordedBalance, 0, len(rows))
 	var snapshotDays []date.Date
 	for _, r := range rows {
-		if isStartupShare[r.AccountID] || date.Date(r.Date).After(today) {
+		if _, ok := p.startupShareAccounts[r.AccountID]; ok || date.Date(r.Date).After(today) {
 			continue
 		}
 		snapshotDays = append(snapshotDays, date.Date(r.Date))
@@ -88,18 +85,18 @@ func (s *Service) recordedBalances(ctx context.Context, today date.Date) ([]reco
 		recorded = append(recorded, recordedBalance{accountID: r.AccountID, typeID: r.TypeID, day: date.Date(r.Date), balance: v.Mean()})
 	}
 
-	startupAccounts, err := s.listStartupShareHistories(ctx)
-	if err != nil {
-		return nil, err
+	typeIDs := make(map[string]string, len(p.accounts))
+	for _, acc := range p.accounts {
+		typeIDs[acc.ID] = acc.TypeID
 	}
 	slices.Sort(snapshotDays)
 	snapshotDays = slices.Compact(snapshotDays)
 	ucfg := uncertain.NewConfig(0, 1)
-	for _, accountID := range slices.Sorted(maps.Keys(startupAccounts)) {
-		sa := startupAccounts[accountID]
+	for _, accountID := range slices.Sorted(maps.Keys(p.startupShares)) {
+		ss := p.startupShares[accountID]
 		for _, day := range snapshotDays {
-			if balance, ok := sa.balanceOn(ucfg, day); ok {
-				recorded = append(recorded, recordedBalance{accountID: accountID, typeID: sa.typeID, day: day, balance: balance})
+			if balance, ok := ss.balanceOn(ucfg, day); ok {
+				recorded = append(recorded, recordedBalance{accountID: accountID, typeID: typeIDs[accountID], day: day, balance: balance})
 			}
 		}
 	}

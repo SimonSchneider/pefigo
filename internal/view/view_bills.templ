@@ -92,6 +92,7 @@ templ billsTable(view *model.BillsView, bills []model.Bill) {
 										<img src={ billFaviconURL(bill) } alt="" width="20" height="20" class="w-5 h-5 rounded-sm shrink-0" loading="lazy"/>
 									}
 									<span>{ bill.Name }</span>
+									@EventBadge(view.GetEvent(bill.EventID))
 								</div>
 							</td>
 							<td class="text-xs text-base-content/60">
@@ -118,12 +119,25 @@ templ billsTable(view *model.BillsView, bills []model.Bill) {
 									<span class="badge badge-ghost badge-xs">Monthly</span>
 								}
 							</td>
-							<td class="text-right">
-								@BalanceBadge(bill.CurrentAmount(), false, "")
-							</td>
-							<td class="text-right">
-								@BalanceBadge(bill.YearlyAmount(), false, "")
-							</td>
+							if bill.ChargeError() != nil {
+								<td colspan="2" class="text-right text-xs text-warning" title={ bill.ChargeError().Error() }>
+									What it would charge is unavailable
+								</td>
+							} else if bill.InBaseline() {
+								<td class="text-right">
+									@BalanceBadge(bill.CurrentAmount(), false, "")
+								</td>
+								<td class="text-right">
+									@BalanceBadge(bill.YearlyAmount(), false, "")
+								</td>
+							} else {
+								<td class="text-right">
+									@WouldPayBadge(bill.CurrentAmount(), true)
+								</td>
+								<td class="text-right">
+									@WouldPayBadge(bill.YearlyAmount(), false)
+								</td>
+							}
 							<td>
 								if bill.Enabled {
 									<span class="badge badge-success badge-xs">Enabled</span>
@@ -231,6 +245,9 @@ templ BillAccountEditContent(view *model.BillAccountEditView) {
 											<option value={ cat.ID }>{ cat.Name }</option>
 										}
 									</select>
+									<div class="max-w-48">
+										@EventSelect(view.Events, "", "select-xs")
+									</div>
 									<button class="btn btn-xs btn-primary" type="submit">
 										@IconPlus("w-3.5 h-3.5")
 										Add
@@ -268,6 +285,16 @@ templ BillEditContent(view *model.BillEditView) {
 		}
 		<div class="flex-1 p-4 overflow-auto bg-base-100">
 			<div>
+				if view.IsEdit() && !view.Bill.InBaseline() {
+					<div role="alert" class="alert alert-info alert-soft text-sm mb-3">
+						<span>Its Event is unplanned, so the Baseline charges nothing of this Bill. It shows what the Bill would charge with its Event planned.</span>
+					</div>
+				}
+				if err := view.Bill.ChargeError(); err != nil {
+					<div role="alert" class="alert alert-warning alert-soft text-sm mb-3">
+						<span>What the Bill would charge is unavailable: { err.Error() }</span>
+					</div>
+				}
 				<form action={ "/bill-items/?next=" + templ.EscapeString("/bill-items/"+view.Bill.ID+"/edit") } method="post">
 					<input type="hidden" name="id" value={ view.Bill.ID }/>
 					<div class="card bg-base-100 shadow-sm border border-base-300">
@@ -317,6 +344,10 @@ templ BillEditContent(view *model.BillEditView) {
 										<input type="text" class="input input-sm w-full" placeholder="https://..." name="url" value={ view.Bill.URL }/>
 									</div>
 								</div>
+								<div class="form-control">
+									<label class="label label-text text-xs pb-1">Event</label>
+									@EventSelect(view.Events, view.Bill.EventID, "select-sm")
+								</div>
 								<div class="form-control col-span-2 lg:col-span-3">
 									<label class="label label-text text-xs pb-1">Notes</label>
 									<input type="text" class="input input-sm w-full" placeholder="Optional notes" name="notes" value={ view.Bill.Notes }/>
@@ -349,21 +380,23 @@ templ BillEditContent(view *model.BillEditView) {
 					<div class="mt-3 card bg-base-100 shadow-sm border border-base-300">
 						<div class="card-body p-3">
 							<h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Amounts</h3>
-						<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr auto auto auto auto">
+						<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr auto auto 1fr auto auto">
 							<div class="text-xs text-base-content/50">Start Date</div>
 							@EndDateColumnHeader()
 							<div class="text-xs text-base-content/50">Amount</div>
 							<div class="text-xs text-base-content/50">Period</div>
 							<div class="text-xs text-base-content/50">Currency</div>
+							<div class="text-xs text-base-content/50">Event</div>
 							<div></div>
 							<div></div>
 								for _, amt := range view.Bill.Amounts {
-									@BillAmountRow(view.Bill.ID, amt)
+									@BillAmountRow(view, amt)
 								}
-								@BillAmountRow(view.Bill.ID, model.BillAmount{})
+								@BillAmountRow(view, model.BillAmount{})
 							</div>
 						</div>
 					</div>
+					@BillEndsCard(view)
 				}
 			</div>
 		</div>
@@ -378,14 +411,16 @@ templ deleteBillButton(bill model.Bill) {
 	</form>
 }
 
-templ BillAmountRow(billID string, amt model.BillAmount) {
-	<form method="post" action={ "/bill-amounts/?next=" + templ.EscapeString("/bill-items/"+billID+"/edit") } style="display:contents">
+templ BillAmountRow(view *model.BillEditView, amt model.BillAmount) {
+	{{ eventID := partEventID(amt.ID, amt.EventID, view.PartEventID()) }}
+	<form method="post" action={ "/bill-amounts/?next=" + templ.EscapeString("/bill-items/"+view.Bill.ID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ amt.ID }/>
-			<input type="hidden" name="bill_id" value={ billID }/>
-			<input type="text" class="input input-xs w-full" placeholder="2025-01-01" name="start_date" value={ amt.GetStartDateString() }/>
+			<input type="hidden" name="offset_event_id" value={ amt.EventID }/>
+			<input type="hidden" name="bill_id" value={ view.Bill.ID }/>
+			@EntryDateInput(view.Events, amt.EventID, "start_date", partDate(amt.ID, amt.StartDate), partStartPlaceholder(amt.ID, amt.EventID, view.PartEventID(), "2025-01-01"))
 		</div>
-		<div><input type="text" class="input input-xs w-full" placeholder="(optional)" name="end_date" value={ amt.GetEndDateString() }/></div>
+		<div>@EntryDateInput(view.Events, amt.EventID, "end_date", amt.EndDate, "(optional)")</div>
 		<div><input type="text" class="input input-xs w-full" placeholder="149" name="amount" value={ amt.GetAmountString() }/></div>
 		<div>
 			<select class="select select-xs w-full" name="amount_period">
@@ -417,20 +452,46 @@ templ BillAmountRow(billID string, amt model.BillAmount) {
 				}
 			</select>
 		</div>
-		<button type="submit" class="btn btn-xs btn-square btn-primary btn-ghost" title={ rowActionTitle(amt.ID != "") }>
-			if amt.ID != "" {
-				@IconCheck("w-3.5 h-3.5")
-			} else {
-				@IconPlus("w-3.5 h-3.5")
-			}
-		</button>
-		if amt.ID != "" {
-			<button type="submit" form={ "delete-bill-amount-form-" + amt.ID } class="btn btn-xs btn-square btn-ghost text-error" title="Delete">
-				@IconX("w-3.5 h-3.5")
-			</button>
-		} else {
-			<div></div>
-		}
+		<div>@EventSelect(view.Events, eventID, "select-xs")</div>
+		@partRowButtons(amt.ID, "delete-bill-amount-form-")
+	</form>
+}
+
+// BillEndsCard lists the days the Bill may end on, each in an Event or not: no Bill Amount applies from
+// the earliest one the Baseline places.
+templ BillEndsCard(view *model.BillEditView) {
+	for _, end := range view.Bill.Ends {
+		<form id={ "delete-bill-end-form-" + end.ID } action={ "/bill-ends/" + end.ID + "/delete?next=" + templ.EscapeString("/bill-items/"+view.Bill.ID+"/edit") } method="post" onsubmit="return confirm('Delete this end?')"></form>
+	}
+	<div class="mt-3 card bg-base-100 shadow-sm border border-base-300">
+		<div class="card-body p-3">
+			<h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Ends</h3>
+			<p class="text-xs text-base-content/60">From the earliest end, no Bill Amount applies. An end in an unplanned Event counts only where a Scenario places it.</p>
+			<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr auto auto">
+				<div class="text-xs text-base-content/50">End Date</div>
+				<div class="text-xs text-base-content/50">Event</div>
+				<div></div>
+				<div></div>
+				for _, end := range view.Bill.Ends {
+					@BillEndRow(view, end)
+				}
+				@BillEndRow(view, model.BillEnd{})
+			</div>
+		</div>
+	</div>
+}
+
+templ BillEndRow(view *model.BillEditView, end model.BillEnd) {
+	{{ eventID := partEventID(end.ID, end.EventID, view.PartEventID()) }}
+	<form method="post" action={ "/bill-ends/?next=" + templ.EscapeString("/bill-items/"+view.Bill.ID+"/edit") } style="display:contents">
+		<div>
+			<input type="hidden" name="id" value={ end.ID }/>
+			<input type="hidden" name="offset_event_id" value={ end.EventID }/>
+			<input type="hidden" name="bill_id" value={ view.Bill.ID }/>
+			@EntryDateInput(view.Events, end.EventID, "date", partDate(end.ID, end.Date), partStartPlaceholder(end.ID, end.EventID, view.PartEventID(), "2028-01-01"))
+		</div>
+		<div>@EventSelect(view.Events, eventID, "select-xs")</div>
+		@partRowButtons(end.ID, "delete-bill-end-form-")
 	</form>
 }
 

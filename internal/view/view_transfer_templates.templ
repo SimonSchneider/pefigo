@@ -588,7 +588,7 @@ templ TransferTemplatesContent(view *model.TransferTemplatesView) {
 						</div>
 					</div>
 				</div>
-				if len(view.LeftOut) > 0 {
+				if len(view.LeftOut) > 0 || len(view.Unavailable) > 0 {
 					@LeftOutTransferTemplates(view)
 				}
 			</div>
@@ -597,8 +597,8 @@ templ TransferTemplatesContent(view *model.TransferTemplatesView) {
 }
 
 // LeftOutTransferTemplates lists the Transfer Templates the Events leave out of the Baseline: those
-// of unplanned Events, at their Events' dates, and those that use their Accounts. They count in
-// nothing on this page.
+// of unplanned Events and of their Salaries and Bills, at their Events' dates, and those that use their
+// Accounts. They count in nothing on this page.
 templ LeftOutTransferTemplates(view *model.TransferTemplatesView) {
 	<div class="card bg-base-100 shadow-sm border border-base-300">
 		<div class="card-body">
@@ -663,6 +663,22 @@ templ LeftOutTransferTemplates(view *model.TransferTemplatesView) {
 											@IconPencil("w-4 h-4")
 										</a>
 									}
+								</td>
+							</tr>
+						}
+						for _, u := range view.Unavailable {
+							<tr class="text-base-content/70">
+								<td>
+									<div class="flex items-center gap-2">
+										<span>{ u.Name }</span>
+										@EventBadge(view.GetEvent(u.EventID))
+									</div>
+								</td>
+								<td colspan="3" class="text-sm text-warning whitespace-normal">What it would pay or charge is unavailable: { u.Reason }</td>
+								<td class="text-right">
+									<a class="btn btn-ghost btn-xs" title={ "Edit " + u.Name } href={ sourceEditURL(u.Source) }>
+										@IconPencil("w-4 h-4")
+									</a>
 								</td>
 							</tr>
 						}

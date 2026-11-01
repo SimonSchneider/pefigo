@@ -273,7 +273,7 @@ const getGrowthModelsByAccount = `-- name: GetGrowthModelsByAccount :many
 SELECT id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at, event_id
 FROM growth_model
 WHERE account_id = ?
-ORDER BY start_date, id
+ORDER BY id
 `
 
 func (q *Queries) GetGrowthModelsByAccount(ctx context.Context, accountID string) ([]GrowthModel, error) {
@@ -311,7 +311,7 @@ func (q *Queries) GetGrowthModelsByAccount(ctx context.Context, accountID string
 }
 
 const getInvestmentRound = `-- name: GetInvestmentRound :one
-SELECT id, account_id, date, valuation, created_at, updated_at, pre_money_shares, investment
+SELECT id, account_id, date, valuation, created_at, updated_at, pre_money_shares, investment, event_id
 FROM investment_round
 WHERE id = ?
 `
@@ -328,42 +328,13 @@ func (q *Queries) GetInvestmentRound(ctx context.Context, id string) (Investment
 		&i.UpdatedAt,
 		&i.PreMoneyShares,
 		&i.Investment,
-	)
-	return i, err
-}
-
-const getLatestInvestmentRound = `-- name: GetLatestInvestmentRound :one
-SELECT id, account_id, date, valuation, created_at, updated_at, pre_money_shares, investment
-FROM investment_round
-WHERE account_id = ?
-  AND date <= ?
-ORDER BY date DESC
-LIMIT 1
-`
-
-type GetLatestInvestmentRoundParams struct {
-	AccountID string
-	Date      int64
-}
-
-func (q *Queries) GetLatestInvestmentRound(ctx context.Context, arg GetLatestInvestmentRoundParams) (InvestmentRound, error) {
-	row := q.db.QueryRowContext(ctx, getLatestInvestmentRound, arg.AccountID, arg.Date)
-	var i InvestmentRound
-	err := row.Scan(
-		&i.ID,
-		&i.AccountID,
-		&i.Date,
-		&i.Valuation,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PreMoneyShares,
-		&i.Investment,
+		&i.EventID,
 	)
 	return i, err
 }
 
 const getShareChange = `-- name: GetShareChange :one
-SELECT id, account_id, date, delta_shares, total_price, created_at, updated_at
+SELECT id, account_id, date, delta_shares, total_price, created_at, updated_at, event_id
 FROM share_change
 WHERE id = ?
 `
@@ -379,6 +350,7 @@ func (q *Queries) GetShareChange(ctx context.Context, id string) (ShareChange, e
 		&i.TotalPrice,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EventID,
 	)
 	return i, err
 }
@@ -717,10 +689,9 @@ func (q *Queries) ListAccounts(ctx context.Context) ([]Account, error) {
 }
 
 const listAllInvestmentRounds = `-- name: ListAllInvestmentRounds :many
-SELECT id, account_id, date, valuation, created_at, updated_at, pre_money_shares, investment
+SELECT id, account_id, date, valuation, created_at, updated_at, pre_money_shares, investment, event_id
 FROM investment_round
 ORDER BY account_id,
-  date,
   id
 `
 
@@ -742,6 +713,7 @@ func (q *Queries) ListAllInvestmentRounds(ctx context.Context) ([]InvestmentRoun
 			&i.UpdatedAt,
 			&i.PreMoneyShares,
 			&i.Investment,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -757,10 +729,9 @@ func (q *Queries) ListAllInvestmentRounds(ctx context.Context) ([]InvestmentRoun
 }
 
 const listAllShareChanges = `-- name: ListAllShareChanges :many
-SELECT id, account_id, date, delta_shares, total_price, created_at, updated_at
+SELECT id, account_id, date, delta_shares, total_price, created_at, updated_at, event_id
 FROM share_change
 ORDER BY account_id,
-  date,
   id
 `
 
@@ -781,6 +752,7 @@ func (q *Queries) ListAllShareChanges(ctx context.Context) ([]ShareChange, error
 			&i.TotalPrice,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -839,7 +811,7 @@ func (q *Queries) ListAllStartupShareOptions(ctx context.Context) ([]StartupShar
 const listGrowthModels = `-- name: ListGrowthModels :many
 SELECT id, account_id, model_type, annual_growth_rate, annual_volatility, start_date, end_date, created_at, updated_at, event_id
 FROM growth_model
-ORDER BY start_date, id
+ORDER BY id
 `
 
 func (q *Queries) ListGrowthModels(ctx context.Context) ([]GrowthModel, error) {
@@ -877,11 +849,10 @@ func (q *Queries) ListGrowthModels(ctx context.Context) ([]GrowthModel, error) {
 }
 
 const listInvestmentRounds = `-- name: ListInvestmentRounds :many
-SELECT id, account_id, date, valuation, created_at, updated_at, pre_money_shares, investment
+SELECT id, account_id, date, valuation, created_at, updated_at, pre_money_shares, investment, event_id
 FROM investment_round
 WHERE account_id = ?
-ORDER BY date DESC,
-  id
+ORDER BY id
 `
 
 func (q *Queries) ListInvestmentRounds(ctx context.Context, accountID string) ([]InvestmentRound, error) {
@@ -902,6 +873,7 @@ func (q *Queries) ListInvestmentRounds(ctx context.Context, accountID string) ([
 			&i.UpdatedAt,
 			&i.PreMoneyShares,
 			&i.Investment,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -997,11 +969,10 @@ func (q *Queries) ListProjectedAccountTypeIDs(ctx context.Context) ([]string, er
 }
 
 const listShareChanges = `-- name: ListShareChanges :many
-SELECT id, account_id, date, delta_shares, total_price, created_at, updated_at
+SELECT id, account_id, date, delta_shares, total_price, created_at, updated_at, event_id
 FROM share_change
 WHERE account_id = ?
-ORDER BY date ASC,
-  id
+ORDER BY id
 `
 
 func (q *Queries) ListShareChanges(ctx context.Context, accountID string) ([]ShareChange, error) {
@@ -1021,6 +992,7 @@ func (q *Queries) ListShareChanges(ctx context.Context, accountID string) ([]Sha
 			&i.TotalPrice,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EventID,
 		); err != nil {
 			return nil, err
 		}
@@ -1169,68 +1141,6 @@ func (q *Queries) ListStartupShareOptions(ctx context.Context, accountID string)
 			&i.EndDate,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listStartupShareSnapshotHistory = `-- name: ListStartupShareSnapshotHistory :many
-SELECT ir.account_id,
-  ir.date,
-  ir.valuation,
-  ir.pre_money_shares,
-  ir.investment,
-  ssa.tax_rate,
-  ssa.valuation_discount_factor,
-  COALESCE(a.type_id, '') AS type_id
-FROM investment_round ir
-  JOIN startup_share_account ssa ON ssa.account_id = ir.account_id
-  JOIN account a ON a.id = ir.account_id
-ORDER BY ir.date,
-  a.type_id,
-  ir.account_id
-`
-
-type ListStartupShareSnapshotHistoryRow struct {
-	AccountID               string
-	Date                    int64
-	Valuation               float64
-	PreMoneyShares          float64
-	Investment              float64
-	TaxRate                 float64
-	ValuationDiscountFactor float64
-	TypeID                  string
-}
-
-// Returns investment rounds joined with startup share config and account type for balance history.
-// valuation = pre_money_valuation; post_money = valuation + investment; post_money_shares derived in app.
-func (q *Queries) ListStartupShareSnapshotHistory(ctx context.Context) ([]ListStartupShareSnapshotHistoryRow, error) {
-	rows, err := q.db.QueryContext(ctx, listStartupShareSnapshotHistory)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListStartupShareSnapshotHistoryRow
-	for rows.Next() {
-		var i ListStartupShareSnapshotHistoryRow
-		if err := rows.Scan(
-			&i.AccountID,
-			&i.Date,
-			&i.Valuation,
-			&i.PreMoneyShares,
-			&i.Investment,
-			&i.TaxRate,
-			&i.ValuationDiscountFactor,
-			&i.TypeID,
 		); err != nil {
 			return nil, err
 		}
@@ -1472,16 +1382,20 @@ INSERT INTO investment_round (
     valuation,
     pre_money_shares,
     investment,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (account_id, date) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
-SET valuation = EXCLUDED.valuation,
+SET account_id = EXCLUDED.account_id,
+  date = EXCLUDED.date,
+  valuation = EXCLUDED.valuation,
   pre_money_shares = EXCLUDED.pre_money_shares,
   investment = EXCLUDED.investment,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
-RETURNING id, account_id, date, valuation, created_at, updated_at, pre_money_shares, investment
+RETURNING id, account_id, date, valuation, created_at, updated_at, pre_money_shares, investment, event_id
 `
 
 type UpsertInvestmentRoundParams struct {
@@ -1491,6 +1405,7 @@ type UpsertInvestmentRoundParams struct {
 	Valuation      float64
 	PreMoneyShares float64
 	Investment     float64
+	EventID        *string
 	CreatedAt      int64
 	UpdatedAt      int64
 }
@@ -1503,6 +1418,7 @@ func (q *Queries) UpsertInvestmentRound(ctx context.Context, arg UpsertInvestmen
 		arg.Valuation,
 		arg.PreMoneyShares,
 		arg.Investment,
+		arg.EventID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -1516,6 +1432,7 @@ func (q *Queries) UpsertInvestmentRound(ctx context.Context, arg UpsertInvestmen
 		&i.UpdatedAt,
 		&i.PreMoneyShares,
 		&i.Investment,
+		&i.EventID,
 	)
 	return i, err
 }
@@ -1527,17 +1444,19 @@ INSERT INTO share_change (
     date,
     delta_shares,
     total_price,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET account_id = EXCLUDED.account_id,
   date = EXCLUDED.date,
   delta_shares = EXCLUDED.delta_shares,
   total_price = EXCLUDED.total_price,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
-RETURNING id, account_id, date, delta_shares, total_price, created_at, updated_at
+RETURNING id, account_id, date, delta_shares, total_price, created_at, updated_at, event_id
 `
 
 type UpsertShareChangeParams struct {
@@ -1546,6 +1465,7 @@ type UpsertShareChangeParams struct {
 	Date        int64
 	DeltaShares float64
 	TotalPrice  float64
+	EventID     *string
 	CreatedAt   int64
 	UpdatedAt   int64
 }
@@ -1557,6 +1477,7 @@ func (q *Queries) UpsertShareChange(ctx context.Context, arg UpsertShareChangePa
 		arg.Date,
 		arg.DeltaShares,
 		arg.TotalPrice,
+		arg.EventID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -1569,6 +1490,7 @@ func (q *Queries) UpsertShareChange(ctx context.Context, arg UpsertShareChangePa
 		&i.TotalPrice,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EventID,
 	)
 	return i, err
 }

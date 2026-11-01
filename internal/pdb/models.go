@@ -52,6 +52,7 @@ type Bill struct {
 	Url              string
 	CreatedAt        int64
 	UpdatedAt        int64
+	EventID          *string
 }
 
 type BillAccount struct {
@@ -75,6 +76,16 @@ type BillAmount struct {
 	UpdatedAt int64
 	Period    string
 	Currency  string
+	EventID   *string
+}
+
+type BillEnd struct {
+	ID        string
+	BillID    string
+	Date      int64
+	EventID   *string
+	CreatedAt int64
+	UpdatedAt int64
 }
 
 type Event struct {
@@ -107,6 +118,7 @@ type FullParentalLeave struct {
 	SjukDaysPerWeek float64
 	CreatedAt       int64
 	UpdatedAt       int64
+	EventID         *string
 }
 
 type GrowthModel struct {
@@ -131,6 +143,7 @@ type InvestmentRound struct {
 	UpdatedAt      int64
 	PreMoneyShares float64
 	Investment     float64
+	EventID        *string
 }
 
 type PartialParentalLeave struct {
@@ -143,6 +156,7 @@ type PartialParentalLeave struct {
 	SkippedWorkDaysPerYear float64
 	CreatedAt              int64
 	UpdatedAt              int64
+	EventID                *string
 }
 
 type Salary struct {
@@ -160,6 +174,7 @@ type Salary struct {
 	Forsamling       string
 	ChurchMember     bool
 	IsGross          bool
+	EventID          *string
 }
 
 type SalaryAdjustment struct {
@@ -172,6 +187,7 @@ type SalaryAdjustment struct {
 	VabDaysPerYear       float64
 	CreatedAt            int64
 	UpdatedAt            int64
+	EventID              *string
 }
 
 type SalaryAmount struct {
@@ -179,6 +195,16 @@ type SalaryAmount struct {
 	SalaryID  string
 	Amount    string
 	StartDate int64
+	CreatedAt int64
+	UpdatedAt int64
+	EventID   *string
+}
+
+type SalaryEnd struct {
+	ID        string
+	SalaryID  string
+	Date      int64
+	EventID   *string
 	CreatedAt int64
 	UpdatedAt int64
 }
@@ -191,6 +217,7 @@ type ShareChange struct {
 	TotalPrice  float64
 	CreatedAt   int64
 	UpdatedAt   int64
+	EventID     *string
 }
 
 type SpecialDate struct {
