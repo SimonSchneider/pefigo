@@ -517,25 +517,31 @@ func (s *Service) UpsertBill(ctx context.Context, inp Bill) (Bill, error) {
 		inp.ID = sid.MustNewString(32)
 	}
 	now := time.Now().Unix()
-	b, err := s.q.UpsertBill(ctx, pdb.UpsertBillParams{
-		ID:               inp.ID,
-		BillAccountID:    inp.BillAccountID,
-		Name:             inp.Name,
-		BudgetCategoryID: inp.BudgetCategoryID,
-		Enabled:          inp.Enabled,
-		Notes:            inp.Notes,
-		Url:              inp.URL,
-		EventID:          ui.WithDefaultNull(inp.EventID),
-		CreatedAt:        now,
-		UpdatedAt:        now,
+	var b pdb.Bill
+	// A Bill changing Event brings its parts along, or stays where it was.
+	err = s.inTx(ctx, func(tx *Service) (err error) {
+		b, err = tx.q.UpsertBill(ctx, pdb.UpsertBillParams{
+			ID:               inp.ID,
+			BillAccountID:    inp.BillAccountID,
+			Name:             inp.Name,
+			BudgetCategoryID: inp.BudgetCategoryID,
+			Enabled:          inp.Enabled,
+			Notes:            inp.Notes,
+			Url:              inp.URL,
+			EventID:          ui.WithDefaultNull(inp.EventID),
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+		if err != nil {
+			return fmt.Errorf("upserting bill: %w", err)
+		}
+		if previous != nil && *previous != inp.EventID {
+			return tx.bringParts(ctx, EventEntryBill, inp.ID, *previous, inp.EventID)
+		}
+		return nil
 	})
 	if err != nil {
-		return Bill{}, fmt.Errorf("upserting bill: %w", err)
-	}
-	if previous != nil && *previous != inp.EventID {
-		if err := s.bringParts(ctx, EventEntryBill, inp.ID, *previous, inp.EventID); err != nil {
-			return Bill{}, err
-		}
+		return Bill{}, err
 	}
 	return billFromDB(b), nil
 }

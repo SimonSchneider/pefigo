@@ -6,6 +6,36 @@ import (
 	"github.com/SimonSchneider/pefigo/internal/model"
 )
 
+func TestASalaryOrBillWhosePartsCantFollowItIntoAnEventStaysWhereItWas(t *testing.T) {
+	svc := newTestService(t)
+	ctx := t.Context()
+	checking := mustAccount(t, svc, "Checking")
+	newJob := mustEvent(t, svc, model.EventInput{Name: "New job", Date: mustParseDate("2027-09-01")})
+	salary := mustSalary(t, svc, model.Salary{Name: "Salary A", ToAccountID: checking.ID, Recurrence: "*-*-25"},
+		model.SalaryAmount{Amount: newFixedValue(30000), StartDate: mustParseDate("2027-01-01")})
+	gym := mustBillIn(t, svc, mustBillAccount(t, svc, "Household", checking.ID), "Gym",
+		model.BillAmount{Amount: newFixedValue(400), StartDate: mustParseDate("2027-01-01")})
+	// Its Salary Amount and Bill Amount can't be saved again, so neither can follow it.
+	for _, table := range []string{"salary_amount", "bill_amount"} {
+		mustExec(t, svc, `CREATE TRIGGER stuck_`+table+` BEFORE UPDATE ON `+table+` BEGIN SELECT RAISE(ABORT, 'stuck'); END`)
+	}
+
+	salary.EventID = newJob.ID
+	if _, err := svc.UpsertSalary(ctx, salary); err == nil {
+		t.Errorf("expected Salary A not to join the New job without its Salary Amount")
+	}
+	if got, err := svc.GetSalary(ctx, salary.ID); err != nil || got.EventID != "" {
+		t.Errorf("expected Salary A to stay in the Baseline with its Salary Amount, got it in %q (%v)", got.EventID, err)
+	}
+	gym.EventID = newJob.ID
+	if _, err := svc.UpsertBill(ctx, gym); err == nil {
+		t.Errorf("expected the Gym not to join the New job without its Bill Amount")
+	}
+	if got, err := svc.GetBill(ctx, gym.ID); err != nil || got.EventID != "" {
+		t.Errorf("expected the Gym to stay in the Baseline with its Bill Amount, got it in %q (%v)", got.EventID, err)
+	}
+}
+
 func TestAOneOffSalaryInAnEventIsPaidOnTheEventsDayWhereverTheEventMoves(t *testing.T) {
 	svc := newTestService(t)
 	checking := mustAccount(t, svc, "Checking")

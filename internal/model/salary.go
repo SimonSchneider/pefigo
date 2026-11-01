@@ -319,30 +319,36 @@ func (s *Service) UpsertSalary(ctx context.Context, inp Salary) (Salary, error) 
 		inp.ID = sid.MustNewString(32)
 	}
 	now := time.Now().Unix()
-	sal, err := s.q.UpsertSalary(ctx, pdb.UpsertSalaryParams{
-		ID:               inp.ID,
-		Name:             inp.Name,
-		ToAccountID:      ui.WithDefaultNull(inp.ToAccountID),
-		PensionAccountID: ui.WithDefaultNull(inp.PensionAccountID),
-		Priority:         inp.Priority,
-		Recurrence:       storeRecurrence(inp.Recurrence, inp.EventID != "", at),
-		BudgetCategoryID: inp.BudgetCategoryID,
-		Enabled:          inp.Enabled,
-		Kommun:           inp.Kommun,
-		Forsamling:       inp.Forsamling,
-		ChurchMember:     inp.ChurchMember,
-		IsGross:          inp.IsGross,
-		EventID:          ui.WithDefaultNull(inp.EventID),
-		CreatedAt:        now,
-		UpdatedAt:        now,
+	var sal pdb.Salary
+	// A Salary changing Event brings its parts along, or stays where it was.
+	err = s.inTx(ctx, func(tx *Service) (err error) {
+		sal, err = tx.q.UpsertSalary(ctx, pdb.UpsertSalaryParams{
+			ID:               inp.ID,
+			Name:             inp.Name,
+			ToAccountID:      ui.WithDefaultNull(inp.ToAccountID),
+			PensionAccountID: ui.WithDefaultNull(inp.PensionAccountID),
+			Priority:         inp.Priority,
+			Recurrence:       storeRecurrence(inp.Recurrence, inp.EventID != "", at),
+			BudgetCategoryID: inp.BudgetCategoryID,
+			Enabled:          inp.Enabled,
+			Kommun:           inp.Kommun,
+			Forsamling:       inp.Forsamling,
+			ChurchMember:     inp.ChurchMember,
+			IsGross:          inp.IsGross,
+			EventID:          ui.WithDefaultNull(inp.EventID),
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+		if err != nil {
+			return fmt.Errorf("upserting salary: %w", err)
+		}
+		if previous != nil && *previous != inp.EventID {
+			return tx.bringParts(ctx, EventEntrySalary, inp.ID, *previous, inp.EventID)
+		}
+		return nil
 	})
 	if err != nil {
-		return Salary{}, fmt.Errorf("upserting salary: %w", err)
-	}
-	if previous != nil && *previous != inp.EventID {
-		if err := s.bringParts(ctx, EventEntrySalary, inp.ID, *previous, inp.EventID); err != nil {
-			return Salary{}, err
-		}
+		return Salary{}, err
 	}
 	return salaryFromDB(sal, at), nil
 }
