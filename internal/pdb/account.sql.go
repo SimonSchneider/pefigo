@@ -206,6 +206,16 @@ func (q *Queries) DeleteTransferTemplateCategory(ctx context.Context, id string)
 	return err
 }
 
+const deleteTransferTemplateEnd = `-- name: DeleteTransferTemplateEnd :exec
+DELETE FROM transfer_template_end
+WHERE id = ?
+`
+
+func (q *Queries) DeleteTransferTemplateEnd(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteTransferTemplateEnd, id)
+	return err
+}
+
 const getAccount = `-- name: GetAccount :one
 SELECT id, name, owner_id, created_at, updated_at, balance_upper_limit, cash_flow_frequency, cash_flow_destination_id, type_id, budget_category_id, is_isk, event_id
 FROM account
@@ -516,7 +526,7 @@ func (q *Queries) GetStartupShareOption(ctx context.Context, id string) (Startup
 }
 
 const getTransferTemplate = `-- name: GetTransferTemplate :one
-SELECT id, name, from_account_id, to_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, end_date, enabled, created_at, updated_at, budget_category_id, event_id
+SELECT id, name, from_account_id, to_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, enabled, created_at, updated_at, budget_category_id, event_id
 FROM transfer_template
 WHERE id = ?
 `
@@ -535,7 +545,6 @@ func (q *Queries) GetTransferTemplate(ctx context.Context, id string) (TransferT
 		&i.Priority,
 		&i.Recurrence,
 		&i.StartDate,
-		&i.EndDate,
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -564,14 +573,33 @@ func (q *Queries) GetTransferTemplateCategory(ctx context.Context, id string) (T
 	return i, err
 }
 
+const getTransferTemplateEnd = `-- name: GetTransferTemplateEnd :one
+SELECT id, transfer_template_id, date, event_id, created_at, updated_at
+FROM transfer_template_end
+WHERE id = ?
+`
+
+func (q *Queries) GetTransferTemplateEnd(ctx context.Context, id string) (TransferTemplateEnd, error) {
+	row := q.db.QueryRowContext(ctx, getTransferTemplateEnd, id)
+	var i TransferTemplateEnd
+	err := row.Scan(
+		&i.ID,
+		&i.TransferTemplateID,
+		&i.Date,
+		&i.EventID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getTransferTemplates = `-- name: GetTransferTemplates :many
-SELECT id, name, from_account_id, to_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, end_date, enabled, created_at, updated_at, budget_category_id, event_id
+SELECT id, name, from_account_id, to_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, enabled, created_at, updated_at, budget_category_id, event_id
 FROM transfer_template
 ORDER BY recurrence,
   priority,
   name,
   start_date,
-  end_date,
   created_at
 `
 
@@ -595,7 +623,6 @@ func (q *Queries) GetTransferTemplates(ctx context.Context) ([]TransferTemplate,
 			&i.Priority,
 			&i.Recurrence,
 			&i.StartDate,
-			&i.EndDate,
 			&i.Enabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -792,6 +819,42 @@ func (q *Queries) ListAllStartupShareOptions(ctx context.Context) ([]StartupShar
 			&i.StrikePricePerShare,
 			&i.GrantDate,
 			&i.EndDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllTransferTemplateEnds = `-- name: ListAllTransferTemplateEnds :many
+SELECT id, transfer_template_id, date, event_id, created_at, updated_at
+FROM transfer_template_end
+ORDER BY transfer_template_id, id
+`
+
+func (q *Queries) ListAllTransferTemplateEnds(ctx context.Context) ([]TransferTemplateEnd, error) {
+	rows, err := q.db.QueryContext(ctx, listAllTransferTemplateEnds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TransferTemplateEnd
+	for rows.Next() {
+		var i TransferTemplateEnd
+		if err := rows.Scan(
+			&i.ID,
+			&i.TransferTemplateID,
+			&i.Date,
+			&i.EventID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1175,6 +1238,43 @@ func (q *Queries) ListTransferTemplateCategories(ctx context.Context) ([]Transfe
 			&i.ID,
 			&i.Name,
 			&i.Color,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTransferTemplateEnds = `-- name: ListTransferTemplateEnds :many
+SELECT id, transfer_template_id, date, event_id, created_at, updated_at
+FROM transfer_template_end
+WHERE transfer_template_id = ?
+ORDER BY id
+`
+
+func (q *Queries) ListTransferTemplateEnds(ctx context.Context, transferTemplateID string) ([]TransferTemplateEnd, error) {
+	rows, err := q.db.QueryContext(ctx, listTransferTemplateEnds, transferTemplateID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TransferTemplateEnd
+	for rows.Next() {
+		var i TransferTemplateEnd
+		if err := rows.Scan(
+			&i.ID,
+			&i.TransferTemplateID,
+			&i.Date,
+			&i.EventID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1647,14 +1747,13 @@ INSERT INTO transfer_template (
     priority,
     recurrence,
     start_date,
-    end_date,
     enabled,
     budget_category_id,
     event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET name = EXCLUDED.name,
   from_account_id = EXCLUDED.from_account_id,
@@ -1665,12 +1764,11 @@ SET name = EXCLUDED.name,
   priority = EXCLUDED.priority,
   recurrence = EXCLUDED.recurrence,
   start_date = EXCLUDED.start_date,
-  end_date = EXCLUDED.end_date,
   enabled = EXCLUDED.enabled,
   budget_category_id = EXCLUDED.budget_category_id,
   event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
-RETURNING id, name, from_account_id, to_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, end_date, enabled, created_at, updated_at, budget_category_id, event_id
+RETURNING id, name, from_account_id, to_account_id, amount_type, amount_fixed, amount_percent, priority, recurrence, start_date, enabled, created_at, updated_at, budget_category_id, event_id
 `
 
 type UpsertTransferTemplateParams struct {
@@ -1684,7 +1782,6 @@ type UpsertTransferTemplateParams struct {
 	Priority         int64
 	Recurrence       string
 	StartDate        int64
-	EndDate          *int64
 	Enabled          bool
 	BudgetCategoryID *string
 	EventID          *string
@@ -1704,7 +1801,6 @@ func (q *Queries) UpsertTransferTemplate(ctx context.Context, arg UpsertTransfer
 		arg.Priority,
 		arg.Recurrence,
 		arg.StartDate,
-		arg.EndDate,
 		arg.Enabled,
 		arg.BudgetCategoryID,
 		arg.EventID,
@@ -1723,7 +1819,6 @@ func (q *Queries) UpsertTransferTemplate(ctx context.Context, arg UpsertTransfer
 		&i.Priority,
 		&i.Recurrence,
 		&i.StartDate,
-		&i.EndDate,
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -1764,6 +1859,47 @@ func (q *Queries) UpsertTransferTemplateCategory(ctx context.Context, arg Upsert
 		&i.ID,
 		&i.Name,
 		&i.Color,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertTransferTemplateEnd = `-- name: UpsertTransferTemplateEnd :one
+INSERT INTO transfer_template_end (id, transfer_template_id, date, event_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+UPDATE
+SET transfer_template_id = EXCLUDED.transfer_template_id,
+  date = EXCLUDED.date,
+  event_id = EXCLUDED.event_id,
+  updated_at = EXCLUDED.updated_at
+RETURNING id, transfer_template_id, date, event_id, created_at, updated_at
+`
+
+type UpsertTransferTemplateEndParams struct {
+	ID                 string
+	TransferTemplateID string
+	Date               int64
+	EventID            *string
+	CreatedAt          int64
+	UpdatedAt          int64
+}
+
+func (q *Queries) UpsertTransferTemplateEnd(ctx context.Context, arg UpsertTransferTemplateEndParams) (TransferTemplateEnd, error) {
+	row := q.db.QueryRowContext(ctx, upsertTransferTemplateEnd,
+		arg.ID,
+		arg.TransferTemplateID,
+		arg.Date,
+		arg.EventID,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i TransferTemplateEnd
+	err := row.Scan(
+		&i.ID,
+		&i.TransferTemplateID,
+		&i.Date,
+		&i.EventID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

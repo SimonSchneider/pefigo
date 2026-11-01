@@ -11,19 +11,20 @@ import (
 )
 
 func TestSavingAnEndDateBeforeItsStartDateIsABadRequest(t *testing.T) {
-	_, srv := newSettingsServer(t)
+	svc, srv := newSettingsServer(t)
+	account, err := svc.UpsertAccount(t.Context(), model.AccountInput{Name: "Savings"})
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
 
-	resp, err := srv.Client().PostForm(srv.URL+"/transfers/", url.Values{
-		"name":         {"Gym"},
-		"amount_type":  {"fixed"},
-		"amount_fixed": {"300"},
-		"recurrence":   {"*-*-01"},
-		"start_date":   {"2025-03-01"},
-		"end_date":     {"2025-02-01"},
-		"enabled":      {"on"},
+	resp, err := srv.Client().PostForm(srv.URL+"/growth-models/", url.Values{
+		"account_id": {account.ID},
+		"type":       {"fixed"},
+		"start_date": {"2025-03-01"},
+		"end_date":   {"2025-02-01"},
 	})
 	if err != nil {
-		t.Fatalf("save transfer template: %v", err)
+		t.Fatalf("save growth model: %v", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)

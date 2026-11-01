@@ -678,19 +678,19 @@ func TestGetTransferTemplatesPageData_GroupAmountsComputed(t *testing.T) {
 	ctx := t.Context()
 
 	pastEnd := mustParseDate("2020-12-31")
-	_, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
+	ended, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:        "Rent",
 		AmountType:  "fixed",
 		AmountFixed: newFixedValue(1500),
 		Priority:    1,
 		Recurrence:  "*-*-01",
 		StartDate:   mustParseDate("2020-01-01"),
-		EndDate:     &pastEnd,
 		Enabled:     true,
 	})
 	if err != nil {
 		t.Fatalf("create inactive template: %v", err)
 	}
+	mustEndTransferTemplate(t, svc, ended.ID, pastEnd)
 
 	_, err = svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:        "Rent",
@@ -761,7 +761,7 @@ func TestGetTransferTemplatesPageData_ActiveGroupMemberContributesToMonthlyIncom
 	}
 
 	pastEnd := mustParseDate("2020-12-31")
-	_, err = svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
+	ended, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:        "Salary",
 		ToAccountID: acc.ID,
 		AmountType:  "fixed",
@@ -769,12 +769,12 @@ func TestGetTransferTemplatesPageData_ActiveGroupMemberContributesToMonthlyIncom
 		Priority:    1,
 		Recurrence:  "*-*-25",
 		StartDate:   mustParseDate("2020-01-01"),
-		EndDate:     &pastEnd,
 		Enabled:     true,
 	})
 	if err != nil {
 		t.Fatalf("create inactive template: %v", err)
 	}
+	mustEndTransferTemplate(t, svc, ended.ID, pastEnd)
 
 	_, err = svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:        "Salary",
@@ -810,7 +810,7 @@ func TestGetTransferTemplatesPageData_ActiveGroupMemberContributesToMonthlyExpen
 	}
 
 	pastEnd := mustParseDate("2020-12-31")
-	_, err = svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
+	ended, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:          "Rent",
 		FromAccountID: acc.ID,
 		AmountType:    "fixed",
@@ -818,12 +818,12 @@ func TestGetTransferTemplatesPageData_ActiveGroupMemberContributesToMonthlyExpen
 		Priority:      1,
 		Recurrence:    "*-*-1",
 		StartDate:     mustParseDate("2020-01-01"),
-		EndDate:       &pastEnd,
 		Enabled:       true,
 	})
 	if err != nil {
 		t.Fatalf("create inactive template: %v", err)
 	}
+	mustEndTransferTemplate(t, svc, ended.ID, pastEnd)
 
 	_, err = svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:          "Rent",
@@ -861,7 +861,7 @@ func TestGetTransferTemplatesPageData_PercentTemplateAfterGroupedSalary(t *testi
 
 	// Two salary periods — same key, so they auto-group.
 	pastEnd := mustParseDate("2023-12-31")
-	_, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
+	ended, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:        "Lön",
 		ToAccountID: salary.ID,
 		AmountType:  "fixed",
@@ -869,12 +869,12 @@ func TestGetTransferTemplatesPageData_PercentTemplateAfterGroupedSalary(t *testi
 		Priority:    1,
 		Recurrence:  "*-*-25",
 		StartDate:   mustParseDate("2020-01-01"),
-		EndDate:     &pastEnd,
 		Enabled:     true,
 	})
 	if err != nil {
 		t.Fatalf("old salary: %v", err)
 	}
+	mustEndTransferTemplate(t, svc, ended.ID, pastEnd)
 	_, err = svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:        "Lön",
 		ToAccountID: salary.ID,
@@ -979,7 +979,7 @@ func TestGetTransferTemplatesPageData_MixedStandaloneAndGroupedTotals(t *testing
 	}
 
 	// Grouped expense: inactive (old) + active (current)
-	_, err = svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
+	ended, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:          "Rent",
 		FromAccountID: acc.ID,
 		AmountType:    "fixed",
@@ -987,12 +987,12 @@ func TestGetTransferTemplatesPageData_MixedStandaloneAndGroupedTotals(t *testing
 		Priority:      2,
 		Recurrence:    "*-*-1",
 		StartDate:     mustParseDate("2020-01-01"),
-		EndDate:       &pastEnd,
 		Enabled:       true,
 	})
 	if err != nil {
 		t.Fatalf("create inactive grouped expense: %v", err)
 	}
+	mustEndTransferTemplate(t, svc, ended.ID, pastEnd)
 	_, err = svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:          "Rent",
 		FromAccountID: acc.ID,
@@ -1028,7 +1028,7 @@ func TestComputeTransfersView_IncludesAllGroupMembers(t *testing.T) {
 	acc2, _ := svc.UpsertAccount(ctx, model.AccountInput{Name: "Savings"})
 
 	pastEnd := mustParseDate("2024-12-31")
-	_, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
+	ended, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:          "Rent",
 		FromAccountID: acc1.ID,
 		ToAccountID:   acc2.ID,
@@ -1037,12 +1037,12 @@ func TestComputeTransfersView_IncludesAllGroupMembers(t *testing.T) {
 		Priority:      1,
 		Recurrence:    "*-*-01",
 		StartDate:     mustParseDate("2020-01-01"),
-		EndDate:       &pastEnd,
 		Enabled:       true,
 	})
 	if err != nil {
 		t.Fatalf("create inactive template: %v", err)
 	}
+	mustEndTransferTemplate(t, svc, ended.ID, pastEnd)
 
 	active, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:          "Rent",
@@ -1085,7 +1085,7 @@ func TestAutoGrouping_SameKeyGroupsTogether(t *testing.T) {
 	acc2, _ := svc.UpsertAccount(ctx, model.AccountInput{Name: "To"})
 
 	pastEnd := mustParseDate("2020-12-31")
-	_, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
+	ended, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:          "Rent",
 		FromAccountID: acc1.ID,
 		ToAccountID:   acc2.ID,
@@ -1094,12 +1094,12 @@ func TestAutoGrouping_SameKeyGroupsTogether(t *testing.T) {
 		Priority:      1,
 		Recurrence:    "*-*-01",
 		StartDate:     mustParseDate("2020-01-01"),
-		EndDate:       &pastEnd,
 		Enabled:       true,
 	})
 	if err != nil {
 		t.Fatalf("create template 1: %v", err)
 	}
+	mustEndTransferTemplate(t, svc, ended.ID, pastEnd)
 	_, err = svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:          "Rent",
 		FromAccountID: acc1.ID,
@@ -1179,19 +1179,19 @@ func TestAutoGrouping_GroupAmountIsSumOfActiveMembers(t *testing.T) {
 	ctx := t.Context()
 
 	pastEnd := mustParseDate("2020-12-31")
-	_, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
+	ended, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:        "Rent",
 		AmountType:  "fixed",
 		AmountFixed: newFixedValue(1500),
 		Priority:    1,
 		Recurrence:  "*-*-01",
 		StartDate:   mustParseDate("2020-01-01"),
-		EndDate:     &pastEnd,
 		Enabled:     true,
 	})
 	if err != nil {
 		t.Fatalf("create inactive template: %v", err)
 	}
+	mustEndTransferTemplate(t, svc, ended.ID, pastEnd)
 	_, err = svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
 		Name:        "Rent",
 		AmountType:  "fixed",

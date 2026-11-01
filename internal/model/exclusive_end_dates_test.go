@@ -113,12 +113,6 @@ func TestSavingAnEndDateOnOrBeforeItsStartDateFails(t *testing.T) {
 
 	for _, end := range []date.Date{start, start.Add(-1 * date.Day)} {
 		for entry, save := range map[string]func() error{
-			"Transfer Template": func() error {
-				return discard(svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
-					Name: "Gym", FromAccountID: checking.ID, AmountType: "fixed", AmountFixed: newFixedValue(300),
-					Recurrence: "*-*-01", StartDate: start, EndDate: &end, Enabled: true,
-				}))
-			},
 			"Bill Amount": func() error {
 				return discard(svc.UpsertBillAmount(ctx, model.BillAmount{BillID: bill.ID, Amount: newFixedValue(100), StartDate: start, EndDate: &end}))
 			},

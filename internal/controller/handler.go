@@ -215,6 +215,8 @@ func NewHandler(svc *model.Service, public fs.FS) http.Handler {
 	mux.Handle("POST /transfers/{$}", h.transferTemplateUpsert())
 	mux.Handle("POST /transfers/{id}/duplicate", h.transferTemplateDuplicate())
 	mux.Handle("POST /transfers/{id}/delete", h.transferTemplateDelete())
+	mux.Handle("POST /transfer-template-ends/{$}", h.transferTemplateEndUpsert())
+	mux.Handle("POST /transfer-template-ends/{id}/delete", h.transferTemplateEndDelete())
 
 	mux.Handle("GET /transfer-template-categories/new", h.transferTemplateCategoryNewPage())
 	mux.Handle("GET /transfer-template-categories/{id}/edit", h.transferTemplateCategoryEditPage())
@@ -668,6 +670,20 @@ func (h *Handler) transferTemplateDuplicate() http.Handler {
 
 func (h *Handler) transferTemplateDelete() http.Handler {
 	return deleteHandler(h.svc.DeleteTransferTemplate, "/")
+}
+
+func (h *Handler) transferTemplateEndUpsert() http.Handler {
+	return upsertHandler("transfer template end", func(ctx context.Context, f transferTemplateEndInputForm) (model.TransferTemplateEnd, error) {
+		return h.svc.UpsertTransferTemplateEnd(ctx, f.TransferTemplateEnd)
+	}, func(e model.TransferTemplateEnd) string {
+		return transferTemplateEditURL(e.TransferTemplateID)
+	})
+}
+
+func (h *Handler) transferTemplateEndDelete() http.Handler {
+	return deleteWithLookupHandler(h.svc.GetTransferTemplateEnd, h.svc.DeleteTransferTemplateEnd, func(e model.TransferTemplateEnd) string {
+		return transferTemplateEditURL(e.TransferTemplateID)
+	})
 }
 
 // ---- Settings (unified) ----

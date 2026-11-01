@@ -28,6 +28,8 @@ func eventEditURL(id string) templ.SafeURL {
 // eventPartOwnerURL is the page of the Salary, Bill or account the part makes up, where it is edited.
 func eventPartOwnerURL(part model.EventPart) templ.SafeURL {
 	switch part.Kind {
+	case model.EventEntryTransferTemplateEnd:
+		return templ.SafeURL("/transfer-templates/" + part.OwnerID + "/edit")
 	case model.EventEntryBill, model.EventEntryBillAmount, model.EventEntryBillEnd:
 		return templ.SafeURL("/bill-items/" + part.OwnerID + "/edit")
 	case model.EventEntryInvestmentRound, model.EventEntryShareChange:
@@ -255,13 +257,7 @@ templ EventEntriesTable(ev model.EventView, editable bool) {
 								<span class="text-xs text-base-content/60 font-mono">{ string(tt.Recurrence) }</span>
 							</td>
 							<td>@OffsetDate(tt.StartDate, tt.StartOffset())</td>
-							<td>
-								if tt.EndDate != nil {
-									@OffsetDate(*tt.EndDate, *tt.EndOffset())
-								} else {
-									<span class="text-base-content/50">-</span>
-								}
-							</td>
+							<td class="text-base-content/50">-</td>
 							if editable {
 								<td class="text-right">@RemoveFromEventButton(ev.ID, model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: tt.ID})</td>
 							}
@@ -392,7 +388,7 @@ templ EventEntriesCard(view *model.EventEditView) {
 				<a class="link" href={ templ.SafeURL("/transfer-templates/new?event_id=" + view.Event.ID) }>Transfer Template</a>
 				<a class="link" href={ templ.SafeURL("/salaries/new?event_id=" + view.Event.ID) }>Salary</a>
 				<span class="text-base-content/50">
-					Growth models, Bills and what an Event adds to a Salary, Bill or Startup Share account, such as parental leave, a Bill Amount, an end or an investment round, are added on their own pages. An existing entry joins from the Event select on its own form.
+					Growth models, Bills and what an Event adds to a Transfer Template, Salary, Bill or Startup Share account, such as an end, parental leave, a Bill Amount or an investment round, are added on their own pages. An existing entry joins from the Event select on its own form.
 				</span>
 			</div>
 		</div>

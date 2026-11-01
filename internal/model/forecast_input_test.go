@@ -22,6 +22,7 @@ type forecastInputIDs struct {
 	growthModel           string
 	specialDate           string
 	transferTemplate      string
+	transferTemplateEnd   string
 	salary                string
 	salaryAmount          string
 	salaryAdjustment      string
@@ -235,6 +236,12 @@ func forecastInputMutations() []forecastInputMutation {
 		{"DeleteTransferTemplate", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.DeleteTransferTemplate(ctx, ids.transferTemplate)
 		}},
+		{"UpsertTransferTemplateEnd", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return discard(svc.UpsertTransferTemplateEnd(ctx, model.TransferTemplateEnd{TransferTemplateID: ids.transferTemplate, Date: mustParseDate("2030-01-01")}))
+		}},
+		{"DeleteTransferTemplateEnd", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return svc.DeleteTransferTemplateEnd(ctx, ids.transferTemplateEnd)
+		}},
 		// view.go
 		{"ModifySnapshotDateRow", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return discard(svc.ModifySnapshotDateRow(ctx, ids.snapshotDate, ids.snapshotDate.Add(date.Day)))
@@ -431,6 +438,9 @@ func seedForecastInputs(t *testing.T, svc *model.Service) forecastInputIDs {
 	})
 	must("transfer template", err)
 	ids.transferTemplate = tt.ID
+	ttEnd, err := svc.UpsertTransferTemplateEnd(ctx, model.TransferTemplateEnd{TransferTemplateID: tt.ID, Date: mustParseDate("2031-01-01")})
+	must("transfer template end", err)
+	ids.transferTemplateEnd = ttEnd.ID
 
 	sal, err := svc.UpsertSalary(ctx, model.Salary{Name: "Acme", ToAccountID: acc.ID, Recurrence: "*-*-25", Enabled: true})
 	must("salary", err)

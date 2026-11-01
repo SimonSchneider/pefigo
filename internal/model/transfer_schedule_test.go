@@ -86,10 +86,11 @@ func TestTransferScheduleAppliesATransferTemplateFromItsStartDateUpToButNotOnIts
 	svc := newTestService(t)
 	checking := mustAccount(t, svc, "Checking")
 	end := mustParseDate("2025-04-01")
-	mustTransferTemplate(t, svc, model.TransferTemplate{
+	gym := mustTransferTemplate(t, svc, model.TransferTemplate{
 		Name: "Gym", FromAccountID: checking.ID, AmountType: "fixed", AmountFixed: newFixedValue(300),
-		Recurrence: "*-*-01", StartDate: mustParseDate("2025-02-01"), EndDate: &end, Enabled: true,
+		Recurrence: "*-*-01", StartDate: mustParseDate("2025-02-01"), Enabled: true,
 	})
+	mustEndTransferTemplate(t, svc, gym.ID, end)
 	schedule := mustTransferSchedule(t, svc)
 
 	for _, tc := range []struct {
@@ -146,8 +147,9 @@ func TestTransferSchedulePercentAmountsChainOffEarlierPriorityGroups(t *testing.
 	oldEnd := mustParseDate("2024-01-01")
 	oldSalary := mustTransferTemplate(t, svc, model.TransferTemplate{
 		Name: "Lön", ToAccountID: salaryAcc.ID, AmountType: "fixed", AmountFixed: newFixedValue(4000),
-		Priority: 1, Recurrence: "*-*-25", StartDate: mustParseDate("2020-01-01"), EndDate: &oldEnd, Enabled: true,
+		Priority: 1, Recurrence: "*-*-25", StartDate: mustParseDate("2020-01-01"), Enabled: true,
 	})
+	mustEndTransferTemplate(t, svc, oldSalary.ID, oldEnd)
 	salary := mustTransferTemplate(t, svc, model.TransferTemplate{
 		Name: "Lön", ToAccountID: salaryAcc.ID, AmountType: "fixed", AmountFixed: newFixedValue(5000),
 		Priority: 1, Recurrence: "*-*-25", StartDate: mustParseDate("2024-01-01"), Enabled: true,
@@ -194,12 +196,15 @@ func TestTransferScheduleMonthlyViewHoldsActiveRecurringTransferTemplatesByKind(
 		{Name: "Salary", ToAccountID: checking.ID, AmountFixed: newFixedValue(5000), Recurrence: "*-*-25", StartDate: start, Enabled: true},
 		{Name: "Bonus", ToAccountID: checking.ID, AmountFixed: newFixedValue(10000), Recurrence: "2025-06-01", StartDate: start, Enabled: true},
 		{Name: "Rent", FromAccountID: checking.ID, AmountFixed: newFixedValue(1200), Recurrence: "*-*-01", StartDate: start, Enabled: true},
-		{Name: "Old rent", FromAccountID: checking.ID, AmountFixed: newFixedValue(900), Recurrence: "*-*-01", StartDate: start, EndDate: &ended, Enabled: true},
+		{Name: "Old rent", FromAccountID: checking.ID, AmountFixed: newFixedValue(900), Recurrence: "*-*-01", StartDate: start, Enabled: true},
 		{Name: "Gym", FromAccountID: checking.ID, AmountFixed: newFixedValue(300), Recurrence: "*-*-01", StartDate: start, Enabled: false},
 		{Name: "Saving", FromAccountID: checking.ID, ToAccountID: savings.ID, AmountFixed: newFixedValue(1000), Recurrence: "*-*-25", StartDate: start, Enabled: true},
 	} {
 		tt.AmountType = "fixed"
-		mustTransferTemplate(t, svc, tt)
+		saved := mustTransferTemplate(t, svc, tt)
+		if tt.Name == "Old rent" {
+			mustEndTransferTemplate(t, svc, saved.ID, ended)
+		}
 	}
 
 	got := make(map[string]model.TransferKind)
@@ -229,11 +234,11 @@ func TestTransferScheduleRowsGroupTransferTemplatesAfterEvaluatingThem(t *testin
 		Priority: 2, Recurrence: "*-*-01", StartDate: mustParseDate("2025-01-01"), Enabled: true,
 	})
 	for _, start := range []string{"2024-01-01", "2024-06-01"} {
-		end := mustParseDate(start).Add(30 * date.Day)
-		mustTransferTemplate(t, svc, model.TransferTemplate{
+		gym := mustTransferTemplate(t, svc, model.TransferTemplate{
 			Name: "Gym", FromAccountID: checking.ID, AmountType: "fixed", AmountFixed: newFixedValue(300),
-			Priority: 3, Recurrence: "*-*-01", StartDate: mustParseDate(start), EndDate: &end, Enabled: true,
+			Priority: 3, Recurrence: "*-*-01", StartDate: mustParseDate(start), Enabled: true,
 		})
+		mustEndTransferTemplate(t, svc, gym.ID, mustParseDate(start).Add(30*date.Day))
 	}
 	day := mustTransferSchedule(t, svc).On(mustParseDate("2025-06-01"))
 

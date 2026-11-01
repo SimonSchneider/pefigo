@@ -100,6 +100,7 @@ const (
 	EventEntryAccount              EventEntryKind = "account"
 	EventEntryGrowthModel          EventEntryKind = "growth-model"
 	EventEntryTransferTemplate     EventEntryKind = "transfer-template"
+	EventEntryTransferTemplateEnd  EventEntryKind = "transfer-template-end"
 	EventEntrySalary               EventEntryKind = "salary"
 	EventEntrySalaryAmount         EventEntryKind = "salary-amount"
 	EventEntrySalaryAdjustment     EventEntryKind = "salary-adjustment"
@@ -115,7 +116,7 @@ const (
 
 // eventEntryKinds are every kind of entry an Event can add.
 var eventEntryKinds = []string{
-	string(EventEntryAccount), string(EventEntryGrowthModel), string(EventEntryTransferTemplate),
+	string(EventEntryAccount), string(EventEntryGrowthModel), string(EventEntryTransferTemplate), string(EventEntryTransferTemplateEnd),
 	string(EventEntrySalary), string(EventEntrySalaryAmount), string(EventEntrySalaryAdjustment),
 	string(EventEntryPartialParentalLeave), string(EventEntryFullParentalLeave), string(EventEntrySalaryEnd),
 	string(EventEntryBill), string(EventEntryBillAmount), string(EventEntryBillEnd),
@@ -371,8 +372,8 @@ func ownDate(dates map[string]date.Date, eventID *string) date.Date {
 }
 
 // RemoveFromEvent puts entry in the Baseline, out of its Event. Its dates become the absolute dates
-// they are at with the Event at its current date. An end leaves its Event only from its Salary's or
-// Bill's page: removing one from the Event's page is invalid input.
+// they are at with the Event at its current date. An end leaves its Event only from its Transfer
+// Template's, Salary's or Bill's page: removing one from the Event's page is invalid input.
 func (s *Service) RemoveFromEvent(ctx context.Context, entry EventEntry) error {
 	if !entry.Kind.RemovableFromEvent() {
 		return fmt.Errorf("%w: a %s is edited on its own page, not removed from its Event", ErrInvalidInput, strings.ToLower(entry.Kind.Label()))
@@ -381,9 +382,9 @@ func (s *Service) RemoveFromEvent(ctx context.Context, entry EventEntry) error {
 }
 
 // RemovableFromEvent reports whether the Event's page removes an entry of the kind from it: every
-// kind but an end, which is edited on its Salary's or Bill's page.
+// kind but an end, which is edited on its Transfer Template's, Salary's or Bill's page.
 func (k EventEntryKind) RemovableFromEvent() bool {
-	return k != EventEntrySalaryEnd && k != EventEntryBillEnd
+	return k != EventEntryTransferTemplateEnd && k != EventEntrySalaryEnd && k != EventEntryBillEnd
 }
 
 func (s *Service) setEntryEvent(ctx context.Context, entry EventEntry, eventID string) error {
@@ -413,6 +414,8 @@ func (s *Service) setEntryEvent(ctx context.Context, entry EventEntry, eventID s
 		if _, err := s.UpsertTransferTemplate(ctx, tt); err != nil {
 			return err
 		}
+	case EventEntryTransferTemplateEnd:
+		return rejoin(ctx, entry.ID, eventID, s.GetTransferTemplateEnd, s.UpsertTransferTemplateEnd, func(v *TransferTemplateEnd, id string) { v.EventID = id })
 	case EventEntrySalary:
 		return rejoin(ctx, entry.ID, eventID, s.GetSalary, s.UpsertSalary, func(v *Salary, id string) { v.EventID = id })
 	case EventEntrySalaryAmount:
@@ -467,6 +470,7 @@ type storedEntries struct {
 	accounts              []pdb.Account
 	growthModels          []pdb.GrowthModel
 	transferTemplates     []pdb.TransferTemplate
+	transferTemplateEnds  []pdb.TransferTemplateEnd
 	salaries              []pdb.Salary
 	salaryAmounts         []pdb.SalaryAmount
 	salaryAdjustments     []pdb.SalaryAdjustment
@@ -493,6 +497,10 @@ func (s *Service) loadStoredEntries(ctx context.Context) (storedEntries, error) 
 		func() (err error) {
 			st.transferTemplates, err = s.q.GetTransferTemplates(ctx)
 			return wrap(err, "listing transfer templates")
+		},
+		func() (err error) {
+			st.transferTemplateEnds, err = s.q.ListAllTransferTemplateEnds(ctx)
+			return wrap(err, "listing transfer template ends")
 		},
 		func() (err error) { st.salaries, err = s.q.ListSalaries(ctx); return wrap(err, "listing salaries") },
 		func() (err error) {
@@ -584,14 +592,6 @@ func (t EventTransferTemplate) StartOffset() date.Duration {
 	return t.StartDate.Sub(t.eventDate)
 }
 
-// EndOffset is how long after the Event's date the Transfer Template ends, or nil without an End Date.
-func (t EventTransferTemplate) EndOffset() *date.Duration {
-	if t.EndDate == nil {
-		return nil
-	}
-	return ptr(t.EndDate.Sub(t.eventDate))
-}
-
 // NamedEventEntry is an entry with a name to show it by, and the Event it is in, if any.
 type NamedEventEntry struct {
 	EventEntry
@@ -605,18 +605,18 @@ type EventView struct {
 	Accounts          []Account
 	GrowthModels      []EventGrowthModel
 	TransferTemplates []EventTransferTemplate
-	// Parts are the Salaries and Bills it adds, and what it adds to Salaries, Bills and Startup Share
-	// accounts, in or outside it: by date, a Salary or Bill first, then by kind.
+	// Parts are the Salaries and Bills it adds, and what it adds to Transfer Templates, Salaries, Bills
+	// and Startup Share accounts, in or outside it: by date, a Salary or Bill first, then by kind.
 	Parts []EventPart
 }
 
-// EventPart is an entry an Event adds that makes up a Salary, Bill or Startup Share account: a Salary
-// or Bill, a Salary Amount, adjustment, parental leave or end of a Salary, a Bill Amount or end of a
-// Bill, or an investment round or share change.
+// EventPart is an entry an Event adds that makes up a Transfer Template, Salary, Bill or Startup Share
+// account: an end of a Transfer Template, a Salary or Bill, a Salary Amount, adjustment, parental leave
+// or end of a Salary, a Bill Amount or end of a Bill, or an investment round or share change.
 type EventPart struct {
 	EventEntry
-	// OwnerID and OwnerName are the Salary, Bill or account the part makes up, or the Salary or Bill
-	// itself.
+	// OwnerID and OwnerName are the Transfer Template, Salary, Bill or account the part makes up, or the
+	// Salary or Bill itself.
 	OwnerID   string
 	OwnerName string
 	// StartDate is the part's first day, and EndDate its End of a parental leave or Bill Amount. A
@@ -648,6 +648,16 @@ func newEventPart(eventID string, kind EventEntryKind, id, ownerID, ownerName st
 	return eventPartIn{eventID: eventID, part: EventPart{
 		EventEntry: EventEntry{Kind: kind, ID: id}, OwnerID: ownerID, OwnerName: ownerName, StartDate: start, EndDate: end,
 	}}
+}
+
+// transferTemplateParts are every End of the Transfer Template, each with the Event it is in. The
+// Transfer Template itself is listed apart from the parts.
+func transferTemplateParts(tt TransferTemplate) []eventPartIn {
+	var parts []eventPartIn
+	for _, e := range tt.Ends {
+		parts = append(parts, newEventPart(e.EventID, EventEntryTransferTemplateEnd, e.ID, tt.ID, tt.Name, &e.Date, nil))
+	}
+	return parts
 }
 
 // salaryParts are the Salary and every part of it, each with the Event it is in.
@@ -725,10 +735,10 @@ func storedEventOf[R any](ctx context.Context, id string, get func(context.Conte
 	return ptr(ui.OrDefault(eventID(row))), nil
 }
 
-// bringParts puts the parts of the Salary or Bill ownerID that are in from, the Event it was in or ""
-// for none, in to, the Event it is in now, keeping the days they apply on: a Salary or Bill joining,
-// leaving or changing Event brings its parts along. Its parts in other Events, which they add to it,
-// stay where they are.
+// bringParts puts the parts of the Transfer Template, Salary or Bill ownerID that are in from, the Event
+// it was in or "" for none, in to, the Event it is in now, keeping the days they apply on: a Transfer
+// Template, Salary or Bill joining, leaving or changing Event brings its parts along. Its parts in other
+// Events, which they add to it, stay where they are.
 func (s *Service) bringParts(ctx context.Context, kind EventEntryKind, ownerID, from, to string) error {
 	own, err := s.ownPlans(ctx)
 	if err != nil {
@@ -736,6 +746,10 @@ func (s *Service) bringParts(ctx context.Context, kind EventEntryKind, ownerID, 
 	}
 	var parts []eventPartIn
 	switch kind {
+	case EventEntryTransferTemplate:
+		if i := slices.IndexFunc(own.transferTemplates, func(tt TransferTemplate) bool { return tt.ID == ownerID }); i >= 0 {
+			parts = transferTemplateParts(own.transferTemplates[i])
+		}
 	case EventEntrySalary:
 		if i := slices.IndexFunc(own.salaries, func(sal Salary) bool { return sal.ID == ownerID }); i >= 0 {
 			parts = salaryParts(own.salaries[i])
@@ -764,6 +778,8 @@ func (k EventEntryKind) Label() string {
 		return "Growth model"
 	case EventEntryTransferTemplate:
 		return "Transfer Template"
+	case EventEntryTransferTemplateEnd:
+		return "Transfer Template end"
 	case EventEntrySalary:
 		return "Salary"
 	case EventEntrySalaryAmount:
@@ -834,16 +850,14 @@ func (s *Service) loadEventEntries(ctx context.Context) (*eventEntries, error) {
 		}
 		e.growthModels = append(e.growthModels, gm)
 	}
-	for _, row := range stored.transferTemplates {
-		tt, err := transferTemplateFromDB(row, ownDate(dates, row.EventID))
-		if err != nil {
-			return nil, err
-		}
-		e.transferTemplates = append(e.transferTemplates, tt)
-	}
 	own, err := pl.atOwnDates()
 	if err != nil {
 		return nil, err
+	}
+	// Every Event placed at its own date leaves out no Transfer Template.
+	e.transferTemplates = own.transferTemplates
+	for _, tt := range own.transferTemplates {
+		e.parts = append(e.parts, transferTemplateParts(tt)...)
 	}
 	for _, sal := range own.salaries {
 		e.parts = append(e.parts, salaryParts(sal)...)
@@ -1004,16 +1018,19 @@ func (s *Service) GetEventDeletePageData(ctx context.Context, id string) (*Event
 			})
 		}
 	}
+	// The parts in other Events, or none, of the Transfer Templates, Salaries, Bills and accounts it adds
+	// or deletes are deleted with them.
+	owners := maps.Clone(accounts)
 	for _, tt := range e.transferTemplates {
-		if tt.EventID != ev.ID && (accounts[tt.FromAccountID] || accounts[tt.ToAccountID]) {
+		if tt.EventID == ev.ID {
+			owners[tt.ID] = true
+		} else if accounts[tt.FromAccountID] || accounts[tt.ToAccountID] {
+			owners[tt.ID] = true
 			v.AlsoDeleted = append(v.AlsoDeleted, NamedEventEntry{
 				EventEntry: EventEntry{Kind: EventEntryTransferTemplate, ID: tt.ID}, Name: tt.Name, EventName: eventNames[tt.EventID],
 			})
 		}
 	}
-	// The parts in other Events, or none, of the Salaries, Bills and accounts it adds are deleted with
-	// them.
-	owners := maps.Clone(accounts)
 	for _, p := range v.Event.Parts {
 		if p.Kind == EventEntrySalary || p.Kind == EventEntryBill {
 			owners[p.OwnerID] = true

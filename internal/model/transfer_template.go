@@ -68,23 +68,56 @@ type TransferTemplate struct {
 	Priority      int64
 	Recurrence    date.Cron
 
-	StartDate        date.Date
+	StartDate date.Date
+	// EndDate is the first day the Transfer Template no longer applies, or nil. A stored Transfer
+	// Template's is the earliest of the Ends it is loaded with: saving it doesn't read it, as its Ends
+	// are saved on their own. See ADR 0009.
 	EndDate          *date.Date
 	Enabled          bool
 	BudgetCategoryID *string
-	// EventID is the Event the Transfer Template is in, or "" in the Baseline. In an Event its Start and
-	// End Dates, and the date of a one-off, are stored as offsets from the Event's date.
+	// EventID is the Event the Transfer Template is in, or "" in the Baseline. In an Event its Start
+	// Date, and the date of a one-off, are stored as offsets from the Event's date.
 	EventID string
-	// StartOffset and EndOffset, when set, give the Start and End Dates of a Transfer Template in an
-	// Event as days after the Event's date, in place of StartDate and EndDate. Only saving reads them,
-	// so a loaded Transfer Template has none.
+	// Ends are the days a stored Transfer Template may end on, each in an Event or in none: it applies
+	// up to the earliest of them. Where it is placed, only the placed Ends are loaded.
+	Ends []TransferTemplateEnd
+	// StartOffset, when set, gives the Start Date of a Transfer Template in an Event as days after the
+	// Event's date, in place of StartDate. Only saving reads it, so a loaded Transfer Template has none.
 	StartOffset *date.Duration
-	EndOffset   *date.Duration
-	// OffsetEventID is the Event StartOffset and EndOffset are days after: the Event the form showed
-	// them for, which an entry changing its Event leaves. It is EventID when blank.
+	// OffsetEventID is the Event StartOffset is days after: the Event the form showed it for, which an
+	// entry changing its Event leaves. It is EventID when blank.
 	OffsetEventID string
 
 	Source TransferTemplateSource
+}
+
+// TransferTemplateEnd is a day a Transfer Template may end on: from it, the Transfer Template no
+// longer applies. In an Event its date is stored as days after the Event's date, whatever Event the
+// Transfer Template itself is in.
+type TransferTemplateEnd struct {
+	ID                 string
+	TransferTemplateID string
+	Date               date.Date
+	EventID            string
+	// DateOffset, when set, gives the date in an Event as days after the date of OffsetEventID, the
+	// Event the form showed it for, or of EventID when that is blank.
+	DateOffset    *date.Duration
+	OffsetEventID string
+}
+
+// transferTemplateEndFromDB is the stored end e with its Event at at.
+func transferTemplateEndFromDB(e pdb.TransferTemplateEnd, at date.Date) TransferTemplateEnd {
+	return TransferTemplateEnd{ID: e.ID, TransferTemplateID: e.TransferTemplateID, Date: placeDate(e.Date, at), EventID: ui.OrDefault(e.EventID)}
+}
+
+func (e TransferTemplateEnd) dayAndID() (date.Date, string) { return e.Date, e.ID }
+
+// withEnds is t with ends, ordered by date and ID, as its Ends, ending at the earliest of them.
+func (t TransferTemplate) withEnds(ends []TransferTemplateEnd) TransferTemplate {
+	t.Ends = slices.Clone(ends)
+	sortByDayAndID(t.Ends, TransferTemplateEnd.dayAndID)
+	t.EndDate = firstEnd(t.Ends, func(e TransferTemplateEnd) date.Date { return e.Date })
+	return t
 }
 
 func (t *TransferTemplate) ToFinanceTransferTemplate() finance.TransferTemplate {
@@ -126,32 +159,16 @@ func transferTemplateFromDB(t pdb.TransferTemplate, at date.Date) (TransferTempl
 		Priority:         t.Priority,
 		Recurrence:       placeRecurrence(t.Recurrence, t.EventID != nil, at),
 		StartDate:        placeDate(t.StartDate, at),
-		EndDate:          placeEndDate(t.EndDate, at),
 		Enabled:          t.Enabled,
 		BudgetCategoryID: t.BudgetCategoryID,
 		EventID:          ui.OrDefault(t.EventID),
 	}, nil
 }
 
-type TransferTemplateInput struct {
-	ID               string
-	Name             string
-	FromAccountID    string
-	ToAccountID      string
-	AmountType       string
-	AmountFixed      uncertain.Value
-	AmountPercent    float64
-	Priority         int64
-	Recurrence       date.Cron
-	StartDate        date.Date
-	EndDate          *date.Date
-	Enabled          bool
-	BudgetCategoryID *string
-}
-
-// UpsertTransferTemplate saves the Transfer Template. In an Event its dates may be given as days after
-// the Event's date, its Start Date is the Event's date when it isn't given, and its dates are saved as
-// offsets from the Event's date. Without a recurrence it is a one-off on its Start Date.
+// UpsertTransferTemplate saves the Transfer Template, but not its Ends, which are saved on their own. In
+// an Event its Start Date may be given as days after the Event's date, is the Event's date when it isn't
+// given, and is saved as an offset from the Event's date. Without a recurrence it is a one-off on its
+// Start Date.
 func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTemplate) (TransferTemplate, error) {
 	at, err := s.eventDate(ctx, inp.EventID)
 	if err != nil {
@@ -161,12 +178,9 @@ func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTempla
 	if err != nil {
 		return TransferTemplate{}, err
 	}
-	startDate, startErr := givenDate("start", inp.StartDate, inp.StartOffset, offsetEventID, offsetAt)
-	endDate, endErr := givenEndDate(inp.EndDate, inp.EndOffset, offsetEventID, offsetAt)
-	if err := errors.Join(startErr, endErr); err != nil {
+	if inp.StartDate, err = givenDate("start", inp.StartDate, inp.StartOffset, offsetEventID, offsetAt); err != nil {
 		return TransferTemplate{}, err
 	}
-	inp.StartDate, inp.EndDate = startDate, endDate
 	if inp.EventID != "" && inp.StartDate.IsZero() {
 		inp.StartDate = at
 	}
@@ -182,17 +196,36 @@ func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTempla
 	if err := checkDatePattern("transfer template recurrence", inp.Recurrence); err != nil {
 		return TransferTemplate{}, err
 	}
-	if err := checkEndDate(inp.StartDate, inp.EndDate); err != nil {
-		return TransferTemplate{}, err
-	}
 	amountFixed, err := orZero(inp.AmountFixed).Encode()
 	if err != nil {
 		return TransferTemplate{}, fmt.Errorf("encoding amount fixed: %w", err)
 	}
+	previous, err := storedEventOf(ctx, inp.ID, s.q.GetTransferTemplate, func(t pdb.TransferTemplate) *string { return t.EventID })
+	if err != nil {
+		return TransferTemplate{}, fmt.Errorf("getting transfer template: %w", err)
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
-	t, err := s.q.UpsertTransferTemplate(ctx, pdb.UpsertTransferTemplateParams{
+	// A Transfer Template changing Event brings its Ends along, or stays where it was.
+	err = s.inTx(ctx, func(tx *Service) error {
+		if err := tx.storeTransferTemplate(ctx, inp, at, amountFixed); err != nil {
+			return err
+		}
+		if previous != nil && *previous != inp.EventID {
+			return tx.bringParts(ctx, EventEntryTransferTemplate, inp.ID, *previous, inp.EventID)
+		}
+		return nil
+	})
+	if err != nil {
+		return TransferTemplate{}, err
+	}
+	return s.GetTransferTemplate(ctx, inp.ID)
+}
+
+// storeTransferTemplate writes inp, in an Event at at, with its fixed amount encoded as amountFixed.
+func (s *Service) storeTransferTemplate(ctx context.Context, inp TransferTemplate, at date.Date, amountFixed string) error {
+	_, err := s.q.UpsertTransferTemplate(ctx, pdb.UpsertTransferTemplateParams{
 		ID:               inp.ID,
 		Name:             inp.Name,
 		FromAccountID:    ui.WithDefaultNull(inp.FromAccountID),
@@ -203,7 +236,6 @@ func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTempla
 		Priority:         inp.Priority,
 		Recurrence:       storeRecurrence(inp.Recurrence, inp.EventID != "", at),
 		StartDate:        storeDate(inp.StartDate, at),
-		EndDate:          storeEndDate(inp.EndDate, at),
 		Enabled:          inp.Enabled,
 		BudgetCategoryID: inp.BudgetCategoryID,
 		EventID:          ui.WithDefaultNull(inp.EventID),
@@ -211,39 +243,72 @@ func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTempla
 		UpdatedAt:        time.Now().Unix(),
 	})
 	if err != nil {
-		return TransferTemplate{}, fmt.Errorf("failed to upsert template: %w", err)
+		return fmt.Errorf("failed to upsert template: %w", err)
 	}
-	return transferTemplateFromDB(t, at)
+	return nil
 }
 
+// DuplicateTransferTemplate saves a copy of the Transfer Template id with a copy of each of its Ends, each
+// in the same Event, so the copy ends wherever the original does.
 func (s *Service) DuplicateTransferTemplate(ctx context.Context, id string) (TransferTemplate, error) {
 	t, err := s.GetTransferTemplate(ctx, id)
 	if err != nil {
 		return TransferTemplate{}, fmt.Errorf("failed to get transfer template: %w", err)
 	}
-	t.ID = ""
-	return s.UpsertTransferTemplate(ctx, t)
+	var copied TransferTemplate
+	err = s.inTx(ctx, func(tx *Service) error {
+		t.ID = ""
+		if copied, err = tx.UpsertTransferTemplate(ctx, t); err != nil {
+			return err
+		}
+		for _, end := range t.Ends {
+			end.ID, end.TransferTemplateID = "", copied.ID
+			if _, err := tx.UpsertTransferTemplateEnd(ctx, end); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return TransferTemplate{}, err
+	}
+	return s.GetTransferTemplate(ctx, copied.ID)
 }
 
-// ListTransferTemplates returns every stored Transfer Template, each in an Event at the Event's date.
+// ListTransferTemplates returns every stored Transfer Template with every End of it, each in an Event at
+// its own Event's date.
 func (s *Service) ListTransferTemplates(ctx context.Context) ([]TransferTemplate, error) {
-	templates, err := s.q.GetTransferTemplates(ctx)
+	rows, err := s.q.GetTransferTemplates(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list templates: %w", err)
 	}
+	ends, err := s.q.ListAllTransferTemplateEnds(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing transfer template ends: %w", err)
+	}
+	return s.atOwnDates(ctx, rows, ends)
+}
+
+// atOwnDates are the stored Transfer Templates rows, each with its stored ends, every one at its own
+// Event's date: the dates their forms edit. Each ends at the earliest of them.
+func (s *Service) atOwnDates(ctx context.Context, rows []pdb.TransferTemplate, endRows []pdb.TransferTemplateEnd) ([]TransferTemplate, error) {
 	dates, err := s.eventDates(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var parsedTemplates []TransferTemplate
-	for _, t := range templates {
-		template, err := transferTemplateFromDB(t, ownDate(dates, t.EventID))
+	ends := make(map[string][]TransferTemplateEnd)
+	for _, row := range endRows {
+		ends[row.TransferTemplateID] = append(ends[row.TransferTemplateID], transferTemplateEndFromDB(row, ownDate(dates, row.EventID)))
+	}
+	templates := make([]TransferTemplate, len(rows))
+	for i, row := range rows {
+		tt, err := transferTemplateFromDB(row, ownDate(dates, row.EventID))
 		if err != nil {
 			return nil, fmt.Errorf("converting transfer template from DB: %w", err)
 		}
-		parsedTemplates = append(parsedTemplates, template)
+		templates[i] = tt.withEnds(ends[tt.ID])
 	}
-	return parsedTemplates, nil
+	return templates, nil
 }
 
 func sortTransferTemplates(ts []TransferTemplate) {
@@ -265,22 +330,79 @@ func sortTransferTemplates(ts []TransferTemplate) {
 	})
 }
 
-// GetTransferTemplate returns the Transfer Template, in an Event at the Event's date.
+// GetTransferTemplate returns the Transfer Template with every End of it, each in an Event at its own
+// Event's date: the dates its forms edit. Its End Date is the earliest of them.
 func (s *Service) GetTransferTemplate(ctx context.Context, id string) (TransferTemplate, error) {
 	t, err := s.q.GetTransferTemplate(ctx, id)
 	if err != nil {
 		return TransferTemplate{}, fmt.Errorf("failed to get transfer template: %w", err)
 	}
-	at, err := s.eventDate(ctx, ui.OrDefault(t.EventID))
+	ends, err := s.q.ListTransferTemplateEnds(ctx, id)
+	if err != nil {
+		return TransferTemplate{}, fmt.Errorf("listing transfer template ends: %w", err)
+	}
+	templates, err := s.atOwnDates(ctx, []pdb.TransferTemplate{t}, ends)
 	if err != nil {
 		return TransferTemplate{}, err
 	}
-	return transferTemplateFromDB(t, at)
+	return templates[0], nil
 }
 
 func (s *Service) DeleteTransferTemplate(ctx context.Context, id string) error {
 	if err := s.q.DeleteTransferTemplate(ctx, id); err != nil {
 		return fmt.Errorf("failed to delete template: %w", err)
+	}
+	return nil
+}
+
+// UpsertTransferTemplateEnd saves a day the Transfer Template may end on, in an Event or in none. In an
+// Event its date may be given as days after the Event's date, is the Event's date when it isn't given,
+// and is saved as an offset from the Event's date, whatever Event the Transfer Template is in.
+func (s *Service) UpsertTransferTemplateEnd(ctx context.Context, inp TransferTemplateEnd) (TransferTemplateEnd, error) {
+	dating, err := s.entryDating(ctx, inp.EventID, inp.OffsetEventID)
+	if err != nil {
+		return TransferTemplateEnd{}, err
+	}
+	if inp.Date, err = dating.firstDay("end", inp.Date, inp.DateOffset); err != nil {
+		return TransferTemplateEnd{}, err
+	}
+	if err := errors.Join(checkRequired("transfer template", inp.TransferTemplateID), checkRequired("end date", inp.Date)); err != nil {
+		return TransferTemplateEnd{}, err
+	}
+	if inp.ID == "" {
+		inp.ID = sid.MustNewString(32)
+	}
+	now := time.Now().Unix()
+	e, err := s.q.UpsertTransferTemplateEnd(ctx, pdb.UpsertTransferTemplateEndParams{
+		ID:                 inp.ID,
+		TransferTemplateID: inp.TransferTemplateID,
+		Date:               dating.store(inp.Date),
+		EventID:            ui.WithDefaultNull(inp.EventID),
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	})
+	if err != nil {
+		return TransferTemplateEnd{}, fmt.Errorf("upserting transfer template end: %w", err)
+	}
+	return transferTemplateEndFromDB(e, dating.at), nil
+}
+
+// GetTransferTemplateEnd returns the Transfer Template's end id, in an Event at the Event's date.
+func (s *Service) GetTransferTemplateEnd(ctx context.Context, id string) (TransferTemplateEnd, error) {
+	e, err := s.q.GetTransferTemplateEnd(ctx, id)
+	if err != nil {
+		return TransferTemplateEnd{}, fmt.Errorf("getting transfer template end: %w", err)
+	}
+	at, err := s.eventDate(ctx, ui.OrDefault(e.EventID))
+	if err != nil {
+		return TransferTemplateEnd{}, err
+	}
+	return transferTemplateEndFromDB(e, at), nil
+}
+
+func (s *Service) DeleteTransferTemplateEnd(ctx context.Context, id string) error {
+	if err := s.q.DeleteTransferTemplateEnd(ctx, id); err != nil {
+		return fmt.Errorf("deleting transfer template end: %w", err)
 	}
 	return nil
 }
@@ -310,9 +432,10 @@ func (c TransferTemplateEditView) StartInput() string {
 	return DateInput(c.Events, c.TransferTemplate.EventID, &c.TransferTemplate.StartDate)
 }
 
-// EndInput is the End Date as the form gives it: in an Event the days after its date.
-func (c TransferTemplateEditView) EndInput() string {
-	return DateInput(c.Events, c.TransferTemplate.EventID, c.TransferTemplate.EndDate)
+// PartEventID is the Event a new End of the Transfer Template is in, unless its form picks another: the
+// Transfer Template's.
+func (c TransferTemplateEditView) PartEventID() string {
+	return c.TransferTemplate.EventID
 }
 
 // RecurrenceInput is the recurrence as the form gives it: blank for a one-off on its Start Date, which
