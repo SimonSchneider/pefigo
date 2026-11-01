@@ -286,7 +286,11 @@ templ EventEntriesTable(ev model.EventView, editable bool) {
 								}
 							</td>
 							if editable {
-								<td class="text-right">@RemoveFromEventButton(ev.ID, part.EventEntry)</td>
+								<td class="text-right">
+									if part.Kind.RemovableFromEvent() {
+										@RemoveFromEventButton(ev.ID, part.EventEntry)
+									}
+								</td>
 							}
 						</tr>
 					}

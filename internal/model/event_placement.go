@@ -217,9 +217,9 @@ func placeBills(p *plans, stored storedEntries, placed func(eventID *string) (da
 func placeSalaries(p *plans, stored storedEntries, placed func(eventID *string) (date.Date, bool)) error {
 	index := make(map[string]int, len(stored.salaries))
 	for _, row := range stored.salaries {
-		if _, ok := placed(row.EventID); ok {
+		if day, ok := placed(row.EventID); ok {
 			index[row.ID] = len(p.salaries)
-			p.salaries = append(p.salaries, salaryFromDB(row))
+			p.salaries = append(p.salaries, salaryFromDB(row, day))
 		}
 	}
 	// part is the placed Salary salaryID a part in the Event eventID belongs to, with the date the part's

@@ -145,7 +145,12 @@ func TestADatedPartLeavingOrJoiningAnEventKeepsTheDaysItAppliesOn(t *testing.T) 
 			moveEvent(t, svc, newJob, "2027-10-01")
 			expect(t, id, newJob.ID, "2027-07-11")
 
-			mustRemoveFromEvent(t, svc, model.EventEntry{Kind: part.kind, ID: id})
+			if part.kind.RemovableFromEvent() {
+				mustRemoveFromEvent(t, svc, model.EventEntry{Kind: part.kind, ID: id})
+			} else if _, err := part.save(ctx, id, "", newJob.ID, -82); err != nil {
+				// An end leaves its Event from its own form, which gives its day after the New job's date.
+				t.Fatalf("leave the New job from its form: %v", err)
+			}
 			expect(t, id, "", "2027-07-11")
 			moveEvent(t, svc, newJob, "2027-09-01")
 			expect(t, id, "", "2027-07-11")

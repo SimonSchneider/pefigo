@@ -330,7 +330,20 @@ func (s *Service) UpsertInvestmentRound(ctx context.Context, inp InvestmentRound
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
-	ir, err := s.q.UpsertInvestmentRound(ctx, pdb.UpsertInvestmentRoundParams{
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return InvestmentRound{}, fmt.Errorf("beginning to save the investment round: %w", err)
+	}
+	defer tx.Rollback()
+	q := s.q.WithTx(tx)
+	// An account has one investment round a day in each Event, and one outside Events: saving a round
+	// on a day replaces the other round there.
+	if err := q.DeleteOtherInvestmentRoundsOnDay(ctx, pdb.DeleteOtherInvestmentRoundsOnDayParams{
+		AccountID: inp.AccountID, Date: dating.store(inp.Date), EventID: ui.WithDefaultNull(inp.EventID), ID: inp.ID,
+	}); err != nil {
+		return InvestmentRound{}, fmt.Errorf("replacing the investment round on %s: %w", inp.Date, err)
+	}
+	ir, err := q.UpsertInvestmentRound(ctx, pdb.UpsertInvestmentRoundParams{
 		ID:             inp.ID,
 		AccountID:      inp.AccountID,
 		Date:           dating.store(inp.Date),
@@ -343,6 +356,9 @@ func (s *Service) UpsertInvestmentRound(ctx context.Context, inp InvestmentRound
 	})
 	if err != nil {
 		return InvestmentRound{}, fmt.Errorf("failed to upsert investment round: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return InvestmentRound{}, fmt.Errorf("saving the investment round: %w", err)
 	}
 	return investmentRoundFromDB(ir, dating.at), nil
 }
@@ -386,10 +402,12 @@ func (s *Service) ListInvestmentRounds(ctx context.Context, accountID string) ([
 	return result, nil
 }
 
-// compareInvestmentRounds orders investment rounds by date and ID: of two on the same day, the one with
-// the later ID applies, in an Event or not.
+// compareInvestmentRounds orders investment rounds by date, then by when they were last saved. Two
+// rounds are on one day only when they are in different Events, or one is in an Event and one isn't:
+// of those, the one saved last applies, and of two saved in the same millisecond the one with the
+// later ID.
 func compareInvestmentRounds(a, b InvestmentRound) int {
-	return cmp.Or(cmp.Compare(a.Date, b.Date), cmp.Compare(a.ID, b.ID))
+	return cmp.Or(cmp.Compare(a.Date, b.Date), a.UpdatedAt.Compare(b.UpdatedAt), cmp.Compare(a.ID, b.ID))
 }
 
 func (s *Service) DeleteInvestmentRound(ctx context.Context, id string) error {
@@ -623,9 +641,10 @@ func (ss *startupShares) growthOn(day date.Date) *finance.StartupGrowth {
 		growth.TotalShares = uncertain.NewFixed(postMoneyShares)
 	}
 	// What is dated on or before day is in the shares on day already: applying it again on day would
-	// count it twice.
+	// count it twice. A round without shares or a price per share values nothing, as in latestRoundOn,
+	// so it never hides another round on its day.
 	for _, r := range ss.rounds {
-		if r.Date.After(day) {
+		if r.Date.After(day) && r.hasSharesAndPrice() {
 			growth.InvestmentRounds[r.Date] = finance.StartupGrowthInvestmentRound{
 				PreMoneyValuation: uncertain.NewFixed(r.Valuation),
 				PreMoneyShares:    uncertain.NewFixed(r.PreMoneyShares),

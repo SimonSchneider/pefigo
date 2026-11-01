@@ -506,6 +506,10 @@ func (s *Service) UpsertBill(ctx context.Context, inp Bill) (Bill, error) {
 	if _, err := s.eventDate(ctx, inp.EventID); err != nil {
 		return Bill{}, err
 	}
+	previous, err := storedEventOf(ctx, inp.ID, s.q.GetBill, func(b pdb.Bill) *string { return b.EventID })
+	if err != nil {
+		return Bill{}, fmt.Errorf("getting bill: %w", err)
+	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
@@ -524,6 +528,11 @@ func (s *Service) UpsertBill(ctx context.Context, inp Bill) (Bill, error) {
 	})
 	if err != nil {
 		return Bill{}, fmt.Errorf("upserting bill: %w", err)
+	}
+	if previous != nil && *previous != inp.EventID {
+		if err := s.bringParts(ctx, EventEntryBill, inp.ID, *previous, inp.EventID); err != nil {
+			return Bill{}, err
+		}
 	}
 	return billFromDB(b), nil
 }

@@ -361,9 +361,19 @@ func ownDate(dates map[string]date.Date, eventID *string) date.Date {
 }
 
 // RemoveFromEvent puts entry in the Baseline, out of its Event. Its dates become the absolute dates
-// they are at with the Event at its current date.
+// they are at with the Event at its current date. An end leaves its Event only from its Salary's or
+// Bill's page: removing one from the Event's page is invalid input.
 func (s *Service) RemoveFromEvent(ctx context.Context, entry EventEntry) error {
+	if !entry.Kind.RemovableFromEvent() {
+		return fmt.Errorf("%w: a %s is edited on its own page, not removed from its Event", ErrInvalidInput, strings.ToLower(entry.Kind.Label()))
+	}
 	return s.setEntryEvent(ctx, entry, "")
+}
+
+// RemovableFromEvent reports whether the Event's page removes an entry of the kind from it: every
+// kind but an end, which is edited on its Salary's or Bill's page.
+func (k EventEntryKind) RemovableFromEvent() bool {
+	return k != EventEntrySalaryEnd && k != EventEntryBillEnd
 }
 
 func (s *Service) setEntryEvent(ctx context.Context, entry EventEntry, eventID string) error {
@@ -622,52 +632,121 @@ func (p EventPart) EndOffset() date.Duration {
 	return p.EndDate.Sub(p.eventDate)
 }
 
-// eventPartsOf are every part of salaries, bills and startupShares, each at its own Event's date with
-// the Event it is in.
-func eventPartsOf(salaries []Salary, bills []Bill, startupShares map[string]*startupShares, accountNames map[string]string) []eventPartIn {
-	var parts []eventPartIn
-	add := func(eventID string, kind EventEntryKind, id, ownerID, ownerName string, start, end *date.Date) {
-		parts = append(parts, eventPartIn{eventID: eventID, part: EventPart{
-			EventEntry: EventEntry{Kind: kind, ID: id}, OwnerID: ownerID, OwnerName: ownerName, StartDate: start, EndDate: end,
-		}})
+// newEventPart is the part id of the kind kind that makes up the Salary, Bill or account ownerID, in
+// the Event eventID, from start to end.
+func newEventPart(eventID string, kind EventEntryKind, id, ownerID, ownerName string, start, end *date.Date) eventPartIn {
+	return eventPartIn{eventID: eventID, part: EventPart{
+		EventEntry: EventEntry{Kind: kind, ID: id}, OwnerID: ownerID, OwnerName: ownerName, StartDate: start, EndDate: end,
+	}}
+}
+
+// salaryParts are the Salary and every part of it, each with the Event it is in.
+func salaryParts(sal Salary) []eventPartIn {
+	parts := []eventPartIn{newEventPart(sal.EventID, EventEntrySalary, sal.ID, sal.ID, sal.Name, nil, nil)}
+	for _, a := range sal.Amounts {
+		parts = append(parts, newEventPart(a.EventID, EventEntrySalaryAmount, a.ID, sal.ID, sal.Name, &a.StartDate, nil))
 	}
-	for _, sal := range salaries {
-		add(sal.EventID, EventEntrySalary, sal.ID, sal.ID, sal.Name, nil, nil)
-		for _, a := range sal.Amounts {
-			add(a.EventID, EventEntrySalaryAmount, a.ID, sal.ID, sal.Name, &a.StartDate, nil)
-		}
-		for _, a := range sal.Adjustments {
-			add(a.EventID, EventEntrySalaryAdjustment, a.ID, sal.ID, sal.Name, &a.ValidFrom, nil)
-		}
-		for _, l := range sal.PartialParentalLeaves {
-			add(l.EventID, EventEntryPartialParentalLeave, l.ID, sal.ID, sal.Name, &l.StartDate, &l.EndDate)
-		}
-		for _, l := range sal.FullParentalLeaves {
-			add(l.EventID, EventEntryFullParentalLeave, l.ID, sal.ID, sal.Name, &l.StartDate, &l.EndDate)
-		}
-		for _, e := range sal.Ends {
-			add(e.EventID, EventEntrySalaryEnd, e.ID, sal.ID, sal.Name, &e.Date, nil)
-		}
+	for _, a := range sal.Adjustments {
+		parts = append(parts, newEventPart(a.EventID, EventEntrySalaryAdjustment, a.ID, sal.ID, sal.Name, &a.ValidFrom, nil))
 	}
-	for _, b := range bills {
-		add(b.EventID, EventEntryBill, b.ID, b.ID, b.Name, nil, nil)
-		for _, a := range b.Amounts {
-			add(a.EventID, EventEntryBillAmount, a.ID, b.ID, b.Name, &a.StartDate, a.EndDate)
-		}
-		for _, e := range b.Ends {
-			add(e.EventID, EventEntryBillEnd, e.ID, b.ID, b.Name, &e.Date, nil)
-		}
+	for _, l := range sal.PartialParentalLeaves {
+		parts = append(parts, newEventPart(l.EventID, EventEntryPartialParentalLeave, l.ID, sal.ID, sal.Name, &l.StartDate, &l.EndDate))
 	}
-	for _, accountID := range slices.Sorted(maps.Keys(startupShares)) {
-		ss := startupShares[accountID]
-		for _, r := range ss.rounds {
-			add(r.EventID, EventEntryInvestmentRound, r.ID, accountID, accountNames[accountID], &r.Date, nil)
-		}
-		for _, c := range ss.shareChanges {
-			add(c.EventID, EventEntryShareChange, c.ID, accountID, accountNames[accountID], &c.Date, nil)
-		}
+	for _, l := range sal.FullParentalLeaves {
+		parts = append(parts, newEventPart(l.EventID, EventEntryFullParentalLeave, l.ID, sal.ID, sal.Name, &l.StartDate, &l.EndDate))
+	}
+	for _, e := range sal.Ends {
+		parts = append(parts, newEventPart(e.EventID, EventEntrySalaryEnd, e.ID, sal.ID, sal.Name, &e.Date, nil))
 	}
 	return parts
+}
+
+// billParts are the Bill and every Bill Amount and end of it, each with the Event it is in.
+func billParts(b Bill) []eventPartIn {
+	parts := []eventPartIn{newEventPart(b.EventID, EventEntryBill, b.ID, b.ID, b.Name, nil, nil)}
+	for _, a := range b.Amounts {
+		parts = append(parts, newEventPart(a.EventID, EventEntryBillAmount, a.ID, b.ID, b.Name, &a.StartDate, a.EndDate))
+	}
+	for _, e := range b.Ends {
+		parts = append(parts, newEventPart(e.EventID, EventEntryBillEnd, e.ID, b.ID, b.Name, &e.Date, nil))
+	}
+	return parts
+}
+
+// startupShareParts are every stored investment round and share change, each at its own Event's date
+// with the Event it is in. They are listed on whatever account holds them, a Startup Share account or
+// one that no longer is: deleting their Event deletes them either way.
+func startupShareParts(stored storedEntries, dates map[string]date.Date, accountNames map[string]string) []eventPartIn {
+	var parts []eventPartIn
+	for _, row := range stored.investmentRounds {
+		r := investmentRoundFromDB(row, ownDate(dates, row.EventID))
+		parts = append(parts, newEventPart(r.EventID, EventEntryInvestmentRound, r.ID, r.AccountID, accountNames[r.AccountID], &r.Date, nil))
+	}
+	for _, row := range stored.shareChanges {
+		c := shareChangeFromDB(row, ownDate(dates, row.EventID))
+		parts = append(parts, newEventPart(c.EventID, EventEntryShareChange, c.ID, c.AccountID, accountNames[c.AccountID], &c.Date, nil))
+	}
+	return parts
+}
+
+// ownPlans are the plans with every Event at its own date, planned or not: every entry at the dates it
+// is stored after.
+func (s *Service) ownPlans(ctx context.Context) (*plans, error) {
+	events, err := s.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stored, err := s.loadStoredEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return placeEntries(events, stored, asStored(events))
+}
+
+// storedEventOf is the Event the stored row id is in, "" for none, or nil when there is no row id yet:
+// the entry is new.
+func storedEventOf[R any](ctx context.Context, id string, get func(context.Context, string) (R, error), eventID func(R) *string) (*string, error) {
+	if id == "" {
+		return nil, nil
+	}
+	row, err := get(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return ptr(ui.OrDefault(eventID(row))), nil
+}
+
+// bringParts puts the parts of the Salary or Bill ownerID that are in from, the Event it was in or ""
+// for none, in to, the Event it is in now, keeping the days they apply on: a Salary or Bill joining,
+// leaving or changing Event brings its parts along. Its parts in other Events, which they add to it,
+// stay where they are.
+func (s *Service) bringParts(ctx context.Context, kind EventEntryKind, ownerID, from, to string) error {
+	own, err := s.ownPlans(ctx)
+	if err != nil {
+		return err
+	}
+	var parts []eventPartIn
+	switch kind {
+	case EventEntrySalary:
+		if i := slices.IndexFunc(own.salaries, func(sal Salary) bool { return sal.ID == ownerID }); i >= 0 {
+			parts = salaryParts(own.salaries[i])
+		}
+	case EventEntryBill:
+		if i := slices.IndexFunc(own.bills, func(b Bill) bool { return b.ID == ownerID }); i >= 0 {
+			parts = billParts(own.bills[i])
+		}
+	}
+	for _, p := range parts {
+		if p.eventID == from && p.part.ID != ownerID {
+			if err := s.setEntryEvent(ctx, p.part.EventEntry, to); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Label names the kind of entry, such as "Full parental leave".
@@ -767,7 +846,13 @@ func (s *Service) loadEventEntries(ctx context.Context) (*eventEntries, error) {
 	if err != nil {
 		return nil, err
 	}
-	e.parts = eventPartsOf(own.salaries, own.bills, own.startupShares, e.accountNames())
+	for _, sal := range own.salaries {
+		e.parts = append(e.parts, salaryParts(sal)...)
+	}
+	for _, b := range own.bills {
+		e.parts = append(e.parts, billParts(b)...)
+	}
+	e.parts = append(e.parts, startupShareParts(stored, dates, e.accountNames())...)
 	return e, nil
 }
 

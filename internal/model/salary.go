@@ -258,14 +258,16 @@ func (s Salary) GenerateTransferTemplates() ([]TransferTemplate, error) {
 	return templates, nil
 }
 
-func salaryFromDB(s pdb.Salary) Salary {
+// salaryFromDB is the stored Salary s with its Event at at: a one-off's recurrence is a date of its
+// Event, as a one-off Transfer Template's is.
+func salaryFromDB(s pdb.Salary, at date.Date) Salary {
 	return Salary{
 		ID:               s.ID,
 		Name:             s.Name,
 		ToAccountID:      ui.OrDefault(s.ToAccountID),
 		PensionAccountID: ui.OrDefault(s.PensionAccountID),
 		Priority:         s.Priority,
-		Recurrence:       date.Cron(s.Recurrence),
+		Recurrence:       placeRecurrence(s.Recurrence, s.EventID != nil, at),
 		BudgetCategoryID: s.BudgetCategoryID,
 		Enabled:          s.Enabled,
 		Kommun:           s.Kommun,
@@ -310,8 +312,13 @@ func (s *Service) UpsertSalary(ctx context.Context, inp Salary) (Salary, error) 
 	if err := errors.Join(checkRequired("name", inp.Name), checkDatePattern("salary recurrence", inp.Recurrence), taxedBy); err != nil {
 		return Salary{}, err
 	}
-	if _, err := s.eventDate(ctx, inp.EventID); err != nil {
+	at, err := s.eventDate(ctx, inp.EventID)
+	if err != nil {
 		return Salary{}, err
+	}
+	previous, err := storedEventOf(ctx, inp.ID, s.q.GetSalary, func(sal pdb.Salary) *string { return sal.EventID })
+	if err != nil {
+		return Salary{}, fmt.Errorf("getting salary: %w", err)
 	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
@@ -323,7 +330,7 @@ func (s *Service) UpsertSalary(ctx context.Context, inp Salary) (Salary, error) 
 		ToAccountID:      ui.WithDefaultNull(inp.ToAccountID),
 		PensionAccountID: ui.WithDefaultNull(inp.PensionAccountID),
 		Priority:         inp.Priority,
-		Recurrence:       string(inp.Recurrence),
+		Recurrence:       storeRecurrence(inp.Recurrence, inp.EventID != "", at),
 		BudgetCategoryID: inp.BudgetCategoryID,
 		Enabled:          inp.Enabled,
 		Kommun:           inp.Kommun,
@@ -337,7 +344,12 @@ func (s *Service) UpsertSalary(ctx context.Context, inp Salary) (Salary, error) 
 	if err != nil {
 		return Salary{}, fmt.Errorf("upserting salary: %w", err)
 	}
-	return salaryFromDB(sal), nil
+	if previous != nil && *previous != inp.EventID {
+		if err := s.bringParts(ctx, EventEntrySalary, inp.ID, *previous, inp.EventID); err != nil {
+			return Salary{}, err
+		}
+	}
+	return salaryFromDB(sal, at), nil
 }
 
 // ListSalaries returns every Salary, loaded as loadSalaries loads it.

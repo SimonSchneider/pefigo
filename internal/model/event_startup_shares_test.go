@@ -91,17 +91,31 @@ func TestAnUnplannedEventsInvestmentRoundIsLeftOutOfTheBaseline(t *testing.T) {
 func TestTwoEventsMayEachAddAnInvestmentRoundOnTheSameDay(t *testing.T) {
 	svc := newTestService(t)
 	p := mustSeriesAPlans(t, svc, "2027-06-01", true)
-	// A second Event on the same day adds another round at +0: the one with the later ID applies.
+	// A second Event on the same day adds another round at +0: the one saved last applies, whatever
+	// its ID.
 	bridge := mustEvent(t, svc, model.EventInput{Name: "Bridge", Date: mustParseDate("2027-06-01")})
-	mustInvestmentRound(t, svc, model.InvestmentRoundInput{
-		ID: "zzz-bridge", AccountID: p.startup.ID, EventID: bridge.ID, DateOffset: days(0), Valuation: 9e6, PreMoneyShares: 10000, Investment: 1e6,
+	savedLater()
+	bridgeRound := mustInvestmentRound(t, svc, model.InvestmentRoundInput{
+		ID: "000-bridge", AccountID: p.startup.ID, EventID: bridge.ID, DateOffset: days(0), Valuation: 9e6, PreMoneyShares: 10000, Investment: 1e6,
 	})
 
 	rec := forecastThrough(t, svc, "2027-06-30", nil)
 	// 9 000 000 pre-money for 10 000 shares and 1 000 000 invested: 1 000 of 11 111.1 shares of 10 000 000.
 	if got, want := balanceOn(t, rec, p.startup.ID, "2027-06-28"), 1e7*1000/(10000+1e6/900); !approxEqual(got, want, 0.01) {
-		t.Errorf("expected the Bridge round, with the later ID, to apply: Startup Co worth %v, got %v", want, got)
+		t.Errorf("expected the Bridge round, saved last, to apply: Startup Co worth %v, got %v", want, got)
 	}
+	savedLater()
+	mustInvestmentRound(t, svc, model.InvestmentRoundInput{
+		ID: p.round.ID, AccountID: p.startup.ID, EventID: p.seriesA.ID, DateOffset: days(0), Valuation: 4e6, PreMoneyShares: 10000, Investment: 1e6,
+	})
+	rec = forecastThrough(t, svc, "2027-06-30", nil)
+	if got := balanceOn(t, rec, p.startup.ID, "2027-06-28"); !approxEqual(got, 400000, 0.01) {
+		t.Errorf("expected the Series A round to apply once it is saved again, after the Bridge's, got %v", got)
+	}
+	savedLater()
+	mustInvestmentRound(t, svc, model.InvestmentRoundInput{
+		ID: bridgeRound.ID, AccountID: p.startup.ID, EventID: bridge.ID, DateOffset: days(0), Valuation: 9e6, PreMoneyShares: 10000, Investment: 1e6,
+	})
 	moveEvent(t, svc, bridge, "2027-07-01")
 	rec = forecastThrough(t, svc, "2027-07-31", nil)
 	if got := balanceOn(t, rec, p.startup.ID, "2027-06-28"); !approxEqual(got, 400000, 0.01) {

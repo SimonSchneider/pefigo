@@ -130,6 +130,31 @@ func (q *Queries) DeleteInvestmentRound(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteOtherInvestmentRoundsOnDay = `-- name: DeleteOtherInvestmentRoundsOnDay :exec
+DELETE FROM investment_round
+WHERE account_id = ?1
+  AND date = ?2
+  AND event_id IS ?3
+  AND id != ?4
+`
+
+type DeleteOtherInvestmentRoundsOnDayParams struct {
+	AccountID string
+	Date      int64
+	EventID   *string
+	ID        string
+}
+
+func (q *Queries) DeleteOtherInvestmentRoundsOnDay(ctx context.Context, arg DeleteOtherInvestmentRoundsOnDayParams) error {
+	_, err := q.db.ExecContext(ctx, deleteOtherInvestmentRoundsOnDay,
+		arg.AccountID,
+		arg.Date,
+		arg.EventID,
+		arg.ID,
+	)
+	return err
+}
+
 const deleteShareChange = `-- name: DeleteShareChange :exec
 DELETE FROM share_change
 WHERE id = ?
