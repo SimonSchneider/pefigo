@@ -15,7 +15,7 @@ The first day a dated entry no longer applies: it applies up to, but not on, its
 _Avoid_: effective to, until, last day
 
 **End**:
-A dated part of a Salary or Bill: a day from which it pays or charges nothing. A Salary's or Bill's End Date is the earliest of its Ends.
+A dated part of a Transfer Template, Salary or Bill: a day from which it no longer applies, so it transfers, pays or charges nothing. Its End Date is the earliest of its Ends. An End may be in another Event than what it ends.
 _Avoid_: termination, stop, end entry
 
 ### Accounts
@@ -140,7 +140,7 @@ The plans for the future as they are stored, with no Scenario applied. Its Forec
 _Avoid_: current plan, base scenario, default scenario
 
 **Event**:
-A named group of related changes to the plans for the future that happen around one date, such as buying an apartment. It adds entries, such as Accounts, growth models, Transfer Templates, Salaries and Bills, and dated parts to Salaries, Bills and Startup Share Accounts outside it, such as parental leave, an investment round or an End. Every date in an Event is relative to the Event's date, so moving the Event moves every change in it. An Event is planned when the Baseline holds it at its date, grouping related entries there, and unplanned when only Scenarios use it. Its changes before the Forecast Start don't count, as Transfers before it are taken to be in the Snapshots.
+A named group of related changes to the plans for the future that happen around one date, such as buying an apartment. It adds entries, such as Accounts, growth models, Transfer Templates, Salaries and Bills, and dated parts to Transfer Templates, Salaries, Bills and Startup Share Accounts outside it, such as an End, parental leave or an investment round. Every date in an Event is relative to the Event's date, so moving the Event moves every change in it. An Event is planned when the Baseline holds it at its date, grouping related entries there, and unplanned when only Scenarios use it. Its changes before the Forecast Start don't count, as Transfers before it are taken to be in the Snapshots.
 _Avoid_: life event, decision, plan change, bundle
 
 **Scenario**:

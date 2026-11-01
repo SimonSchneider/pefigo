@@ -4,6 +4,8 @@ A Salary or Bill isn't given an End Date directly. It has Ends: dated parts like
 
 An End is edited on its Salary's or Bill's own page, with the Event select its other parts have. The Event's page lists the Ends an Event adds, as it lists everything the Event adds, but doesn't remove them. What the user found confusing in #157 was adding ends from the Event's page, not an Event ending something.
 
+[ADR 0010](0010-transfer-templates-end-at-the-earliest-of-their-ends.md) gives Transfer Templates Ends in the same way.
+
 This extends [ADR 0008](0008-event-entries-store-their-dates-as-offsets.md) beyond Accounts, growth models and Transfer Templates. A Salary or Bill, each of its dated parts (Salary Amounts, adjustments, parental leave, Bill Amounts and Ends), and each investment round and share change belongs to at most one Event. Each stores its dates as days after its own Event's date, which may differ from its Salary's or Bill's. A one-off Salary's recurrence, such as `2027-06-01`, is stored as a one-off Transfer Template's is.
 
 ## Considered Options
