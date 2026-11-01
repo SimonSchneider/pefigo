@@ -25,7 +25,7 @@ An account's balance recorded at the start of a day, before that day's Transfers
 _Avoid_: balance record
 
 **Startup Share Account**:
-An account holding shares in a startup. It has no Snapshots: its balance on a day is derived from its latest investment round with shares and a price per share, and its share changes, up to that day. Without such a round it is 0.
+An account holding shares in a startup. It has no Snapshots: its balance on a day is derived from its latest investment round with shares and a price per share, and its share changes, up to that day. Of several such rounds on one day, the one saved last counts. Without such a round it is 0.
 
 **Uncategorized**:
 The Account Type that accounts without one are grouped under.
