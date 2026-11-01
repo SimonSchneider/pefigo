@@ -31,6 +31,7 @@ type forecastInputIDs struct {
 	billAccount           string
 	bill                  string
 	billAmount            string
+	billEnd               string
 	investmentRound       string
 	shareChange           string
 	startupShareOption    string
@@ -82,6 +83,12 @@ func forecastInputMutations() []forecastInputMutation {
 		}},
 		{"DeleteBillAmount", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.DeleteBillAmount(ctx, ids.billAmount)
+		}},
+		{"UpsertBillEnd", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return discard(svc.UpsertBillEnd(ctx, model.BillEnd{BillID: ids.bill, Date: mustParseDate("2030-01-01")}))
+		}},
+		{"DeleteBillEnd", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
+			return svc.DeleteBillEnd(ctx, ids.billEnd)
 		}},
 		// category.go
 		{"UpsertCategory", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
@@ -457,6 +464,9 @@ func seedForecastInputs(t *testing.T, svc *model.Service) forecastInputIDs {
 	amt, err := svc.UpsertBillAmount(ctx, model.BillAmount{BillID: bill.ID, Amount: newFixedValue(100), Period: "monthly", StartDate: mustParseDate("2026-01-01")})
 	must("bill amount", err)
 	ids.billAmount = amt.ID
+	billEnd, err := svc.UpsertBillEnd(ctx, model.BillEnd{BillID: bill.ID, Date: mustParseDate("2031-01-01")})
+	must("bill end", err)
+	ids.billEnd = billEnd.ID
 
 	ir, err := svc.UpsertInvestmentRound(ctx, model.InvestmentRoundInput{
 		AccountID: acc.ID, Date: mustParseDate("2026-01-01"), Valuation: 1e6, PreMoneyShares: 1000, Investment: 1e5,

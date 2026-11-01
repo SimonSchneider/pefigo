@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -95,10 +96,30 @@ func (s *Service) DeleteEvent(ctx context.Context, id string) error {
 type EventEntryKind string
 
 const (
-	EventEntryAccount          EventEntryKind = "account"
-	EventEntryGrowthModel      EventEntryKind = "growth-model"
-	EventEntryTransferTemplate EventEntryKind = "transfer-template"
+	EventEntryAccount              EventEntryKind = "account"
+	EventEntryGrowthModel          EventEntryKind = "growth-model"
+	EventEntryTransferTemplate     EventEntryKind = "transfer-template"
+	EventEntrySalary               EventEntryKind = "salary"
+	EventEntrySalaryAmount         EventEntryKind = "salary-amount"
+	EventEntrySalaryAdjustment     EventEntryKind = "salary-adjustment"
+	EventEntryPartialParentalLeave EventEntryKind = "partial-parental-leave"
+	EventEntryFullParentalLeave    EventEntryKind = "full-parental-leave"
+	EventEntrySalaryEnd            EventEntryKind = "salary-end"
+	EventEntryBill                 EventEntryKind = "bill"
+	EventEntryBillAmount           EventEntryKind = "bill-amount"
+	EventEntryBillEnd              EventEntryKind = "bill-end"
+	EventEntryInvestmentRound      EventEntryKind = "investment-round"
+	EventEntryShareChange          EventEntryKind = "share-change"
 )
+
+// eventEntryKinds are every kind of entry an Event can add.
+var eventEntryKinds = []string{
+	string(EventEntryAccount), string(EventEntryGrowthModel), string(EventEntryTransferTemplate),
+	string(EventEntrySalary), string(EventEntrySalaryAmount), string(EventEntrySalaryAdjustment),
+	string(EventEntryPartialParentalLeave), string(EventEntryFullParentalLeave), string(EventEntrySalaryEnd),
+	string(EventEntryBill), string(EventEntryBillAmount), string(EventEntryBillEnd),
+	string(EventEntryInvestmentRound), string(EventEntryShareChange),
+}
 
 // EventEntry names an entry an Event can add or end.
 type EventEntry struct {
@@ -118,7 +139,7 @@ func ParseEventEntry(s string) (EventEntry, error) {
 	if !ok || id == "" {
 		return EventEntry{}, fmt.Errorf("%w: %q is not an entry", ErrInvalidInput, s)
 	}
-	if err := checkOneOf("entry kind", kind, string(EventEntryAccount), string(EventEntryGrowthModel), string(EventEntryTransferTemplate)); err != nil {
+	if err := checkOneOf("entry kind", kind, eventEntryKinds...); err != nil {
 		return EventEntry{}, err
 	}
 	return entry, nil
@@ -371,10 +392,52 @@ func (s *Service) setEntryEvent(ctx context.Context, entry EventEntry, eventID s
 		if _, err := s.UpsertTransferTemplate(ctx, tt); err != nil {
 			return err
 		}
+	case EventEntrySalary:
+		return rejoin(ctx, entry.ID, eventID, s.GetSalary, s.UpsertSalary, func(v *Salary, id string) { v.EventID = id })
+	case EventEntrySalaryAmount:
+		return rejoin(ctx, entry.ID, eventID, s.GetSalaryAmount, s.UpsertSalaryAmount, func(v *SalaryAmount, id string) { v.EventID = id })
+	case EventEntrySalaryAdjustment:
+		return rejoin(ctx, entry.ID, eventID, s.GetSalaryAdjustment, s.UpsertSalaryAdjustment, func(v *SalaryAdjustment, id string) { v.EventID = id })
+	case EventEntryPartialParentalLeave:
+		return rejoin(ctx, entry.ID, eventID, s.GetPartialParentalLeave, s.UpsertPartialParentalLeave, func(v *PartialParentalLeave, id string) { v.EventID = id })
+	case EventEntryFullParentalLeave:
+		return rejoin(ctx, entry.ID, eventID, s.GetFullParentalLeave, s.UpsertFullParentalLeave, func(v *FullParentalLeave, id string) { v.EventID = id })
+	case EventEntrySalaryEnd:
+		return rejoin(ctx, entry.ID, eventID, s.GetSalaryEnd, s.UpsertSalaryEnd, func(v *SalaryEnd, id string) { v.EventID = id })
+	case EventEntryBill:
+		return rejoin(ctx, entry.ID, eventID, s.GetBill, s.UpsertBill, func(v *Bill, id string) { v.EventID = id })
+	case EventEntryBillAmount:
+		return rejoin(ctx, entry.ID, eventID, s.GetBillAmount, s.UpsertBillAmount, func(v *BillAmount, id string) { v.EventID = id })
+	case EventEntryBillEnd:
+		return rejoin(ctx, entry.ID, eventID, s.GetBillEnd, s.UpsertBillEnd, func(v *BillEnd, id string) { v.EventID = id })
+	case EventEntryInvestmentRound:
+		get := func(ctx context.Context, id string) (InvestmentRoundInput, error) {
+			ir, err := s.GetInvestmentRound(ctx, id)
+			return ir.input(), err
+		}
+		return rejoin(ctx, entry.ID, eventID, get, s.UpsertInvestmentRound, func(v *InvestmentRoundInput, id string) { v.EventID = id })
+	case EventEntryShareChange:
+		get := func(ctx context.Context, id string) (ShareChangeInput, error) {
+			sc, err := s.GetShareChange(ctx, id)
+			return sc.input(), err
+		}
+		return rejoin(ctx, entry.ID, eventID, get, s.UpsertShareChange, func(v *ShareChangeInput, id string) { v.EventID = id })
 	default:
 		return fmt.Errorf("%w: %s can't be in an event", ErrInvalidInput, entry)
 	}
 	return nil
+}
+
+// rejoin saves the entry id, as get reads it at its dates, in the Event eventID that setEvent puts it
+// in. Its dates are kept: save stores them again, as days after the new Event's date.
+func rejoin[T, R any](ctx context.Context, id, eventID string, get func(context.Context, string) (T, error), save func(context.Context, T) (R, error), setEvent func(*T, string)) error {
+	v, err := get(ctx, id)
+	if err != nil {
+		return err
+	}
+	setEvent(&v, eventID)
+	_, err = save(ctx, v)
+	return err
 }
 
 // storedEntries are every stored entry an Event can add, as stored: the dates of an Event's entries
@@ -521,6 +584,139 @@ type EventView struct {
 	Accounts          []Account
 	GrowthModels      []EventGrowthModel
 	TransferTemplates []EventTransferTemplate
+	// Parts are the Salaries and Bills it adds, and what it adds to Salaries, Bills and Startup Share
+	// accounts, in or outside it: by kind and date.
+	Parts []EventPart
+}
+
+// EventPart is an entry an Event adds that makes up a Salary, Bill or Startup Share account: a Salary
+// or Bill, a Salary Amount, adjustment, parental leave or end of a Salary, a Bill Amount or end of a
+// Bill, or an investment round or share change.
+type EventPart struct {
+	EventEntry
+	// OwnerID and OwnerName are the Salary, Bill or account the part makes up, or the Salary or Bill
+	// itself.
+	OwnerID   string
+	OwnerName string
+	// StartDate is the part's first day, and EndDate its End of a parental leave or Bill Amount. A
+	// Salary or Bill has neither.
+	StartDate *date.Date
+	EndDate   *date.Date
+	eventDate date.Date
+}
+
+// StartOffset is how long after the Event's date the part starts.
+func (p EventPart) StartOffset() date.Duration {
+	if p.StartDate == nil {
+		return 0
+	}
+	return p.StartDate.Sub(p.eventDate)
+}
+
+// EndOffset is how long after the Event's date the part ends, or 0 without an End Date.
+func (p EventPart) EndOffset() date.Duration {
+	if p.EndDate == nil {
+		return 0
+	}
+	return p.EndDate.Sub(p.eventDate)
+}
+
+// eventPartsOf are every part of salaries, bills and startupShares, each at its own Event's date with
+// the Event it is in.
+func eventPartsOf(salaries []Salary, bills []Bill, startupShares map[string]*startupShares, accountNames map[string]string) []eventPartIn {
+	var parts []eventPartIn
+	add := func(eventID string, kind EventEntryKind, id, ownerID, ownerName string, start, end *date.Date) {
+		parts = append(parts, eventPartIn{eventID: eventID, part: EventPart{
+			EventEntry: EventEntry{Kind: kind, ID: id}, OwnerID: ownerID, OwnerName: ownerName, StartDate: start, EndDate: end,
+		}})
+	}
+	for _, sal := range salaries {
+		add(sal.EventID, EventEntrySalary, sal.ID, sal.ID, sal.Name, nil, nil)
+		for _, a := range sal.Amounts {
+			add(a.EventID, EventEntrySalaryAmount, a.ID, sal.ID, sal.Name, &a.StartDate, nil)
+		}
+		for _, a := range sal.Adjustments {
+			add(a.EventID, EventEntrySalaryAdjustment, a.ID, sal.ID, sal.Name, &a.ValidFrom, nil)
+		}
+		for _, l := range sal.PartialParentalLeaves {
+			add(l.EventID, EventEntryPartialParentalLeave, l.ID, sal.ID, sal.Name, &l.StartDate, &l.EndDate)
+		}
+		for _, l := range sal.FullParentalLeaves {
+			add(l.EventID, EventEntryFullParentalLeave, l.ID, sal.ID, sal.Name, &l.StartDate, &l.EndDate)
+		}
+		for _, e := range sal.Ends {
+			add(e.EventID, EventEntrySalaryEnd, e.ID, sal.ID, sal.Name, &e.Date, nil)
+		}
+	}
+	for _, b := range bills {
+		add(b.EventID, EventEntryBill, b.ID, b.ID, b.Name, nil, nil)
+		for _, a := range b.Amounts {
+			add(a.EventID, EventEntryBillAmount, a.ID, b.ID, b.Name, &a.StartDate, a.EndDate)
+		}
+		for _, e := range b.Ends {
+			add(e.EventID, EventEntryBillEnd, e.ID, b.ID, b.Name, &e.Date, nil)
+		}
+	}
+	for _, accountID := range slices.Sorted(maps.Keys(startupShares)) {
+		ss := startupShares[accountID]
+		for _, r := range ss.rounds {
+			add(r.EventID, EventEntryInvestmentRound, r.ID, accountID, accountNames[accountID], &r.Date, nil)
+		}
+		for _, c := range ss.shareChanges {
+			add(c.EventID, EventEntryShareChange, c.ID, accountID, accountNames[accountID], &c.Date, nil)
+		}
+	}
+	return parts
+}
+
+// Label names the kind of entry, such as "Full parental leave".
+func (k EventEntryKind) Label() string {
+	switch k {
+	case EventEntryAccount:
+		return "Account"
+	case EventEntryGrowthModel:
+		return "Growth model"
+	case EventEntryTransferTemplate:
+		return "Transfer Template"
+	case EventEntrySalary:
+		return "Salary"
+	case EventEntrySalaryAmount:
+		return "Salary Amount"
+	case EventEntrySalaryAdjustment:
+		return "Salary adjustment"
+	case EventEntryPartialParentalLeave:
+		return "Partial parental leave"
+	case EventEntryFullParentalLeave:
+		return "Full parental leave"
+	case EventEntrySalaryEnd:
+		return "Salary end"
+	case EventEntryBill:
+		return "Bill"
+	case EventEntryBillAmount:
+		return "Bill Amount"
+	case EventEntryBillEnd:
+		return "Bill end"
+	case EventEntryInvestmentRound:
+		return "Investment round"
+	case EventEntryShareChange:
+		return "Share change"
+	}
+	return string(k)
+}
+
+// Name names the part by its kind, owner and first day, such as "Full parental leave of Salary A from
+// 2027-06-01".
+func (p EventPart) Name() string {
+	if p.StartDate == nil {
+		return p.OwnerName
+	}
+	return fmt.Sprintf("%s of %s from %s", p.Kind.Label(), p.OwnerName, p.StartDate)
+}
+
+// eventPartIn is a part with the Event it is in, or "".
+type eventPartIn struct {
+	eventID string
+	part    EventPart
 }
 
 // growthModelName names a growth model of the account accountName.
@@ -534,6 +730,7 @@ type eventEntries struct {
 	accounts          []Account
 	growthModels      []GrowthModel
 	transferTemplates []TransferTemplate
+	parts             []eventPartIn
 	stored            storedEntries
 }
 
@@ -565,6 +762,11 @@ func (s *Service) loadEventEntries(ctx context.Context) (*eventEntries, error) {
 		}
 		e.transferTemplates = append(e.transferTemplates, tt)
 	}
+	own, err := placeEntries(events, stored, asStored(events))
+	if err != nil {
+		return nil, err
+	}
+	e.parts = eventPartsOf(own.salaries, own.bills, own.startupShares, e.accountNames())
 	return e, nil
 }
 
@@ -603,6 +805,20 @@ func (e *eventEntries) view(ev Event) EventView {
 			v.TransferTemplates = append(v.TransferTemplates, EventTransferTemplate{TransferTemplate: tt, eventDate: ev.Date})
 		}
 	}
+	for _, p := range e.parts {
+		if p.eventID == ev.ID {
+			part := p.part
+			part.eventDate = ev.Date
+			v.Parts = append(v.Parts, part)
+		}
+	}
+	slices.SortStableFunc(v.Parts, func(a, b EventPart) int {
+		return cmp.Or(
+			cmp.Compare(slices.Index(eventEntryKinds, string(a.Kind)), slices.Index(eventEntryKinds, string(b.Kind))),
+			cmp.Compare(ptrOrZero(a.StartDate), ptrOrZero(b.StartDate)),
+			cmp.Compare(a.OwnerName, b.OwnerName),
+		)
+	})
 	slices.SortStableFunc(v.GrowthModels, func(a, b EventGrowthModel) int {
 		return cmp.Or(cmp.Compare(a.StartDate, b.StartDate), cmp.Compare(a.AccountName, b.AccountName))
 	})
@@ -710,6 +926,19 @@ func (s *Service) GetEventDeletePageData(ctx context.Context, id string) (*Event
 			})
 		}
 	}
+	// The parts in other Events, or none, of the Salaries, Bills and accounts it adds are deleted with
+	// them.
+	owners := maps.Clone(accounts)
+	for _, p := range v.Event.Parts {
+		if p.Kind == EventEntrySalary || p.Kind == EventEntryBill {
+			owners[p.OwnerID] = true
+		}
+	}
+	for _, p := range e.parts {
+		if p.eventID != ev.ID && owners[p.part.OwnerID] && p.part.Kind != EventEntrySalary && p.part.Kind != EventEntryBill {
+			v.AlsoDeleted = append(v.AlsoDeleted, NamedEventEntry{EventEntry: p.part.EventEntry, Name: p.part.Name(), EventName: eventNames[p.eventID]})
+		}
+	}
 	options, err := s.q.ListAllStartupShareOptions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing startup share options: %w", err)
@@ -722,4 +951,13 @@ func (s *Service) GetEventDeletePageData(ctx context.Context, id string) (*Event
 		}
 	}
 	return v, nil
+}
+
+// ptrOrZero is *v, or the zero value for nil.
+func ptrOrZero[T any](v *T) T {
+	if v == nil {
+		var zero T
+		return zero
+	}
+	return *v
 }

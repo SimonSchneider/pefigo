@@ -65,6 +65,9 @@ type plans struct {
 	// salaries are the placed Salaries, by name and ID, each with its placed parts by date and ID. A
 	// Gross Salary isn't segmented yet.
 	salaries []Salary
+	// bills are the placed Bills, by Bill account, name and ID, each with its placed Bill Amounts and
+	// ends by date and ID. Their Bill Amounts aren't converted to the Default Currency yet.
+	bills []Bill
 	// startupShareAccounts are every Startup Share account, placed or not, by account ID.
 	startupShareAccounts map[string]StartupShareAccount
 	// startupShares are the placed Startup Share accounts, by account ID, with their placed investment
@@ -166,7 +169,47 @@ func placeEntries(events []Event, stored storedEntries, placements EventPlacemen
 	if err := placeSalaries(p, stored, placed); err != nil {
 		return nil, err
 	}
+	if err := placeBills(p, stored, placed); err != nil {
+		return nil, err
+	}
 	return p, nil
+}
+
+// placeBills places the Bills of stored whose Events placed places, each with the Bill Amounts and ends
+// whose own Events it places, as placeSalaries places Salaries.
+func placeBills(p *plans, stored storedEntries, placed func(eventID *string) (date.Date, bool)) error {
+	index := make(map[string]int, len(stored.bills))
+	for _, row := range stored.bills {
+		if _, ok := placed(row.EventID); ok {
+			index[row.ID] = len(p.bills)
+			p.bills = append(p.bills, billFromDB(row))
+		}
+	}
+	part := func(billID string, eventID *string) (b *Bill, day date.Date, ok bool) {
+		i, found := index[billID]
+		if day, ok = placed(eventID); !ok || !found {
+			return nil, 0, false
+		}
+		return &p.bills[i], day, true
+	}
+	for _, row := range stored.billAmounts {
+		if b, day, ok := part(row.BillID, row.EventID); ok {
+			amt, err := billAmountFromDB(row, day)
+			if err != nil {
+				return err
+			}
+			b.Amounts = append(b.Amounts, amt)
+		}
+	}
+	for _, row := range stored.billEnds {
+		if b, day, ok := part(row.BillID, row.EventID); ok {
+			b.Ends = append(b.Ends, billEndFromDB(row, day))
+		}
+	}
+	for i := range p.bills {
+		sortBillParts(&p.bills[i])
+	}
+	return nil
 }
 
 // placeSalaries places the Salaries of stored whose Events placed places, each with the parts whose

@@ -39,7 +39,7 @@ func (s *Service) transferSchedule(ctx context.Context, p *plans) (*TransferSche
 	if err != nil {
 		return nil, fmt.Errorf("generating salary transfer templates: %w", err)
 	}
-	billTemplates, err := s.generateBillTransferTemplates(ctx)
+	billTemplates, err := s.billTransferTemplates(ctx, p.bills)
 	if err != nil {
 		return nil, fmt.Errorf("generating bill transfer templates: %w", err)
 	}
