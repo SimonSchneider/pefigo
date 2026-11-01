@@ -196,16 +196,22 @@ func (s *Service) ListAccountGrowthModels(ctx context.Context, accountID string)
 	if err != nil {
 		return nil, err
 	}
-	gmList := make([]GrowthModel, len(gms))
-	for i, g := range gms {
+	return growthModelsOf(gms, dates)
+}
+
+// growthModelsOf are the stored growth models, each at its own Event's date of dates, in the order the
+// forecast applies them.
+func growthModelsOf(rows []pdb.GrowthModel, dates map[string]date.Date) ([]GrowthModel, error) {
+	gms := make([]GrowthModel, len(rows))
+	for i, g := range rows {
 		gm, err := growthModelFromDB(g, ownDate(dates, g.EventID))
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert growth model from db: %w", err)
 		}
-		gmList[i] = gm
+		gms[i] = gm
 	}
-	slices.SortStableFunc(gmList, compareGrowthModels)
-	return gmList, nil
+	slices.SortStableFunc(gms, compareGrowthModels)
+	return gms, nil
 }
 
 // compareGrowthModels orders growth models by Start Date, then ID: the order the forecast applies them

@@ -47,8 +47,9 @@ type Salary struct {
 	segments    []SalarySegment
 	segmentsErr error
 	// paid is how a Salary loaded for its pages, whose parts are each at their own Event's date, is
-	// paid: as the Baseline pays it, or, when the Baseline leaves it out with its Event, as it would be
-	// paid with its Event at its own date. It is nil for a Salary as it is paid. See Salary.payment.
+	// paid: as the Baseline pays it, or, when the Baseline leaves it out with its unplanned Event, as it
+	// would be paid with that Event planned. It is nil for a Salary as it is paid. See placings.shownBy
+	// and Salary.payment.
 	paid *Salary
 	// leftOut is whether the Baseline leaves the loaded Salary out with its unplanned Event.
 	leftOut bool
@@ -68,7 +69,7 @@ type SalaryEnd struct {
 }
 
 // payment is the Salary as it is paid: as loaded for its pages, how the Baseline pays it, or how it
-// would be paid with its unplanned Event at its date. It is the Salary itself otherwise.
+// would be paid with its unplanned Event planned. It is the Salary itself otherwise.
 func (s Salary) payment() Salary {
 	if s.paid != nil {
 		return *s.paid
@@ -77,7 +78,7 @@ func (s Salary) payment() Salary {
 }
 
 // InBaseline reports whether the Baseline pays the Salary: not when its Event is unplanned. Its pages
-// then show what it would pay with its Event at its date.
+// then show what it would pay with that Event planned.
 func (s Salary) InBaseline() bool {
 	return !s.leftOut
 }
@@ -362,56 +363,43 @@ func (s *Service) GetSalary(ctx context.Context, id string) (Salary, error) {
 }
 
 // loadSalaries returns every Salary, or only the Salary id when id isn't empty, with every part of it
-// at its own Event's date, as its forms edit it, and with the Events it shows. What it pays is how the
-// Baseline pays it: its Salary Segments and current amount leave out what unplanned Events add or end.
-// A Salary in an unplanned Event pays what it would with every Event at its own date. A Gross Salary is
-// segmented once, or carries the error that kept it from being segmented.
+// at its own Event's date, as its forms edit it, and with the Events it shows. What it pays is what the
+// plans its Event shows it by pay (see placings.shownBy): the Baseline's, which leave out what unplanned
+// Events add or end, or for a Salary in an unplanned Event, the Baseline with that Event planned. A
+// Gross Salary is segmented once, or carries the error that kept it from being segmented.
 func (s *Service) loadSalaries(ctx context.Context, id string) (loadedSalaries, error) {
-	events, err := s.ListEvents(ctx)
+	pl, err := s.loadPlacings(ctx)
 	if err != nil {
 		return loadedSalaries{}, err
 	}
-	stored, err := s.loadStoredEntries(ctx)
+	own, err := pl.atOwnDates()
 	if err != nil {
 		return loadedSalaries{}, err
 	}
-	own, err := placeEntries(events, stored, asStored(events))
-	if err != nil {
-		return loadedSalaries{}, err
-	}
-	baseline, err := placeEntries(events, stored, nil)
-	if err != nil {
-		return loadedSalaries{}, err
-	}
-	inBaseline := make(map[string]bool, len(baseline.salaries))
-	for _, sal := range baseline.salaries {
-		inBaseline[sal.ID] = true
-	}
-	paying := slices.Clone(baseline.salaries)
-	for _, sal := range own.salaries {
-		if !inBaseline[sal.ID] {
-			paying = append(paying, sal)
-		}
-	}
-	if err := s.segmentSalaries(ctx, paying); err != nil {
-		return loadedSalaries{}, err
-	}
-	paid := make(map[string]*Salary, len(paying))
-	for i := range paying {
-		paid[paying[i].ID] = &paying[i]
-	}
-	var salaries []Salary
+	var salaries, paid []Salary
 	for _, sal := range own.salaries {
 		if id != "" && sal.ID != id {
 			continue
 		}
-		sal.paid, sal.leftOut = paid[sal.ID], !inBaseline[sal.ID]
-		salaries = append(salaries, sal)
+		p, inBaseline, err := pl.shownBy(sal.EventID)
+		if err != nil {
+			return loadedSalaries{}, err
+		}
+		// Its Event's plans place every Salary shownBy shows by them.
+		shown, _ := p.salary(sal.ID)
+		sal.leftOut = !inBaseline
+		salaries, paid = append(salaries, sal), append(paid, shown)
 	}
 	if id != "" && len(salaries) == 0 {
 		return loadedSalaries{}, fmt.Errorf("getting salary: %w", sql.ErrNoRows)
 	}
-	return loadedSalaries{salaries: salaries, events: events, accounts: accountsListFromDB(stored.accounts)}, nil
+	if err := s.segmentSalaries(ctx, paid); err != nil {
+		return loadedSalaries{}, err
+	}
+	for i := range salaries {
+		salaries[i].paid = &paid[i]
+	}
+	return loadedSalaries{salaries: salaries, events: pl.events, accounts: accountsListFromDB(pl.stored.accounts)}, nil
 }
 
 // loadedSalaries are Salaries loaded for their pages, with the Events and accounts they were loaded
@@ -1032,20 +1020,28 @@ func (s *Service) GetSalaryEditPageData(ctx context.Context, id string) (*Salary
 }
 
 // salaryTransferTemplates are what salaries, with the Events placed, pay: each Gross Salary segmented.
+// It fails on the first Salary whose payments can't be worked out.
 func (s *Service) salaryTransferTemplates(ctx context.Context, salaries []Salary) ([]TransferTemplate, error) {
+	payments, err := s.salaryPayments(ctx, salaries)
+	if err != nil {
+		return nil, err
+	}
+	return transferTemplatesOf(payments)
+}
+
+// salaryPayments are what each of salaries, with the Events placed, pays, each Gross Salary segmented,
+// or why it can't be worked out, such as a Gross Salary whose Net Salary is unknown.
+func (s *Service) salaryPayments(ctx context.Context, salaries []Salary) ([]payment, error) {
 	salaries = slices.Clone(salaries)
 	if err := s.segmentSalaries(ctx, salaries); err != nil {
 		return nil, err
 	}
-	var templates []TransferTemplate
-	for _, salary := range salaries {
-		salaryTemplates, err := salary.GenerateTransferTemplates()
-		if err != nil {
-			return nil, err
-		}
-		templates = append(templates, salaryTemplates...)
+	payments := make([]payment, len(salaries))
+	for i, sal := range salaries {
+		payments[i] = payment{name: sal.Name, eventID: sal.EventID, source: TransferTemplateSource{Type: TransferSourceSalary, EntityID: sal.ID, Label: sal.Name}}
+		payments[i].templates, payments[i].err = sal.GenerateTransferTemplates()
 	}
-	return templates, nil
+	return payments, nil
 }
 
 // segment splits a Gross Salary into its Salary Segments, from its first Salary Amount's Start Date.

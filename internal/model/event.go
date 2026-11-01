@@ -702,15 +702,11 @@ func startupShareParts(stored storedEntries, dates map[string]date.Date, account
 // ownPlans are the plans with every Event at its own date, planned or not: every entry at the dates it
 // is stored after.
 func (s *Service) ownPlans(ctx context.Context) (*plans, error) {
-	events, err := s.ListEvents(ctx)
+	pl, err := s.loadPlacings(ctx)
 	if err != nil {
 		return nil, err
 	}
-	stored, err := s.loadStoredEntries(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return placeEntries(events, stored, asStored(events))
+	return pl.atOwnDates()
 }
 
 // storedEventOf is the Event the stored row id is in, "" for none, or nil when there is no row id yet:
@@ -825,18 +821,11 @@ type eventEntries struct {
 }
 
 func (s *Service) loadEventEntries(ctx context.Context) (*eventEntries, error) {
-	events, err := s.ListEvents(ctx)
+	pl, err := s.loadPlacings(ctx)
 	if err != nil {
 		return nil, err
 	}
-	stored, err := s.loadStoredEntries(ctx)
-	if err != nil {
-		return nil, err
-	}
-	dates := make(map[string]date.Date, len(events))
-	for _, ev := range events {
-		dates[ev.ID] = ev.Date
-	}
+	events, stored, dates := pl.events, pl.stored, pl.eventDates()
 	e := &eventEntries{events: events, stored: stored, accounts: accountsListFromDB(stored.accounts)}
 	for _, row := range stored.growthModels {
 		gm, err := growthModelFromDB(row, ownDate(dates, row.EventID))
@@ -852,7 +841,7 @@ func (s *Service) loadEventEntries(ctx context.Context) (*eventEntries, error) {
 		}
 		e.transferTemplates = append(e.transferTemplates, tt)
 	}
-	own, err := placeEntries(events, stored, asStored(events))
+	own, err := pl.atOwnDates()
 	if err != nil {
 		return nil, err
 	}

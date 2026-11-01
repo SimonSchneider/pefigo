@@ -119,12 +119,25 @@ templ billsTable(view *model.BillsView, bills []model.Bill) {
 									<span class="badge badge-ghost badge-xs">Monthly</span>
 								}
 							</td>
-							<td class="text-right">
-								@BalanceBadge(bill.CurrentAmount(), false, "")
-							</td>
-							<td class="text-right">
-								@BalanceBadge(bill.YearlyAmount(), false, "")
-							</td>
+							if bill.ChargeError() != nil {
+								<td colspan="2" class="text-right text-xs text-warning" title={ bill.ChargeError().Error() }>
+									What it would charge is unavailable
+								</td>
+							} else if bill.InBaseline() {
+								<td class="text-right">
+									@BalanceBadge(bill.CurrentAmount(), false, "")
+								</td>
+								<td class="text-right">
+									@BalanceBadge(bill.YearlyAmount(), false, "")
+								</td>
+							} else {
+								<td class="text-right">
+									@WouldPayBadge(bill.CurrentAmount(), true)
+								</td>
+								<td class="text-right">
+									@WouldPayBadge(bill.YearlyAmount(), false)
+								</td>
+							}
 							<td>
 								if bill.Enabled {
 									<span class="badge badge-success badge-xs">Enabled</span>
@@ -274,7 +287,12 @@ templ BillEditContent(view *model.BillEditView) {
 			<div>
 				if view.IsEdit() && !view.Bill.InBaseline() {
 					<div role="alert" class="alert alert-info alert-soft text-sm mb-3">
-						<span>Its Event is unplanned, so the Baseline charges nothing of this Bill. It shows what the Bill would charge with its Event at its date.</span>
+						<span>Its Event is unplanned, so the Baseline charges nothing of this Bill. It shows what the Bill would charge with its Event planned.</span>
+					</div>
+				}
+				if err := view.Bill.ChargeError(); err != nil {
+					<div role="alert" class="alert alert-warning alert-soft text-sm mb-3">
+						<span>What the Bill would charge is unavailable: { err.Error() }</span>
 					</div>
 				}
 				<form action={ "/bill-items/?next=" + templ.EscapeString("/bill-items/"+view.Bill.ID+"/edit") } method="post">

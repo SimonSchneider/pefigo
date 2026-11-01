@@ -41,11 +41,13 @@ type Bill struct {
 	Amounts []BillAmount
 	// Ends are the days the Bill may end on: no Bill Amount applies from the earliest of them.
 	Ends []BillEnd
-	// baseline is how the Baseline charges a Bill loaded for its pages, whose Bill Amounts and ends are
-	// each at their own Event's date. It is nil for a Bill as it is charged, and for one the Baseline
-	// leaves out with its Event, which is charged as it would be with its Event at its own date. See
-	// Bill.charged.
-	baseline *Bill
+	// charges is how a Bill loaded for its pages, whose Bill Amounts and ends are each at their own
+	// Event's date, is charged: as the Baseline charges it, or, when the Baseline leaves it out with its
+	// unplanned Event, as it would be charged with that Event planned. It is nil for a Bill as it is
+	// charged. See placings.shownBy and Bill.charged.
+	charges *Bill
+	// chargeErr is why what a Bill of an unplanned Event would charge can't be worked out.
+	chargeErr error
 	// leftOut is whether the Baseline leaves the loaded Bill out with its unplanned Event.
 	leftOut bool
 }
@@ -63,19 +65,26 @@ type BillEnd struct {
 	OffsetEventID string
 }
 
-// charged is the Bill as it is charged: how the Baseline charges it when it is loaded for its pages,
-// and the Bill itself otherwise, with its Event at its own date when the Baseline leaves it out.
+// charged is the Bill as it is charged: as loaded for its pages, how the Baseline charges it, or how it
+// would be charged with its unplanned Event planned. It is the Bill itself otherwise.
 func (b Bill) charged() Bill {
-	if b.baseline != nil {
-		return *b.baseline
+	if b.charges != nil {
+		return *b.charges
 	}
 	return b
 }
 
 // InBaseline reports whether the Baseline charges the Bill: not when its Event is unplanned. Its pages
-// then show what it would charge with its Event at its date.
+// then show what it would charge with that Event planned.
 func (b Bill) InBaseline() bool {
 	return !b.leftOut
+}
+
+// ChargeError is why what a Bill of an unplanned Event would charge can't be worked out, such as a Bill
+// Amount in a currency whose Exchange Rate can't be fetched, or nil. Such a Bill shows nothing charged.
+// What the Baseline charges always can be: a page that can't work it out fails.
+func (b Bill) ChargeError() error {
+	return b.chargeErr
 }
 
 // End is the first day no Bill Amount of the Bill applies: the earliest of its Ends, or nil without
@@ -339,26 +348,19 @@ func (a BillAmount) dayAndID() (date.Date, string) { return a.StartDate, a.ID }
 func (e BillEnd) dayAndID() (date.Date, string)    { return e.Date, e.ID }
 
 // loadBillAccounts returns every Bill account with its Bills, each with its Bill Amounts and ends at
-// their own Event's dates, as its forms edit them, with the Events and accounts its pages show. What
-// a Bill charges is how the Baseline charges it: it leaves out what unplanned Events add or end, and a
-// Bill in an unplanned Event charges what it would with every Event at its own date. Every Bill Amount
-// has its amount in the Default Currency: one in another currency converted at the latest Exchange
-// Rate. It fails when the Default Currency can't be read, or when no Exchange Rate needed was ever
-// fetched.
+// their own Event's dates, as its forms edit them, with the Events and accounts its pages show. What a
+// Bill charges is what the plans its Event shows it by charge (see placings.shownBy): the Baseline's,
+// which leave out what unplanned Events add or end, or for a Bill in an unplanned Event, the Baseline
+// with that Event planned. It is in the Default Currency: a Bill Amount in another currency converted
+// at the latest Exchange Rate. It fails when the Default Currency can't be read, or when no Exchange
+// Rate the Baseline needs was ever fetched. A Bill of an unplanned Event whose rate wasn't charges
+// nothing, and says why.
 func (s *Service) loadBillAccounts(ctx context.Context) (loadedBillAccounts, error) {
-	events, err := s.ListEvents(ctx)
+	pl, err := s.loadPlacings(ctx)
 	if err != nil {
 		return loadedBillAccounts{}, err
 	}
-	stored, err := s.loadStoredEntries(ctx)
-	if err != nil {
-		return loadedBillAccounts{}, err
-	}
-	own, err := placeEntries(events, stored, asStored(events))
-	if err != nil {
-		return loadedBillAccounts{}, err
-	}
-	baseline, err := placeEntries(events, stored, nil)
+	own, err := pl.atOwnDates()
 	if err != nil {
 		return loadedBillAccounts{}, err
 	}
@@ -366,25 +368,27 @@ func (s *Service) loadBillAccounts(ctx context.Context) (loadedBillAccounts, err
 	if err != nil {
 		return loadedBillAccounts{}, err
 	}
-	if err := convert(own.bills); err != nil {
-		return loadedBillAccounts{}, err
+	bills := slices.Clone(own.bills)
+	for i, b := range bills {
+		p, inBaseline, err := pl.shownBy(b.EventID)
+		if err != nil {
+			return loadedBillAccounts{}, err
+		}
+		// Its Event's plans place every Bill shownBy shows by them.
+		charged, _ := p.bill(b.ID)
+		if err := convert(&charged); err != nil {
+			if inBaseline {
+				return loadedBillAccounts{}, err
+			}
+			charged.Amounts, bills[i].chargeErr = nil, err
+		}
+		bills[i].charges, bills[i].leftOut = &charged, !inBaseline
 	}
-	if err := convert(baseline.bills); err != nil {
-		return loadedBillAccounts{}, err
-	}
-	charged := make(map[string]*Bill, len(baseline.bills))
-	for i := range baseline.bills {
-		charged[baseline.bills[i].ID] = &baseline.bills[i]
-	}
-	for i, b := range own.bills {
-		own.bills[i].baseline = charged[b.ID]
-		own.bills[i].leftOut = charged[b.ID] == nil
-	}
-	accounts, err := s.billAccountsOf(ctx, own.bills)
+	accounts, err := s.billAccountsOf(ctx, bills)
 	if err != nil {
 		return loadedBillAccounts{}, err
 	}
-	return loadedBillAccounts{billAccounts: accounts, events: events, accounts: accountsListFromDB(stored.accounts)}, nil
+	return loadedBillAccounts{billAccounts: accounts, events: pl.events, accounts: accountsListFromDB(pl.stored.accounts)}, nil
 }
 
 // loadedBillAccounts are Bill accounts loaded for their pages, with the Events and accounts they were
@@ -411,31 +415,30 @@ func (s *Service) billAccountsOf(ctx context.Context, bills []Bill) ([]BillAccou
 	return accounts, nil
 }
 
-// billAmountConverter gives every Bill Amount of the bills it is called with its amount in the Default
+// billAmountConverter gives every Bill Amount of the Bill it is called with its amount in the Default
 // Currency: one in another currency converted at the latest Exchange Rate, fetched once per currency.
-func (s *Service) billAmountConverter(ctx context.Context) (func(bills []Bill) error, error) {
+// The Bill's Bill Amounts must be its own: they are changed in place.
+func (s *Service) billAmountConverter(ctx context.Context) (func(bill *Bill) error, error) {
 	defaultCurrency, err := s.GetDefaultCurrency(ctx)
 	if err != nil {
 		return nil, err
 	}
 	rates := make(map[string]float64)
-	return func(bills []Bill) error {
-		for i := range bills {
-			for j := range bills[i].Amounts {
-				amount := &bills[i].Amounts[j]
-				if amount.Currency == "" || amount.Currency == defaultCurrency {
-					continue
-				}
-				rate, ok := rates[amount.Currency]
-				if !ok {
-					var err error
-					if rate, err = s.currencyClient.GetRate(ctx, amount.Currency, defaultCurrency); err != nil {
-						return fmt.Errorf("converting Bill Amounts in %s: %w", amount.Currency, err)
-					}
-					rates[amount.Currency] = rate
-				}
-				amount.rate = rate
+	return func(bill *Bill) error {
+		for j := range bill.Amounts {
+			amount := &bill.Amounts[j]
+			if amount.Currency == "" || amount.Currency == defaultCurrency {
+				continue
 			}
+			rate, ok := rates[amount.Currency]
+			if !ok {
+				var err error
+				if rate, err = s.currencyClient.GetRate(ctx, amount.Currency, defaultCurrency); err != nil {
+					return fmt.Errorf("converting Bill Amounts in %s: %w", amount.Currency, err)
+				}
+				rates[amount.Currency] = rate
+			}
+			amount.rate = rate
 		}
 		return nil
 	}, nil
@@ -848,28 +851,38 @@ func (s *Service) GetBillEditPageData(ctx context.Context, billID string) (*Bill
 	return nil, fmt.Errorf("getting bill: %w", sql.ErrNoRows)
 }
 
-// billTransferTemplates are what bills, with the Events placed, charge, in the Default Currency.
+// billTransferTemplates are what bills, with the Events placed, charge, in the Default Currency. It
+// fails on the first Bill whose charges can't be worked out.
 func (s *Service) billTransferTemplates(ctx context.Context, bills []Bill) ([]TransferTemplate, error) {
-	bills = slices.Clone(bills)
-	for i := range bills {
-		bills[i].Amounts = slices.Clone(bills[i].Amounts)
-	}
-	convert, err := s.billAmountConverter(ctx)
+	payments, err := s.billPayments(ctx, bills)
 	if err != nil {
 		return nil, err
 	}
-	if err := convert(bills); err != nil {
+	return transferTemplatesOf(payments)
+}
+
+// billPayments are what each of bills, with the Events placed, charges, in the Default Currency, or why
+// it can't be worked out, such as a Bill Amount in a currency whose Exchange Rate can't be fetched. A
+// Bill of a Bill account that doesn't exist charges nothing.
+func (s *Service) billPayments(ctx context.Context, bills []Bill) ([]payment, error) {
+	convert, err := s.billAmountConverter(ctx)
+	if err != nil {
 		return nil, err
 	}
 	accounts, err := s.billAccountsOf(ctx, bills)
 	if err != nil {
 		return nil, err
 	}
-	var templates []TransferTemplate
+	var payments []payment
 	for _, ba := range accounts {
 		for _, bill := range ba.Bills {
-			templates = append(templates, bill.GenerateTransferTemplates(ba)...)
+			pay := payment{name: bill.Name, eventID: bill.EventID, source: TransferTemplateSource{Type: TransferSourceBill, EntityID: bill.ID, Label: bill.Name, BillAccountID: ba.ID, BillAccountName: ba.Name}}
+			bill.Amounts = slices.Clone(bill.Amounts)
+			if pay.err = convert(&bill); pay.err == nil {
+				pay.templates = bill.GenerateTransferTemplates(ba)
+			}
+			payments = append(payments, pay)
 		}
 	}
-	return templates, nil
+	return payments, nil
 }

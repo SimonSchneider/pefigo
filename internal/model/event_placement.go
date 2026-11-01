@@ -95,6 +95,26 @@ func (p *plans) usesLeftOutAccount(t TransferTemplate) bool {
 // placeEvents is the one path every Forecast Input that Events change is loaded through: the
 // Baseline's with no placements, and a Scenario's with its overrides.
 func (s *Service) placeEvents(ctx context.Context, placements EventPlacements) (*plans, error) {
+	pl, err := s.loadPlacings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return placeEntries(pl.events, pl.stored, placements)
+}
+
+// placings are the Events and stored entries one page load reads, placed each way the page asks for,
+// once each: as the Baseline places them, with every Event at its own date, and with one unplanned
+// Event planned.
+type placings struct {
+	events    []Event
+	stored    storedEntries
+	baseline  *plans
+	ownDates  *plans
+	unplanned map[string]*plans // by the ID of the unplanned Event they plan
+}
+
+// loadPlacings reads the Events and every stored entry, for one page load to place.
+func (s *Service) loadPlacings(ctx context.Context) (*placings, error) {
 	events, err := s.ListEvents(ctx)
 	if err != nil {
 		return nil, err
@@ -103,7 +123,74 @@ func (s *Service) placeEvents(ctx context.Context, placements EventPlacements) (
 	if err != nil {
 		return nil, err
 	}
-	return placeEntries(events, stored, placements)
+	return &placings{events: events, stored: stored, unplanned: make(map[string]*plans)}, nil
+}
+
+// inBaseline are the plans as the Baseline places them.
+func (pl *placings) inBaseline() (*plans, error) {
+	return pl.placeOnce(&pl.baseline, nil)
+}
+
+// atOwnDates are the plans with every Event at its own date, planned or not: every entry at the dates
+// it is stored after, as its forms edit it, and none left out.
+func (pl *placings) atOwnDates() (*plans, error) {
+	return pl.placeOnce(&pl.ownDates, asStored(pl.events))
+}
+
+func (pl *placings) placeOnce(placed **plans, placements EventPlacements) (*plans, error) {
+	if *placed == nil {
+		p, err := placeEntries(pl.events, pl.stored, placements)
+		if err != nil {
+			return nil, err
+		}
+		*placed = p
+	}
+	return *placed, nil
+}
+
+// shownBy are the plans an entry of the Event eventID, or of none for "", shows what it does by on its
+// pages: the Baseline's, unless the Baseline leaves the unplanned Event out. Then they are the Baseline
+// with that Event alone planned, at its own date, as a Scenario that plans only it would place them, and
+// inBaseline is false. What other unplanned Events add to or end of the entry never shows.
+func (pl *placings) shownBy(eventID string) (p *plans, inBaseline bool, err error) {
+	i := slices.IndexFunc(pl.events, func(ev Event) bool { return ev.ID == eventID })
+	if i < 0 || pl.events[i].Planned {
+		p, err := pl.inBaseline()
+		return p, true, err
+	}
+	planned := pl.unplanned[eventID]
+	p, err = pl.placeOnce(&planned, EventPlacements{eventID: {Date: pl.events[i].Date}})
+	pl.unplanned[eventID] = planned
+	return p, false, err
+}
+
+// eventDates are the dates of every Event, by ID.
+func (pl *placings) eventDates() map[string]date.Date {
+	dates := make(map[string]date.Date, len(pl.events))
+	for _, ev := range pl.events {
+		dates[ev.ID] = ev.Date
+	}
+	return dates
+}
+
+// salary is the Salary id as p places it, and whether p places it.
+func (p *plans) salary(id string) (Salary, bool) {
+	i := slices.IndexFunc(p.salaries, func(sal Salary) bool { return sal.ID == id })
+	if i < 0 {
+		return Salary{}, false
+	}
+	return p.salaries[i], true
+}
+
+// bill is the Bill id as p places it, with its own copy of its Bill Amounts, and whether p places it.
+func (p *plans) bill(id string) (Bill, bool) {
+	i := slices.IndexFunc(p.bills, func(b Bill) bool { return b.ID == id })
+	if i < 0 {
+		return Bill{}, false
+	}
+	b := p.bills[i]
+	b.Amounts = slices.Clone(b.Amounts)
+	return b, true
 }
 
 // placeEntries places stored as placements say. It knows how to place each type of entry, and

@@ -380,12 +380,7 @@ func (s *Service) ListInvestmentRounds(ctx context.Context, accountID string) ([
 	if err != nil {
 		return nil, err
 	}
-	result := make([]InvestmentRound, len(rounds))
-	for i, r := range rounds {
-		result[i] = investmentRoundFromDB(r, ownDate(dates, r.EventID))
-	}
-	slices.SortStableFunc(result, func(a, b InvestmentRound) int { return compareInvestmentRounds(b, a) })
-	return result, nil
+	return investmentRoundsOf(rounds, dates), nil
 }
 
 // compareInvestmentRounds orders investment rounds by date, then by when they were last saved, then by
@@ -461,12 +456,7 @@ func (s *Service) ListShareChanges(ctx context.Context, accountID string) ([]Sha
 	if err != nil {
 		return nil, err
 	}
-	result := make([]ShareChange, len(changes))
-	for i, c := range changes {
-		result[i] = shareChangeFromDB(c, ownDate(dates, c.EventID))
-	}
-	sortByDayAndID(result, ShareChange.dayAndID)
-	return result, nil
+	return shareChangesOf(changes, dates), nil
 }
 
 // dayAndID are the share change's date and ID, which order it among the others.
@@ -552,11 +542,16 @@ func (s *Service) ListStartupShareOptions(ctx context.Context, accountID string)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list startup share options: %w", err)
 	}
-	result := make([]StartupShareOption, len(opts))
-	for i, o := range opts {
-		result[i] = startupShareOptionFromDB(o)
+	return startupShareOptionsOf(opts), nil
+}
+
+// startupShareOptionsOf are the stored Options, in their order.
+func startupShareOptionsOf(rows []pdb.StartupShareOption) []StartupShareOption {
+	opts := make([]StartupShareOption, len(rows))
+	for i, o := range rows {
+		opts[i] = startupShareOptionFromDB(o)
 	}
-	return result, nil
+	return opts
 }
 
 func (s *Service) DeleteStartupShareOption(ctx context.Context, id string) error {
@@ -715,27 +710,39 @@ func (ss *startupShares) summaryOn(day date.Date) DerivedStartupShareSummary {
 	return DerivedStartupShareSummary{SharesOwned: sharesOwned, TotalShares: totalShares, AvgPurchasePricePerShare: avgPrice}
 }
 
-// startupShareSummary is what the Startup Share account accountID holds on day in the Baseline, or,
-// when the Baseline leaves it out, with every Event at its own date. It is nil for an account that
-// isn't a Startup Share account.
-func (s *Service) startupShareSummary(ctx context.Context, accountID string, day date.Date) (*DerivedStartupShareSummary, error) {
-	events, err := s.ListEvents(ctx)
+// startupShareSummary is what the Startup Share account acc holds on day, as the plans of its Event
+// show it (see placings.shownBy): in the Baseline, or for an account of an unplanned Event, in the
+// Baseline with that Event planned. It is nil for an account that isn't a Startup Share account.
+func (pl *placings) startupShareSummary(acc Account, day date.Date) (*DerivedStartupShareSummary, error) {
+	p, _, err := pl.shownBy(acc.EventID)
 	if err != nil {
 		return nil, err
 	}
-	stored, err := s.loadStoredEntries(ctx)
-	if err != nil {
-		return nil, err
+	ss, ok := p.startupShares[acc.ID]
+	if !ok {
+		return nil, nil
 	}
-	for _, placements := range []EventPlacements{nil, asStored(events)} {
-		p, err := placeEntries(events, stored, placements)
-		if err != nil {
-			return nil, err
-		}
-		if ss, ok := p.startupShares[accountID]; ok {
-			summary := ss.summaryOn(day)
-			return &summary, nil
-		}
+	summary := ss.summaryOn(day)
+	return &summary, nil
+}
+
+// investmentRoundsOf are the stored rounds, each at its own Event's date of dates, latest first: of
+// two on one day, the one that applies first.
+func investmentRoundsOf(rows []pdb.InvestmentRound, dates map[string]date.Date) []InvestmentRound {
+	rounds := make([]InvestmentRound, len(rows))
+	for i, r := range rows {
+		rounds[i] = investmentRoundFromDB(r, ownDate(dates, r.EventID))
 	}
-	return nil, nil
+	slices.SortStableFunc(rounds, func(a, b InvestmentRound) int { return compareInvestmentRounds(b, a) })
+	return rounds
+}
+
+// shareChangesOf are the stored share changes, each at its own Event's date of dates, by date and ID.
+func shareChangesOf(rows []pdb.ShareChange, dates map[string]date.Date) []ShareChange {
+	changes := make([]ShareChange, len(rows))
+	for i, c := range rows {
+		changes[i] = shareChangeFromDB(c, ownDate(dates, c.EventID))
+	}
+	sortByDayAndID(changes, ShareChange.dayAndID)
+	return changes
 }
