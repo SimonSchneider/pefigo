@@ -257,8 +257,8 @@ func (d *TransferScheduleDay) Monthly() []ScheduledTransfer {
 }
 
 // TransferScheduleRow is one row of the Transfer Template table: a Transfer Template, or a group of
-// rows. The Transfer Templates that share a name, priority, recurrence and Accounts, such as the
-// segments of a Bill, are one group, and the Bills of a Bill Account are one group of those rows. A
+// rows. The Transfer Templates that share a name, priority, recurrence, Accounts, Event and the Salary
+// or Bill they are generated from, such as the segments of a Bill, are one group, and the Bills of a Bill Account are one group of those rows. A
 // group spans its Members' dates, is Active when one of them is, is Disabled when all of them are, and
 // its Amount is their total.
 type TransferScheduleRow struct {
@@ -282,11 +282,18 @@ func (d *TransferScheduleDay) Rows() []TransferScheduleRow {
 		priority   int64
 		recurrence date.Cron
 		from, to   string
+		eventID    string
+		// source is the Salary or Bill the Transfer Template is generated from: one Bill's segments
+		// group, two Bills of one name don't.
+		source TransferTemplateSource
 	}
 	groups := make(map[groupKey][]TransferScheduleRow)
 	var order []groupKey
 	for _, t := range d.transfers {
-		k := groupKey{name: t.Name, priority: t.Priority, recurrence: t.Recurrence, from: t.FromAccountID, to: t.ToAccountID}
+		k := groupKey{
+			name: t.Name, priority: t.Priority, recurrence: t.Recurrence, from: t.FromAccountID, to: t.ToAccountID, eventID: t.EventID,
+			source: TransferTemplateSource{Type: t.Source.Type, EntityID: t.Source.EntityID},
+		}
 		if _, ok := groups[k]; !ok {
 			order = append(order, k)
 		}
