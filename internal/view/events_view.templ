@@ -25,6 +25,15 @@ func eventEditURL(id string) templ.SafeURL {
 }
 
 // formatOffset is how long after an Event's date one of its dates is, such as "+31 days".
+// entryDatePlaceholder is the placeholder of an entry's Start: +0, the Event's date, in an Event, and
+// the example date otherwise.
+func entryDatePlaceholder(inEvent bool, example string) string {
+	if inEvent {
+		return "+0"
+	}
+	return example
+}
+
 func formatOffset(d date.Duration) string {
 	unit := "days"
 	if d == 1 || d == -1 {
@@ -374,16 +383,19 @@ templ EventEndsCard(view *model.EventEditView) {
 				<p class="text-sm text-base-content/50">Ends no entries.</p>
 			}
 			@EventEndsTable(view.Event, true)
+			<p class="text-xs text-base-content/60">
+				End a Transfer Template or growth model outside the Event, some days after the Event's date: +0 ends it on the Event's date, which it no longer applies on. To change one, end it here and add its replacement to the Event.
+			</p>
 			<form method="post" action={ templ.SafeURL("/events/" + view.Event.ID + "/ends/") } class="flex flex-wrap items-end gap-2">
 				<div class="form-control flex-1 min-w-64">
-					<label class="label"><span class="label-text text-xs">End a Transfer Template or growth model outside the Event. To change one, end it and add its replacement.</span></label>
+					<label class="label"><span class="label-text text-xs">Entry</span></label>
 					<select class="select select-sm select-bordered w-full" name="entry">
 						@EntryOptions(view.Endable)
 					</select>
 				</div>
-				<div class="form-control">
-					<label class="label"><span class="label-text text-xs">End Date (first day not included)</span></label>
-					<input type="date" class="input input-sm input-bordered" name="end_date" value={ view.Event.Date.String() }/>
+				<div class="form-control w-28">
+					<label class="label"><span class="label-text text-xs">Days after</span></label>
+					<input type="text" class="input input-sm input-bordered w-full" name="end_date" value="+0"/>
 				</div>
 				<button type="submit" class="btn btn-sm btn-primary">End</button>
 			</form>

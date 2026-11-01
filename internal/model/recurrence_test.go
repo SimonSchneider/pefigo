@@ -26,8 +26,9 @@ func TestSavingATransferTemplateWithoutAValidRecurrenceIsInvalidInput(t *testing
 		})
 	}
 
-	// A Transfer Template recurrence is required: an empty one isn't stored.
-	for _, recurrence := range append([]date.Cron{""}, invalidDatePatterns...) {
+	// An empty Transfer Template recurrence is a one-off on the Start Date (see
+	// TestATransferTemplateWithoutARecurrenceIsAOneOffOnItsStartDate); any other must be a date pattern.
+	for _, recurrence := range invalidDatePatterns {
 		if _, err := save(recurrence); !errors.Is(err, model.ErrInvalidInput) {
 			t.Errorf("recurrence %q: expected ErrInvalidInput, got %v", recurrence, err)
 		}

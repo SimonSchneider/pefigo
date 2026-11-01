@@ -145,7 +145,7 @@ func NewHandler(svc *model.Service, public fs.FS) http.Handler {
 		return h.svc.RemoveFromEvent(ctx, f.Entry)
 	}))
 	mux.Handle("POST /events/{id}/ends/{$}", h.eventAction("ending in event", func(ctx context.Context, eventID string, f eventEntryForm) error {
-		return h.svc.UpsertEventEnd(ctx, model.EventEndInput{EventID: eventID, Entry: f.Entry, EndDate: f.EndDate})
+		return h.svc.UpsertEventEnd(ctx, model.EventEndInput{EventID: eventID, Entry: f.Entry, EndDate: f.EndDate, EndOffset: f.EndOffset})
 	}))
 	mux.Handle("POST /events/{id}/ends/remove", h.eventAction("lifting the end", func(ctx context.Context, eventID string, f eventEntryForm) error {
 		return h.svc.DeleteEventEnd(ctx, eventID, f.Entry)

@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/SimonSchneider/goslu/date"
 )
 
 func FormatWithThousands(val float64) string {
@@ -52,4 +55,9 @@ func FormatPercent(fraction float64) string {
 		return "0"
 	}
 	return s
+}
+
+// FormatDays formats days with their sign, as ParseDays parses them: "+20", "-5" or "+0".
+func FormatDays(d date.Duration) string {
+	return fmt.Sprintf("%+d", d)
 }

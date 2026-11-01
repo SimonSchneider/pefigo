@@ -1,6 +1,8 @@
 package controller_test
 
 import (
+	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -161,5 +163,56 @@ func TestDeletingAnEventIsConfirmedWithWhatItDeletes(t *testing.T) {
 	}
 	if _, err := svc.GetAccount(ctx, property.ID); err == nil {
 		t.Errorf("expected the Event's account deleted")
+	}
+}
+
+func TestEntryFormsTakeDaysAfterTheirEventsDate(t *testing.T) {
+	svc, srv := newSettingsServer(t)
+	ctx := t.Context()
+	ev, err := svc.UpsertEvent(ctx, model.EventInput{Name: "Apartment", Date: mustDate(t, "2027-09-10")})
+	if err != nil {
+		t.Fatalf("create event: %v", err)
+	}
+	accountLocation := postForm(t, srv, "/accounts/", url.Values{"name": {"Property"}, "event_id": {ev.ID}})
+	accountID := strings.Split(accountLocation, "/")[2]
+
+	postForm(t, srv, "/growth-models/", url.Values{"account_id": {accountID}, "type": {"fixed"}, "event_id": {ev.ID}, "start_date": {"-5"}, "end_date": {"+30"}})
+	growth, err := svc.ListAccountGrowthModels(ctx, accountID)
+	if err != nil || len(growth) != 1 || growth[0].StartDate != mustDate(t, "2027-09-05") || growth[0].EndDate == nil || *growth[0].EndDate != mustDate(t, "2027-10-10") {
+		t.Fatalf("expected a growth model from 2027-09-05 to 2027-10-10, got %+v (%v)", growth, err)
+	}
+	if page := getPage(t, srv, accountLocation); !strings.Contains(page, `value="-5"`) || !strings.Contains(page, `value="+30"`) {
+		t.Errorf("expected the account page to give the growth model's dates as -5 and +30")
+	}
+
+	location := postForm(t, srv, "/transfers/", url.Values{
+		"name": {"Down payment"}, "to_account_id": {accountID}, "amount_type": {"fixed"}, "amount_fixed": {"600000"}, "start_date": {"+20"}, "event_id": {ev.ID}, "enabled": {"on"},
+	})
+	tt, err := svc.GetTransferTemplate(ctx, strings.Split(location, "/")[2])
+	if err != nil || tt.StartDate != mustDate(t, "2027-09-30") || tt.Recurrence != "2027-09-30" {
+		t.Fatalf("expected a one-off on 2027-09-30, 20 days after the Event, got %+v (%v)", tt, err)
+	}
+	if page := getPage(t, srv, location); !strings.Contains(page, `name="start_date" value="+20"`) || !strings.Contains(page, `name="recurrence" value=""`) {
+		t.Errorf("expected the Transfer Template form to give the one-off as +20 with no recurrence")
+	}
+
+	savings := postForm(t, srv, "/transfers/", url.Values{
+		"name": {"Savings"}, "amount_type": {"fixed"}, "amount_fixed": {"15000"}, "recurrence": {"*-*-25"}, "start_date": {"2020-01-01"}, "enabled": {"on"},
+	})
+	postForm(t, srv, "/events/"+ev.ID+"/ends/", url.Values{"entry": {"transfer-template:" + strings.Split(savings, "/")[2]}, "end_date": {"+10"}})
+	edit, err := svc.GetEventEditPageData(ctx, ev.ID)
+	if err != nil || len(edit.Event.Ends) != 1 || edit.Event.Ends[0].EndDate != mustDate(t, "2027-09-20") {
+		t.Fatalf("expected the Apartment to end Savings on 2027-09-20, got %+v (%v)", edit, err)
+	}
+
+	resp, err := srv.Client().PostForm(srv.URL+"/transfers/", url.Values{
+		"name": {"Gym"}, "amount_type": {"fixed"}, "amount_fixed": {"300"}, "recurrence": {"*-*-01"}, "start_date": {"+20"}, "enabled": {"on"},
+	})
+	if err != nil {
+		t.Fatalf("save transfer template: %v", err)
+	}
+	defer resp.Body.Close()
+	if body, _ := io.ReadAll(resp.Body); resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "needs an Event") {
+		t.Errorf("expected days after an Event's date outside an Event to be a bad request, got %d: %s", resp.StatusCode, body)
 	}
 }

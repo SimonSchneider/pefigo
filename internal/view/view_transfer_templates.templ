@@ -120,30 +120,41 @@ templ TransferTemplateForm(view *model.TransferTemplateEditView) {
 					<div class="card-body p-5">
 						<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/60 mb-3">Schedule</h3>
 						<div class="form-control">
-							<label class="label"><span class="label-text font-medium">Recurrence (Cron Expression)</span></label>
-							<input type="text" class="input input-bordered w-full" placeholder="*-*-25" name="recurrence" value={ view.TransferTemplate.Recurrence }/>
+							<label class="label"><span class="label-text font-medium">Recurrence</span></label>
+							<input type="text" class="input input-bordered w-full" placeholder="*-*-25" name="recurrence" value={ view.RecurrenceInput() }/>
 							<div class="text-sm text-base-content/60 mt-1">
-								Leave empty for one-time transfers. Use cron syntax (e.g., "*-*-25" for monthly on 25th)
+								Leave empty for a one-time transfer on the Start. Otherwise a date pattern, such as *-*-25 for the 25th of every month.
 							</div>
 						</div>
+						{{ ev := view.Event() }}
 						<div class="grid grid-cols-2 gap-4">
 							<div class="form-control">
-								<label class="label"><span class="label-text font-medium">Start Date</span></label>
-								{{ startDate := "" }}
-								if !view.TransferTemplate.StartDate.IsZero() {
-									{{ startDate = view.TransferTemplate.StartDate.String() }}
-								}
-								<input type="text" class="input input-bordered w-full" name="start_date" value={ startDate } placeholder="The Event's date in an Event"/>
+								<label class="label whitespace-normal">
+									<span class="label-text font-medium">
+										if ev != nil {
+											Start, days after { ev.Name }
+										} else {
+											Start Date
+										}
+									</span>
+								</label>
+								<input type="text" class="input input-bordered w-full" name="start_date" value={ view.StartInput() } placeholder={ entryDatePlaceholder(ev != nil, "2027-01-01") }/>
 							</div>
 							<div class="form-control">
-								<label class="label"><span class="label-text font-medium">End Date</span></label>
-								{{ endDate := "" }}
-								if view.TransferTemplate.EndDate != nil {
-									{{ endDate = view.TransferTemplate.EndDate.String() }}
-								}
-								<input type="text" class="input input-bordered w-full" name="end_date" value={ endDate } placeholder="Optional"/>
-								<div class="text-sm text-base-content/60 mt-1">First day not included</div>
+								<label class="label whitespace-normal">
+									<span class="label-text font-medium">
+										if ev != nil {
+											End, days after { ev.Name }
+										} else {
+											End Date
+										}
+									</span>
+								</label>
+								<input type="text" class="input input-bordered w-full" name="end_date" value={ view.EndInput() } placeholder="Optional"/>
 							</div>
+						</div>
+						<div class="text-sm text-base-content/60 mt-1">
+							A date such as 2027-09-30, or in an Event the days after its date, such as +20. The End's first day isn't included.
 						</div>
 					</div>
 				</div>
@@ -182,7 +193,7 @@ templ TransferTemplateForm(view *model.TransferTemplateEditView) {
 						<label class="label"><span class="label-text font-medium">Event</span></label>
 						@EventSelect(view.Events, view.TransferTemplate.EventID, "select-bordered")
 						<div class="text-sm text-base-content/60 mt-1">
-							In an Event, the dates move with the Event's date, and a blank Start Date is the Event's date. A one-off's date moves too; a repeating recurrence doesn't.
+							In an Event, give the Start and End as days after its date, such as +20, and they move with it. A blank Start is the Event's date.
 						</div>
 					</div>
 				</div>

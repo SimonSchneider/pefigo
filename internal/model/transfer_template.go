@@ -75,6 +75,11 @@ type TransferTemplate struct {
 	// EndedByEventID is the placed Event whose end it ends on, when an Event's end is earlier than its
 	// own End Date. Only a Transfer Schedule places Events, so a stored Transfer Template has none.
 	EndedByEventID string
+	// StartOffset and EndOffset, when set, give the Start and End Dates of a Transfer Template in an
+	// Event as days after the Event's date, in place of StartDate and EndDate. Only saving reads them,
+	// so a loaded Transfer Template has none.
+	StartOffset *date.Duration
+	EndOffset   *date.Duration
 
 	Source TransferTemplateSource
 }
@@ -141,19 +146,29 @@ type TransferTemplateInput struct {
 	BudgetCategoryID *string
 }
 
-// UpsertTransferTemplate saves the Transfer Template. In an Event its Start Date is the Event's date
-// when it isn't given, its dates are saved as offsets from the Event's date, and an end the Event gave
-// it is lifted.
+// UpsertTransferTemplate saves the Transfer Template. In an Event its dates may be given as days after
+// the Event's date, its Start Date is the Event's date when it isn't given, its dates are saved as
+// offsets from the Event's date, and an end the Event gave it is lifted. Without a recurrence it is a
+// one-off on its Start Date.
 func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTemplate) (TransferTemplate, error) {
 	at, err := s.eventDate(ctx, inp.EventID)
 	if err != nil {
 		return TransferTemplate{}, err
 	}
+	startDate, startErr := givenDate("start", inp.StartDate, inp.StartOffset, inp.EventID, at)
+	endDate, endErr := givenEndDate(inp.EndDate, inp.EndOffset, inp.EventID, at)
+	if err := errors.Join(startErr, endErr); err != nil {
+		return TransferTemplate{}, err
+	}
+	inp.StartDate, inp.EndDate = startDate, endDate
 	if inp.EventID != "" && inp.StartDate.IsZero() {
 		inp.StartDate = at
 	}
 	if err := errors.Join(checkRequired("name", inp.Name), checkRequired("start date", inp.StartDate)); err != nil {
 		return TransferTemplate{}, err
+	}
+	if inp.Recurrence == "" {
+		inp.Recurrence = date.Cron(inp.StartDate.String())
 	}
 	if err := checkOneOf("transfer template amount type", inp.AmountType, TransferAmountFixed, TransferAmountPercent); err != nil {
 		return TransferTemplate{}, err
@@ -277,6 +292,35 @@ type TransferTemplateEditView struct {
 
 func (c TransferTemplateEditView) IsEdit() bool {
 	return c.TransferTemplate.ID != ""
+}
+
+// Event is the Event the Transfer Template is in, or nil in the Baseline.
+func (c TransferTemplateEditView) Event() *Event {
+	return findEvent(c.Events, c.TransferTemplate.EventID)
+}
+
+// StartInput is the Start Date as the form gives it: in an Event the days after its date. A new
+// Transfer Template has none.
+func (c TransferTemplateEditView) StartInput() string {
+	if !c.IsEdit() {
+		return ""
+	}
+	return DateInput(c.Events, c.TransferTemplate.EventID, &c.TransferTemplate.StartDate)
+}
+
+// EndInput is the End Date as the form gives it: in an Event the days after its date.
+func (c TransferTemplateEditView) EndInput() string {
+	return DateInput(c.Events, c.TransferTemplate.EventID, c.TransferTemplate.EndDate)
+}
+
+// RecurrenceInput is the recurrence as the form gives it: blank for a one-off on its Start Date, which
+// saving without a recurrence makes, so the one-off follows the Start.
+func (c TransferTemplateEditView) RecurrenceInput() string {
+	t := c.TransferTemplate
+	if d, ok := fixedDate(t.Recurrence); ok && d == t.StartDate {
+		return ""
+	}
+	return string(t.Recurrence)
 }
 
 type TransferTemplatesView struct {

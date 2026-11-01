@@ -47,9 +47,9 @@ func (gm GrowthModel) AppliesOn(day date.Date) bool {
 	return (&finance.TimeFrameGrowth{StartDate: gm.StartDate, EndDate: gm.EndDate}).IsActiveOn(day)
 }
 
-// AccountGrowthModelInput is a growth model to save. In an Event its Start Date is the Event's date
-// when it isn't given, its dates are saved as offsets from the Event's date, and an end the Event gave
-// it is lifted.
+// AccountGrowthModelInput is a growth model to save. In an Event its dates may be given as days after
+// the Event's date, its Start Date is the Event's date when it isn't given, its dates are saved as
+// offsets from the Event's date, and an end the Event gave it is lifted.
 type AccountGrowthModelInput struct {
 	ID               string
 	AccountID        string
@@ -59,6 +59,18 @@ type AccountGrowthModelInput struct {
 	StartDate        date.Date
 	EndDate          *date.Date
 	EventID          string
+	// StartOffset and EndOffset, when set, give the Start and End Dates in an Event as days after the
+	// Event's date, in place of StartDate and EndDate.
+	StartOffset *date.Duration
+	EndOffset   *date.Duration
+}
+
+// input is the growth model as an input that saves it unchanged.
+func (gm GrowthModel) input() AccountGrowthModelInput {
+	return AccountGrowthModelInput{
+		ID: gm.ID, AccountID: gm.AccountID, Type: gm.Type, AnnualRate: gm.AnnualRate, AnnualVolatility: gm.AnnualVolatility,
+		StartDate: gm.StartDate, EndDate: gm.EndDate, EventID: gm.EventID,
+	}
 }
 
 type GrowthModels []GrowthModel
@@ -120,6 +132,12 @@ func (s *Service) UpsertAccountGrowthModel(ctx context.Context, inp AccountGrowt
 	if err != nil {
 		return GrowthModel{}, err
 	}
+	startDate, startErr := givenDate("start", inp.StartDate, inp.StartOffset, inp.EventID, at)
+	endDate, endErr := givenEndDate(inp.EndDate, inp.EndOffset, inp.EventID, at)
+	if err := errors.Join(startErr, endErr); err != nil {
+		return GrowthModel{}, err
+	}
+	inp.StartDate, inp.EndDate = startDate, endDate
 	if inp.EventID != "" && inp.StartDate.IsZero() {
 		inp.StartDate = at
 	}

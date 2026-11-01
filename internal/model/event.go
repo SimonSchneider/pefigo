@@ -154,6 +154,53 @@ func storeEndDate(d *date.Date, at date.Date) *int64 {
 	return ptr(storeDate(*d, at))
 }
 
+// givenDate is the date an entry's input gives: offset days after at, the date of the Event eventID,
+// when offset is set, and d otherwise. Days after an Event's date need an Event; what names the date
+// in that error.
+func givenDate(what string, d date.Date, offset *date.Duration, eventID string, at date.Date) (date.Date, error) {
+	if offset == nil {
+		return d, nil
+	}
+	if eventID == "" {
+		return 0, fmt.Errorf("%w: a %s of %s days after an Event's date needs an Event", ErrInvalidInput, what, ui.FormatDays(*offset))
+	}
+	return at.Add(*offset), nil
+}
+
+// givenEndDate is givenDate for an End Date, which may be none.
+func givenEndDate(d *date.Date, offset *date.Duration, eventID string, at date.Date) (*date.Date, error) {
+	if offset == nil {
+		return d, nil
+	}
+	end, err := givenDate("end", 0, offset, eventID, at)
+	if err != nil {
+		return nil, err
+	}
+	return &end, nil
+}
+
+// DateInput is the date d of an entry in the Event eventID as its form gives it: in an Event the days
+// after the Event's date, such as +20, and otherwise the date. No date is blank.
+func DateInput(events []Event, eventID string, d *date.Date) string {
+	if d == nil {
+		return ""
+	}
+	if ev := findEvent(events, eventID); ev != nil {
+		return ui.FormatDays(d.Sub(ev.Date))
+	}
+	return d.String()
+}
+
+// findEvent is the Event eventID of events, or nil.
+func findEvent(events []Event, eventID string) *Event {
+	for i := range events {
+		if events[i].ID == eventID {
+			return &events[i]
+		}
+	}
+	return nil
+}
+
 // fixedDate is the one day recurrence matches when it is a date, such as 2028-03-01: the recurrence
 // of a one-off Transfer Template.
 func fixedDate(recurrence date.Cron) (date.Date, bool) {
@@ -266,7 +313,7 @@ func (s *Service) setEntryEvent(ctx context.Context, entry EventEntry, eventID s
 			return err
 		}
 		gm.EventID = eventID
-		if _, err := s.UpsertAccountGrowthModel(ctx, AccountGrowthModelInput(gm)); err != nil {
+		if _, err := s.UpsertAccountGrowthModel(ctx, gm.input()); err != nil {
 			return err
 		}
 	case EventEntryTransferTemplate:
@@ -290,6 +337,8 @@ type EventEndInput struct {
 	EventID string
 	Entry   EventEntry
 	EndDate date.Date
+	// EndOffset, when set, gives the End Date as days after the Event's date, in place of EndDate.
+	EndOffset *date.Duration
 }
 
 // UpsertEventEnd makes the Event end the entry. An Event only ends Transfer Templates and growth
@@ -302,7 +351,10 @@ func (s *Service) UpsertEventEnd(ctx context.Context, inp EventEndInput) error {
 	if inp.EventID == "" {
 		return fmt.Errorf("%w: no event to end %s in", ErrInvalidInput, inp.Entry)
 	}
-	end := inp.EndDate
+	end, err := givenDate("end", inp.EndDate, inp.EndOffset, inp.EventID, at)
+	if err != nil {
+		return err
+	}
 	if end.IsZero() {
 		end = at
 	}

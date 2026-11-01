@@ -3,6 +3,7 @@ package view;
 import (
 	"strconv"
 
+	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/internal/model"
 	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
@@ -443,12 +444,13 @@ templ GrowthModelRow(accountID string, events []model.Event, growthModel model.G
 		</div>
 		<div><input type="text" class="input input-xs w-full" placeholder="0.05" name="annual_rate" value={ growthModel.AnnualRate.SimpleEncode() }/></div>
 		<div><input type="text" class="input input-xs w-full" placeholder="0.10" name="annual_volatility" value={ growthModel.AnnualVolatility.SimpleEncode() }/></div>
-		{{ startDate := "" }}
+		{{ var start *date.Date }}
 		if growthModel.ID != "" {
-			{{ startDate = growthModel.StartDate.String() }}
+			{{ start = &growthModel.StartDate }}
 		}
-		<div><input type="text" class="input input-xs w-full" placeholder="2024-01-01" name="start_date" value={ startDate }/></div>
-		<div><input type="text" class="input input-xs w-full" placeholder="End" name="end_date" value={ growthModel.GetEndDateString() }/></div>
+		{{ inEvent := growthModel.EventID != "" }}
+		<div><input type="text" class="input input-xs w-full" placeholder={ entryDatePlaceholder(inEvent, "2024-01-01") } title="A date, or in an Event the days after its date, such as +20" name="start_date" value={ model.DateInput(events, growthModel.EventID, start) }/></div>
+		<div><input type="text" class="input input-xs w-full" placeholder="End" title="A date, or in an Event the days after its date, such as +20" name="end_date" value={ model.DateInput(events, growthModel.EventID, growthModel.EndDate) }/></div>
 		<div>@EventSelect(events, growthModel.EventID, "select-xs")</div>
 		<button type="submit" class="btn btn-xs btn-square btn-primary btn-ghost" title={ rowActionTitle(growthModel.ID != "") }>
 			if growthModel.ID != "" {
