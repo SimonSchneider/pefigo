@@ -321,7 +321,7 @@ func (s *Service) UpsertInvestmentRound(ctx context.Context, inp InvestmentRound
 	if err != nil {
 		return InvestmentRound{}, err
 	}
-	if inp.Date, err = dating.startDate("date", inp.Date, inp.DateOffset); err != nil {
+	if inp.Date, err = dating.firstDay("date", inp.Date, inp.DateOffset); err != nil {
 		return InvestmentRound{}, err
 	}
 	if err := errors.Join(checkRequired("account", inp.AccountID), checkRequired("date", inp.Date)); err != nil {
@@ -422,7 +422,7 @@ func (s *Service) UpsertShareChange(ctx context.Context, inp ShareChangeInput) (
 	if err != nil {
 		return ShareChange{}, err
 	}
-	if inp.Date, err = dating.startDate("date", inp.Date, inp.DateOffset); err != nil {
+	if inp.Date, err = dating.firstDay("date", inp.Date, inp.DateOffset); err != nil {
 		return ShareChange{}, err
 	}
 	if err := errors.Join(checkRequired("account", inp.AccountID), checkRequired("date", inp.Date)); err != nil {
@@ -480,14 +480,12 @@ func (s *Service) ListShareChanges(ctx context.Context, accountID string) ([]Sha
 	for i, c := range changes {
 		result[i] = shareChangeFromDB(c, ownDate(dates, c.EventID))
 	}
-	slices.SortStableFunc(result, compareShareChanges)
+	sortByDayAndID(result, ShareChange.dayAndID)
 	return result, nil
 }
 
-// compareShareChanges orders share changes by date and ID.
-func compareShareChanges(a, b ShareChange) int {
-	return cmp.Or(cmp.Compare(a.Date, b.Date), cmp.Compare(a.ID, b.ID))
-}
+// dayAndID are the share change's date and ID, which order it among the others.
+func (sc ShareChange) dayAndID() (date.Date, string) { return sc.Date, sc.ID }
 
 func (s *Service) DeleteShareChange(ctx context.Context, id string) error {
 	if err := s.q.DeleteShareChange(ctx, id); err != nil {

@@ -330,11 +330,7 @@ func NewAccountsView(accounts []AccountDetailed, accountTypes []AccountTypeWithF
 
 // GetEvent is the Event id, or nil for "" or an Event that doesn't exist.
 func (v *AccountsView) GetEvent(id string) *Event {
-	ev, ok := v.Events[id]
-	if !ok {
-		return nil
-	}
-	return &ev
+	return eventByID(v.Events, id)
 }
 
 func (v *AccountsView) GetBudgetCategory(id *string) *TransferTemplateCategory {

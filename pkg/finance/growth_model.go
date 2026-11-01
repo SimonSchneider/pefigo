@@ -25,7 +25,7 @@ func (i *TimeFrameGrowth) StartsOn() date.Date {
 }
 
 func (i *TimeFrameGrowth) IsActiveOn(day date.Date) bool {
-	return appliesOn(i.StartDate, i.EndDate, day)
+	return AppliesOn(i.StartDate, i.EndDate, day)
 }
 
 type GrowthCombined struct {

@@ -228,9 +228,10 @@ func (d entryDating) date(what string, given date.Date, offset *date.Duration) (
 	return givenDate(what, given, offset, d.offsetEventID, d.offsetAt)
 }
 
-// startDate is the date an input gives for the first day it applies: in an Event, the Event's date
-// when none is given.
-func (d entryDating) startDate(what string, given date.Date, offset *date.Duration) (date.Date, error) {
+// firstDay is the date an input gives for its first day: the first day a Salary Amount, adjustment,
+// leave, Bill Amount, round or share change applies, or the first day an end stops its Salary or Bill.
+// In an Event it is the Event's date when none is given.
+func (d entryDating) firstDay(what string, given date.Date, offset *date.Duration) (date.Date, error) {
 	day, err := d.date(what, given, offset)
 	if err == nil && d.eventID != "" && day.IsZero() {
 		day = d.at
@@ -272,6 +273,15 @@ func DateInput(events []Event, eventID string, d *date.Date) string {
 	return d.String()
 }
 
+// eventByID is the Event id of a page's Events, or nil for "" or an Event that doesn't exist: the
+// GetEvent of each page that shows entries' Events.
+func eventByID(events map[string]Event, id string) *Event {
+	if ev, ok := events[id]; ok {
+		return &ev
+	}
+	return nil
+}
+
 // findEvent is the Event eventID of events, or nil.
 func findEvent(events []Event, eventID string) *Event {
 	for i := range events {
@@ -304,9 +314,9 @@ func fixedDate(recurrence date.Cron) (date.Date, bool) {
 	return date.FromTime(t), true
 }
 
-// storeRecurrence is the recurrence of a Transfer Template placed at at, as stored. The date of a
-// one-off in an Event is one of the Event's dates, so it is stored as the date that many days after
-// day 0. A recurrence that repeats isn't a date of the Event and is stored as it is.
+// storeRecurrence is the recurrence of a Transfer Template or Salary placed at at, as stored. The date
+// of a one-off in an Event is one of the Event's dates, so it is stored as the date that many days
+// after day 0. A recurrence that repeats isn't a date of the Event and is stored as it is.
 func storeRecurrence(recurrence date.Cron, inEvent bool, at date.Date) string {
 	if d, ok := fixedDate(recurrence); ok && inEvent {
 		return date.Date(storeDate(d, at)).String()
@@ -314,7 +324,7 @@ func storeRecurrence(recurrence date.Cron, inEvent bool, at date.Date) string {
 	return string(recurrence)
 }
 
-// placeRecurrence is the stored recurrence of a Transfer Template placed at at.
+// placeRecurrence is the stored recurrence of a Transfer Template or Salary placed at at.
 func placeRecurrence(stored string, inEvent bool, at date.Date) date.Cron {
 	if d, ok := fixedDate(date.Cron(stored)); ok && inEvent {
 		return date.Cron(placeDate(int64(d), at).String())
@@ -406,19 +416,19 @@ func (s *Service) setEntryEvent(ctx context.Context, entry EventEntry, eventID s
 	case EventEntrySalary:
 		return rejoin(ctx, entry.ID, eventID, s.GetSalary, s.UpsertSalary, func(v *Salary, id string) { v.EventID = id })
 	case EventEntrySalaryAmount:
-		return rejoin(ctx, entry.ID, eventID, s.GetSalaryAmount, s.UpsertSalaryAmount, func(v *SalaryAmount, id string) { v.EventID = id })
+		return rejoin(ctx, entry.ID, eventID, s.getSalaryAmount, s.UpsertSalaryAmount, func(v *SalaryAmount, id string) { v.EventID = id })
 	case EventEntrySalaryAdjustment:
-		return rejoin(ctx, entry.ID, eventID, s.GetSalaryAdjustment, s.UpsertSalaryAdjustment, func(v *SalaryAdjustment, id string) { v.EventID = id })
+		return rejoin(ctx, entry.ID, eventID, s.getSalaryAdjustment, s.UpsertSalaryAdjustment, func(v *SalaryAdjustment, id string) { v.EventID = id })
 	case EventEntryPartialParentalLeave:
-		return rejoin(ctx, entry.ID, eventID, s.GetPartialParentalLeave, s.UpsertPartialParentalLeave, func(v *PartialParentalLeave, id string) { v.EventID = id })
+		return rejoin(ctx, entry.ID, eventID, s.getPartialParentalLeave, s.UpsertPartialParentalLeave, func(v *PartialParentalLeave, id string) { v.EventID = id })
 	case EventEntryFullParentalLeave:
-		return rejoin(ctx, entry.ID, eventID, s.GetFullParentalLeave, s.UpsertFullParentalLeave, func(v *FullParentalLeave, id string) { v.EventID = id })
+		return rejoin(ctx, entry.ID, eventID, s.getFullParentalLeave, s.UpsertFullParentalLeave, func(v *FullParentalLeave, id string) { v.EventID = id })
 	case EventEntrySalaryEnd:
 		return rejoin(ctx, entry.ID, eventID, s.GetSalaryEnd, s.UpsertSalaryEnd, func(v *SalaryEnd, id string) { v.EventID = id })
 	case EventEntryBill:
 		return rejoin(ctx, entry.ID, eventID, s.GetBill, s.UpsertBill, func(v *Bill, id string) { v.EventID = id })
 	case EventEntryBillAmount:
-		return rejoin(ctx, entry.ID, eventID, s.GetBillAmount, s.UpsertBillAmount, func(v *BillAmount, id string) { v.EventID = id })
+		return rejoin(ctx, entry.ID, eventID, s.getBillAmount, s.UpsertBillAmount, func(v *BillAmount, id string) { v.EventID = id })
 	case EventEntryBillEnd:
 		return rejoin(ctx, entry.ID, eventID, s.GetBillEnd, s.UpsertBillEnd, func(v *BillEnd, id string) { v.EventID = id })
 	case EventEntryInvestmentRound:
@@ -900,7 +910,7 @@ func (e *eventEntries) view(ev Event) EventView {
 	}
 	slices.SortStableFunc(v.Parts, func(a, b EventPart) int {
 		return cmp.Or(
-			cmp.Compare(ptrOrZero(a.StartDate), ptrOrZero(b.StartDate)),
+			cmp.Compare(ui.OrDefault(a.StartDate), ui.OrDefault(b.StartDate)),
 			cmp.Compare(slices.Index(eventEntryKinds, string(a.Kind)), slices.Index(eventEntryKinds, string(b.Kind))),
 			cmp.Compare(a.OwnerName, b.OwnerName),
 		)
@@ -1037,13 +1047,4 @@ func (s *Service) GetEventDeletePageData(ctx context.Context, id string) (*Event
 		}
 	}
 	return v, nil
-}
-
-// ptrOrZero is *v, or the zero value for nil.
-func ptrOrZero[T any](v *T) T {
-	if v == nil {
-		var zero T
-		return zero
-	}
-	return *v
 }

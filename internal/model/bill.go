@@ -81,19 +81,12 @@ func (b Bill) InBaseline() bool {
 // End is the first day no Bill Amount of the Bill applies: the earliest of its Ends, or nil without
 // one.
 func (b Bill) End() *date.Date {
-	var end *date.Date
-	for _, e := range b.Ends {
-		if end == nil || e.Date.Before(*end) {
-			end = &e.Date
-		}
-	}
-	return end
+	return firstEnd(b.Ends, func(e BillEnd) date.Date { return e.Date })
 }
 
-// endsBefore reports whether the Bill has ended by day.
-func (b Bill) endsBefore(day date.Date) bool {
-	end := b.End()
-	return end != nil && !day.Before(*end)
+// hasEndedBy reports whether the Bill has ended by day.
+func (b Bill) hasEndedBy(day date.Date) bool {
+	return endedBy(b.End(), day)
 }
 
 // The Bill Amount periods (BillAmount.Period).
@@ -161,7 +154,7 @@ func (ba BillAmount) yearlyAmount() uncertain.Value {
 func (b Bill) currentBillAmount() *BillAmount {
 	charged := b.charged()
 	today := date.Today()
-	if charged.endsBefore(today) {
+	if charged.hasEndedBy(today) {
 		return nil
 	}
 	var current *BillAmount
@@ -259,21 +252,14 @@ func (b Bill) GenerateTransferTemplates(ba BillAccount) []TransferTemplate {
 	sorted := slices.Clone(b.Amounts)
 	slices.SortStableFunc(sorted, func(a, b BillAmount) int { return cmp.Compare(a.StartDate, b.StartDate) })
 
-	end := b.End()
 	var templates []TransferTemplate
 	for i, amt := range sorted {
-		if b.endsBefore(amt.StartDate) {
+		if b.hasEndedBy(amt.StartDate) {
 			break
 		}
-		endDate := amt.EndDate
+		endDate := earliest(amt.EndDate, b.End())
 		if i+1 < len(sorted) {
-			nextStart := sorted[i+1].StartDate
-			if endDate == nil || *endDate > nextStart {
-				endDate = &nextStart
-			}
-		}
-		if end != nil && (endDate == nil || *endDate > *end) {
-			endDate = end
+			endDate = earliest(endDate, &sorted[i+1].StartDate)
 		}
 		templates = append(templates, TransferTemplate{
 			ID:               fmt.Sprintf("bill:%s:%d", b.ID, i),
@@ -342,16 +328,15 @@ func billEndFromDB(e pdb.BillEnd, at date.Date) BillEnd {
 	return BillEnd{ID: e.ID, BillID: e.BillID, Date: placeDate(e.Date, at), EventID: ui.OrDefault(e.EventID)}
 }
 
-// sortBillParts orders the Bill's Bill Amounts and ends by date and ID: stored offsets don't sort as the
-// dates they place at.
+// sortBillParts orders the Bill's Bill Amounts and ends by date and ID.
 func sortBillParts(b *Bill) {
-	slices.SortStableFunc(b.Amounts, func(x, y BillAmount) int {
-		return cmp.Or(cmp.Compare(x.StartDate, y.StartDate), cmp.Compare(x.ID, y.ID))
-	})
-	slices.SortStableFunc(b.Ends, func(x, y BillEnd) int {
-		return cmp.Or(cmp.Compare(x.Date, y.Date), cmp.Compare(x.ID, y.ID))
-	})
+	sortByDayAndID(b.Amounts, BillAmount.dayAndID)
+	sortByDayAndID(b.Ends, BillEnd.dayAndID)
 }
+
+// The first day and ID of each part of a Bill, which order it among the others.
+func (a BillAmount) dayAndID() (date.Date, string) { return a.StartDate, a.ID }
+func (e BillEnd) dayAndID() (date.Date, string)    { return e.Date, e.ID }
 
 // loadBillAccounts returns every Bill account with its Bills, each with its Bill Amounts and ends at
 // their own Event's dates, as its forms edit them, with the Events and accounts its pages show. What
@@ -584,7 +569,7 @@ func (s *Service) UpsertBillAmount(ctx context.Context, inp BillAmount) (BillAmo
 	if err != nil {
 		return BillAmount{}, err
 	}
-	start, startErr := dating.startDate("start", inp.StartDate, inp.StartOffset)
+	start, startErr := dating.firstDay("start", inp.StartDate, inp.StartOffset)
 	end, endErr := dating.endDate(inp.EndDate, inp.EndOffset)
 	if err := errors.Join(startErr, endErr); err != nil {
 		return BillAmount{}, err
@@ -633,8 +618,8 @@ func (s *Service) UpsertBillAmount(ctx context.Context, inp BillAmount) (BillAmo
 	return billAmountFromDB(a, dating.at)
 }
 
-// GetBillAmount returns the Bill Amount id, in an Event at the Event's date.
-func (s *Service) GetBillAmount(ctx context.Context, id string) (BillAmount, error) {
+// getBillAmount returns the Bill Amount id, in an Event at the Event's date.
+func (s *Service) getBillAmount(ctx context.Context, id string) (BillAmount, error) {
 	a, err := s.q.GetBillAmount(ctx, id)
 	if err != nil {
 		return BillAmount{}, fmt.Errorf("getting bill amount: %w", err)
@@ -664,7 +649,7 @@ func (s *Service) ListBillAmounts(ctx context.Context, billID string) ([]BillAmo
 		}
 		result = append(result, a)
 	}
-	sortBillParts(&Bill{Amounts: result})
+	sortByDayAndID(result, BillAmount.dayAndID)
 	return result, nil
 }
 
@@ -680,7 +665,7 @@ func (s *Service) UpsertBillEnd(ctx context.Context, inp BillEnd) (BillEnd, erro
 	if err != nil {
 		return BillEnd{}, err
 	}
-	if inp.Date, err = dating.startDate("end", inp.Date, inp.DateOffset); err != nil {
+	if inp.Date, err = dating.firstDay("end", inp.Date, inp.DateOffset); err != nil {
 		return BillEnd{}, err
 	}
 	if err := errors.Join(checkRequired("bill", inp.BillID), checkRequired("end date", inp.Date)); err != nil {
@@ -732,10 +717,7 @@ type BillsView struct {
 
 // GetEvent is the Event id, or nil for "" or an Event that doesn't exist.
 func (v *BillsView) GetEvent(id string) *Event {
-	if ev, ok := v.Events[id]; ok {
-		return &ev
-	}
-	return nil
+	return eventByID(v.Events, id)
 }
 
 func (v *BillsView) GetBudgetCategory(id *string) *TransferTemplateCategory {

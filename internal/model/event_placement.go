@@ -1,6 +1,7 @@
 package model
 
 import (
+	"cmp"
 	"context"
 	"slices"
 
@@ -73,6 +74,16 @@ type plans struct {
 	// startupShares are the placed Startup Share accounts, by account ID, with their placed investment
 	// rounds and share changes, and their Options but those funded by a left-out Account.
 	startupShares map[string]*startupShares
+}
+
+// sortByDayAndID orders entries by the day and ID key gives each: stored offsets don't sort as the days
+// they place at. Of two entries on the same day, the one with the later ID comes last.
+func sortByDayAndID[T any](entries []T, key func(T) (date.Date, string)) {
+	slices.SortStableFunc(entries, func(a, b T) int {
+		aDay, aID := key(a)
+		bDay, bID := key(b)
+		return cmp.Or(cmp.Compare(aDay, bDay), cmp.Compare(aID, bID))
+	})
 }
 
 // usesLeftOutAccount reports whether t moves money from or to an Account that is left out, which
@@ -175,6 +186,20 @@ func placeEntries(events []Event, stored storedEntries, placements EventPlacemen
 	return p, nil
 }
 
+// partOwner is how a part finds the placed Salary or Bill it belongs to, of owners by index of their
+// IDs: given its owner's ID and its own Event, it is its owner with the date the part's dates are stored
+// after. ok is false when either is left out.
+func partOwner[O any](owners []O, index map[string]int, placed func(eventID *string) (date.Date, bool)) func(ownerID string, eventID *string) (owner *O, day date.Date, ok bool) {
+	return func(ownerID string, eventID *string) (*O, date.Date, bool) {
+		i, found := index[ownerID]
+		day, ok := placed(eventID)
+		if !ok || !found {
+			return nil, 0, false
+		}
+		return &owners[i], day, true
+	}
+}
+
 // placeBills places the Bills of stored whose Events placed places, each with the Bill Amounts and ends
 // whose own Events it places, as placeSalaries places Salaries.
 func placeBills(p *plans, stored storedEntries, placed func(eventID *string) (date.Date, bool)) error {
@@ -185,13 +210,7 @@ func placeBills(p *plans, stored storedEntries, placed func(eventID *string) (da
 			p.bills = append(p.bills, billFromDB(row))
 		}
 	}
-	part := func(billID string, eventID *string) (b *Bill, day date.Date, ok bool) {
-		i, found := index[billID]
-		if day, ok = placed(eventID); !ok || !found {
-			return nil, 0, false
-		}
-		return &p.bills[i], day, true
-	}
+	part := partOwner(p.bills, index, placed)
 	for _, row := range stored.billAmounts {
 		if b, day, ok := part(row.BillID, row.EventID); ok {
 			amt, err := billAmountFromDB(row, day)
@@ -222,15 +241,7 @@ func placeSalaries(p *plans, stored storedEntries, placed func(eventID *string) 
 			p.salaries = append(p.salaries, salaryFromDB(row, day))
 		}
 	}
-	// part is the placed Salary salaryID a part in the Event eventID belongs to, with the date the part's
-	// dates are stored after. ok is false when either is left out.
-	part := func(salaryID string, eventID *string) (sal *Salary, day date.Date, ok bool) {
-		i, found := index[salaryID]
-		if day, ok = placed(eventID); !ok || !found {
-			return nil, 0, false
-		}
-		return &p.salaries[i], day, true
-	}
+	part := partOwner(p.salaries, index, placed)
 	for _, row := range stored.salaryAmounts {
 		if sal, day, ok := part(row.SalaryID, row.EventID); ok {
 			amt, err := salaryAmountFromDB(row, day)
@@ -299,6 +310,6 @@ func placeStartupShares(p *plans, stored storedEntries, placed func(eventID *str
 	// Stored offsets don't sort as the dates they place at.
 	for _, ss := range p.startupShares {
 		slices.SortStableFunc(ss.rounds, compareInvestmentRounds)
-		slices.SortStableFunc(ss.shareChanges, compareShareChanges)
+		sortByDayAndID(ss.shareChanges, ShareChange.dayAndID)
 	}
 }

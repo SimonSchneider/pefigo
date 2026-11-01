@@ -2,6 +2,7 @@ package model_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/SimonSchneider/goslu/date"
@@ -19,6 +20,16 @@ type eventPart struct {
 	get func(ctx context.Context, id string) (string, date.Date, error)
 }
 
+// listedOn is the Event and first date of the part id of parts, as its owner's page lists it.
+func listedOn[T any](parts []T, id string, of func(T) (partID, eventID string, day date.Date)) (string, date.Date, error) {
+	for _, p := range parts {
+		if partID, eventID, day := of(p); partID == id {
+			return eventID, day, nil
+		}
+	}
+	return "", 0, fmt.Errorf("%s isn't listed", id)
+}
+
 // eventParts are every kind of dated part, on a Salary, a Bill and a Startup Share account.
 func eventParts(t *testing.T, svc *model.Service) []eventPart {
 	t.Helper()
@@ -27,6 +38,21 @@ func eventParts(t *testing.T, svc *model.Service) []eventPart {
 	bill := mustBillIn(t, svc, mustBillAccount(t, svc, "Household", checking.ID), "Gym")
 	startup := mustAccount(t, svc, "Startup Co")
 	mustStartupShareAccount(t, svc, startup.ID, nil, nil)
+	// salaryPage and billPage are Salary A and the Gym as their pages show them.
+	salaryPage := func(ctx context.Context) (model.Salary, error) {
+		page, err := svc.GetSalaryEditPageData(ctx, salary.ID)
+		if err != nil {
+			return model.Salary{}, err
+		}
+		return page.Salary, nil
+	}
+	billPage := func(ctx context.Context) (model.Bill, error) {
+		page, err := svc.GetBillEditPageData(ctx, bill.ID)
+		if err != nil {
+			return model.Bill{}, err
+		}
+		return page.Bill, nil
+	}
 	return []eventPart{
 		{model.EventEntrySalaryAmount,
 			func(ctx context.Context, id, eventID, offsetEventID string, offset int64) (string, error) {
@@ -34,8 +60,11 @@ func eventParts(t *testing.T, svc *model.Service) []eventPart {
 				return a.ID, err
 			},
 			func(ctx context.Context, id string) (string, date.Date, error) {
-				a, err := svc.GetSalaryAmount(ctx, id)
-				return a.EventID, a.StartDate, err
+				sal, err := salaryPage(ctx)
+				if err != nil {
+					return "", 0, err
+				}
+				return listedOn(sal.Amounts, id, func(a model.SalaryAmount) (string, string, date.Date) { return a.ID, a.EventID, a.StartDate })
 			}},
 		{model.EventEntrySalaryAdjustment,
 			func(ctx context.Context, id, eventID, offsetEventID string, offset int64) (string, error) {
@@ -43,8 +72,11 @@ func eventParts(t *testing.T, svc *model.Service) []eventPart {
 				return a.ID, err
 			},
 			func(ctx context.Context, id string) (string, date.Date, error) {
-				a, err := svc.GetSalaryAdjustment(ctx, id)
-				return a.EventID, a.ValidFrom, err
+				sal, err := salaryPage(ctx)
+				if err != nil {
+					return "", 0, err
+				}
+				return listedOn(sal.Adjustments, id, func(a model.SalaryAdjustment) (string, string, date.Date) { return a.ID, a.EventID, a.ValidFrom })
 			}},
 		{model.EventEntryPartialParentalLeave,
 			func(ctx context.Context, id, eventID, offsetEventID string, offset int64) (string, error) {
@@ -52,8 +84,11 @@ func eventParts(t *testing.T, svc *model.Service) []eventPart {
 				return l.ID, err
 			},
 			func(ctx context.Context, id string) (string, date.Date, error) {
-				l, err := svc.GetPartialParentalLeave(ctx, id)
-				return l.EventID, l.StartDate, err
+				sal, err := salaryPage(ctx)
+				if err != nil {
+					return "", 0, err
+				}
+				return listedOn(sal.PartialParentalLeaves, id, func(l model.PartialParentalLeave) (string, string, date.Date) { return l.ID, l.EventID, l.StartDate })
 			}},
 		{model.EventEntryFullParentalLeave,
 			func(ctx context.Context, id, eventID, offsetEventID string, offset int64) (string, error) {
@@ -61,8 +96,11 @@ func eventParts(t *testing.T, svc *model.Service) []eventPart {
 				return l.ID, err
 			},
 			func(ctx context.Context, id string) (string, date.Date, error) {
-				l, err := svc.GetFullParentalLeave(ctx, id)
-				return l.EventID, l.StartDate, err
+				sal, err := salaryPage(ctx)
+				if err != nil {
+					return "", 0, err
+				}
+				return listedOn(sal.FullParentalLeaves, id, func(l model.FullParentalLeave) (string, string, date.Date) { return l.ID, l.EventID, l.StartDate })
 			}},
 		{model.EventEntrySalaryEnd,
 			func(ctx context.Context, id, eventID, offsetEventID string, offset int64) (string, error) {
@@ -79,8 +117,11 @@ func eventParts(t *testing.T, svc *model.Service) []eventPart {
 				return a.ID, err
 			},
 			func(ctx context.Context, id string) (string, date.Date, error) {
-				a, err := svc.GetBillAmount(ctx, id)
-				return a.EventID, a.StartDate, err
+				b, err := billPage(ctx)
+				if err != nil {
+					return "", 0, err
+				}
+				return listedOn(b.Amounts, id, func(a model.BillAmount) (string, string, date.Date) { return a.ID, a.EventID, a.StartDate })
 			}},
 		{model.EventEntryBillEnd,
 			func(ctx context.Context, id, eventID, offsetEventID string, offset int64) (string, error) {

@@ -358,11 +358,7 @@ func newTransferTemplatesView(schedule *TransferSchedule, day date.Date, account
 
 // GetEvent is the Event id, or nil for "" or an Event that doesn't exist.
 func (v *TransferTemplatesView) GetEvent(id string) *Event {
-	ev, ok := v.Events[id]
-	if !ok {
-		return nil
-	}
-	return &ev
+	return eventByID(v.Events, id)
 }
 
 // TemplateCount is the number of Transfer Templates the table lists: a Bill, or the Transfer Templates
