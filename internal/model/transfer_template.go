@@ -74,9 +74,6 @@ type TransferTemplate struct {
 	// EventID is the Event the Transfer Template is in, or "" in the Baseline. In an Event its Start and
 	// End Dates, and the date of a one-off, are stored as offsets from the Event's date.
 	EventID string
-	// EndedByEventID is the placed Event whose end it ends on, when an Event's end is earlier than its
-	// own End Date. Only a Transfer Schedule places Events, so a stored Transfer Template has none.
-	EndedByEventID string
 	// StartOffset and EndOffset, when set, give the Start and End Dates of a Transfer Template in an
 	// Event as days after the Event's date, in place of StartDate and EndDate. Only saving reads them,
 	// so a loaded Transfer Template has none.
@@ -149,9 +146,8 @@ type TransferTemplateInput struct {
 }
 
 // UpsertTransferTemplate saves the Transfer Template. In an Event its dates may be given as days after
-// the Event's date, its Start Date is the Event's date when it isn't given, its dates are saved as
-// offsets from the Event's date, and an end the Event gave it is lifted. Without a recurrence it is a
-// one-off on its Start Date.
+// the Event's date, its Start Date is the Event's date when it isn't given, and its dates are saved as
+// offsets from the Event's date. Without a recurrence it is a one-off on its Start Date.
 func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTemplate) (TransferTemplate, error) {
 	at, err := s.eventDate(ctx, inp.EventID)
 	if err != nil {
@@ -208,10 +204,6 @@ func (s *Service) UpsertTransferTemplate(ctx context.Context, inp TransferTempla
 	})
 	if err != nil {
 		return TransferTemplate{}, fmt.Errorf("failed to upsert template: %w", err)
-	}
-	// An Event only ends entries outside it.
-	if err := s.DeleteEventEnd(ctx, inp.EventID, EventEntry{Kind: EventEntryTransferTemplate, ID: t.ID}); err != nil {
-		return TransferTemplate{}, err
 	}
 	return transferTemplateFromDB(t, at)
 }

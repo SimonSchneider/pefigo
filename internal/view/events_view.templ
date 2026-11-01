@@ -142,7 +142,6 @@ templ EventCard(ev model.EventView) {
 				</a>
 			</div>
 			@EventEntriesTable(ev, false)
-			@EventEndsTable(ev, false)
 		</div>
 	</div>
 }
@@ -235,52 +234,6 @@ templ OffsetDate(d date.Date, offset date.Duration) {
 	<span class="text-xs text-base-content/50 whitespace-nowrap">{ formatOffset(offset) }</span>
 }
 
-// EventEndsTable lists the entries outside ev that it ends, with a button to lift each end when
-// editable.
-templ EventEndsTable(ev model.EventView, editable bool) {
-	if len(ev.Ends) > 0 {
-		<div class="overflow-x-auto">
-			<table class="table table-sm w-full">
-				<thead class="bg-base-200/60">
-					<tr>
-						<th>Ends</th>
-						<th>Name</th>
-						@EndDateHeaderCell()
-						if editable {
-							<th></th>
-						}
-					</tr>
-				</thead>
-				<tbody>
-					for _, end := range ev.Ends {
-						<tr>
-							<td class="text-xs text-base-content/60">
-								if end.Entry.Kind == model.EventEntryGrowthModel {
-									Growth model
-								} else {
-									Transfer Template
-								}
-							</td>
-							<td>{ end.Name }</td>
-							<td>@OffsetDate(end.EndDate, end.Offset)</td>
-							if editable {
-								<td class="text-right">
-									<form method="post" action={ templ.SafeURL("/events/" + ev.ID + "/ends/remove") }>
-										<input type="hidden" name="entry" value={ end.Entry.String() }/>
-										<button type="submit" class="btn btn-ghost btn-xs text-error" title={ "Lift the end of " + end.Name }>
-											@IconX("w-3.5 h-3.5")
-										</button>
-									</form>
-								</td>
-							}
-						</tr>
-					}
-				</tbody>
-			</table>
-		</div>
-	}
-}
-
 templ RemoveFromEventButton(eventID string, entry model.EventEntry) {
 	<form method="post" action={ templ.SafeURL("/events/" + eventID + "/entries/remove") }>
 		<input type="hidden" name="entry" value={ entry.String() }/>
@@ -306,7 +259,6 @@ templ EditEventContent(view *model.EventEditView) {
 				@EventForm(view)
 				if view.IsEdit() {
 					@EventEntriesCard(view)
-					@EventEndsCard(view)
 				}
 			</div>
 		</div>
@@ -366,67 +318,6 @@ templ EventEntriesCard(view *model.EventEditView) {
 	</div>
 }
 
-templ EventEndsCard(view *model.EventEditView) {
-	<div class="card bg-base-100 shadow-sm border border-base-300">
-		<div class="card-body p-5 gap-3">
-			<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/60">Entries it ends</h3>
-			if len(view.Event.Ends) == 0 {
-				<p class="text-sm text-base-content/50">Ends no entries.</p>
-			}
-			@EventEndsTable(view.Event, true)
-			<p class="text-xs text-base-content/60">
-				End a Transfer Template or growth model outside the Event, some days after the Event's date: +0 ends it on the Event's date, which it no longer applies on. To change one, end it here and add its replacement to the Event.
-			</p>
-			<form method="post" action={ templ.SafeURL("/events/" + view.Event.ID + "/ends/") } class="flex flex-wrap items-end gap-2">
-				<div class="form-control flex-1 min-w-64">
-					<label class="label"><span class="label-text text-xs">Entry</span></label>
-					<select class="select select-sm select-bordered w-full" name="entry">
-						@EntryOptions(view.Endable)
-					</select>
-				</div>
-				<div class="form-control w-28">
-					<label class="label"><span class="label-text text-xs">Days after</span></label>
-					<input type="text" class="input input-sm input-bordered w-full" name="end_date" value="+0"/>
-				</div>
-				<button type="submit" class="btn btn-sm btn-primary">End</button>
-			</form>
-		</div>
-	</div>
-}
-
-// EntryOptions are the options of entries, grouped by kind, each naming the Event it is in.
-templ EntryOptions(entries []model.NamedEventEntry) {
-	for _, group := range []struct {
-		kind  model.EventEntryKind
-		label string
-	}{
-		{model.EventEntryAccount, "Accounts"},
-		{model.EventEntryGrowthModel, "Growth models"},
-		{model.EventEntryTransferTemplate, "Transfer Templates"},
-	} {
-		{{ found := false }}
-		for _, e := range entries {
-			if e.Kind == group.kind {
-				{{ found = true }}
-			}
-		}
-		if found {
-			<optgroup label={ group.label }>
-				for _, e := range entries {
-					if e.Kind == group.kind {
-						<option value={ e.String() }>
-							{ e.Name }
-							if e.EventName != "" {
-								(in { e.EventName })
-							}
-						</option>
-					}
-				}
-			</optgroup>
-		}
-	}
-}
-
 templ DeleteEventContent(view *model.EventDeleteView) {
 	<main class="flex-1 flex flex-col min-h-0">
 		@Header("Delete " + view.Event.Name, BackButton(string(eventEditURL(view.Event.ID))))
@@ -435,11 +326,10 @@ templ DeleteEventContent(view *model.EventDeleteView) {
 				<div class="card bg-base-100 shadow-sm border border-error/40">
 					<div class="card-body p-5 gap-3">
 						<p>
-							Deleting <strong>{ view.Event.Name }</strong> on { view.Event.Date.String() } deletes the entries it adds and lifts the ends it declares.
+							Deleting <strong>{ view.Event.Name }</strong> on { view.Event.Date.String() } deletes the entries it adds.
 							To keep an entry, remove it from the Event first: it moves to the Baseline with the dates it applies on.
 						</p>
 						@EventEntriesTable(view.Event, false)
-						@EventEndsTable(view.Event, false)
 						if len(view.AlsoDeleted) > 0 {
 							<div>
 								<p class="text-sm font-medium">Also deleted with its accounts:</p>

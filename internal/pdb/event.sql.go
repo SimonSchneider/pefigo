@@ -19,38 +19,6 @@ func (q *Queries) DeleteEvent(ctx context.Context, id string) error {
 	return err
 }
 
-const deleteGrowthModelEnd = `-- name: DeleteGrowthModelEnd :exec
-DELETE FROM event_growth_model_end
-WHERE event_id = ?
-  AND growth_model_id = ?
-`
-
-type DeleteGrowthModelEndParams struct {
-	EventID       string
-	GrowthModelID string
-}
-
-func (q *Queries) DeleteGrowthModelEnd(ctx context.Context, arg DeleteGrowthModelEndParams) error {
-	_, err := q.db.ExecContext(ctx, deleteGrowthModelEnd, arg.EventID, arg.GrowthModelID)
-	return err
-}
-
-const deleteTransferTemplateEnd = `-- name: DeleteTransferTemplateEnd :exec
-DELETE FROM event_transfer_template_end
-WHERE event_id = ?
-  AND transfer_template_id = ?
-`
-
-type DeleteTransferTemplateEndParams struct {
-	EventID            string
-	TransferTemplateID string
-}
-
-func (q *Queries) DeleteTransferTemplateEnd(ctx context.Context, arg DeleteTransferTemplateEndParams) error {
-	_, err := q.db.ExecContext(ctx, deleteTransferTemplateEnd, arg.EventID, arg.TransferTemplateID)
-	return err
-}
-
 const getEvent = `-- name: GetEvent :one
 SELECT id, name, date, planned, created_at, updated_at
 FROM event
@@ -96,66 +64,6 @@ func (q *Queries) ListEvents(ctx context.Context) ([]Event, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listGrowthModelEnds = `-- name: ListGrowthModelEnds :many
-SELECT event_id, growth_model_id, end_offset
-FROM event_growth_model_end
-ORDER BY event_id,
-  growth_model_id
-`
-
-func (q *Queries) ListGrowthModelEnds(ctx context.Context) ([]EventGrowthModelEnd, error) {
-	rows, err := q.db.QueryContext(ctx, listGrowthModelEnds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []EventGrowthModelEnd
-	for rows.Next() {
-		var i EventGrowthModelEnd
-		if err := rows.Scan(&i.EventID, &i.GrowthModelID, &i.EndOffset); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listTransferTemplateEnds = `-- name: ListTransferTemplateEnds :many
-SELECT event_id, transfer_template_id, end_offset
-FROM event_transfer_template_end
-ORDER BY event_id,
-  transfer_template_id
-`
-
-func (q *Queries) ListTransferTemplateEnds(ctx context.Context) ([]EventTransferTemplateEnd, error) {
-	rows, err := q.db.QueryContext(ctx, listTransferTemplateEnds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []EventTransferTemplateEnd
-	for rows.Next() {
-		var i EventTransferTemplateEnd
-		if err := rows.Scan(&i.EventID, &i.TransferTemplateID, &i.EndOffset); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -224,40 +132,4 @@ func (q *Queries) UpsertEvent(ctx context.Context, arg UpsertEventParams) (Event
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const upsertGrowthModelEnd = `-- name: UpsertGrowthModelEnd :exec
-INSERT INTO event_growth_model_end (event_id, growth_model_id, end_offset)
-VALUES (?, ?, ?) ON CONFLICT (event_id, growth_model_id) DO
-UPDATE
-SET end_offset = EXCLUDED.end_offset
-`
-
-type UpsertGrowthModelEndParams struct {
-	EventID       string
-	GrowthModelID string
-	EndOffset     int64
-}
-
-func (q *Queries) UpsertGrowthModelEnd(ctx context.Context, arg UpsertGrowthModelEndParams) error {
-	_, err := q.db.ExecContext(ctx, upsertGrowthModelEnd, arg.EventID, arg.GrowthModelID, arg.EndOffset)
-	return err
-}
-
-const upsertTransferTemplateEnd = `-- name: UpsertTransferTemplateEnd :exec
-INSERT INTO event_transfer_template_end (event_id, transfer_template_id, end_offset)
-VALUES (?, ?, ?) ON CONFLICT (event_id, transfer_template_id) DO
-UPDATE
-SET end_offset = EXCLUDED.end_offset
-`
-
-type UpsertTransferTemplateEndParams struct {
-	EventID            string
-	TransferTemplateID string
-	EndOffset          int64
-}
-
-func (q *Queries) UpsertTransferTemplateEnd(ctx context.Context, arg UpsertTransferTemplateEndParams) error {
-	_, err := q.db.ExecContext(ctx, upsertTransferTemplateEnd, arg.EventID, arg.TransferTemplateID, arg.EndOffset)
-	return err
 }

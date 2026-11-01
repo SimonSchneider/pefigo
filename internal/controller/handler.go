@@ -97,7 +97,7 @@ func billEditURL(billID string) string {
 	return fmt.Sprintf("/bill-items/%s/edit", billID)
 }
 
-// eventEditURL is the edit page of the Event eventID, where its entries and ends are edited.
+// eventEditURL is the edit page of the Event eventID, which lists its entries.
 func eventEditURL(eventID string) string {
 	return fmt.Sprintf("/events/%s/edit", eventID)
 }
@@ -140,12 +140,6 @@ func NewHandler(svc *model.Service, public fs.FS) http.Handler {
 	mux.Handle("POST /events/{id}/delete", h.eventDelete())
 	mux.Handle("POST /events/{id}/entries/remove", h.eventAction("removing from event", func(ctx context.Context, _ string, f eventEntryForm) error {
 		return h.svc.RemoveFromEvent(ctx, f.Entry)
-	}))
-	mux.Handle("POST /events/{id}/ends/{$}", h.eventAction("ending in event", func(ctx context.Context, eventID string, f eventEntryForm) error {
-		return h.svc.UpsertEventEnd(ctx, model.EventEndInput{EventID: eventID, Entry: f.Entry, EndDate: f.EndDate, EndOffset: f.EndOffset})
-	}))
-	mux.Handle("POST /events/{id}/ends/remove", h.eventAction("lifting the end", func(ctx context.Context, eventID string, f eventEntryForm) error {
-		return h.svc.DeleteEventEnd(ctx, eventID, f.Entry)
 	}))
 
 	mux.Handle("GET /snapshots-table", h.snapshotsTablePage())

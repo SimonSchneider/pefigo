@@ -40,8 +40,8 @@ func placedEvents(events []Event, placements EventPlacements) []Event {
 
 // plans are the entries of the plans for the future with the Events placed: the Accounts, growth
 // models and stored Transfer Templates outside Events and in the placed Events, each at absolute
-// dates, and each one the placed Events end ending on the earliest End Date they give it. The entries
-// of a left-out Event are left out, and so is every entry that uses one of its Accounts.
+// dates. The entries of a left-out Event are left out, and so is every entry that uses one of its
+// Accounts.
 type plans struct {
 	events            []Event   // the placed Events, at the dates they are placed at
 	accounts          []Account // by name and ID
@@ -73,8 +73,8 @@ func (s *Service) placeEvents(ctx context.Context, placements EventPlacements) (
 	return placeEntries(events, stored, placements)
 }
 
-// placeEntries places stored as placements say. It knows how to place and end each type of entry,
-// and nothing about why the Events are placed where they are.
+// placeEntries places stored as placements say. It knows how to place each type of entry, and
+// nothing about why the Events are placed where they are.
 func placeEntries(events []Event, stored storedEntries, placements EventPlacements) (*plans, error) {
 	p := &plans{leftOutAccounts: make(map[string]bool)}
 	own := make(map[string]date.Date, len(events))
@@ -110,7 +110,6 @@ func placeEntries(events []Event, stored storedEntries, placements EventPlacemen
 		}
 	}
 
-	growthIndex := make(map[string]int)
 	for _, row := range stored.growthModels {
 		day, ok := placed(row.EventID)
 		if !ok || p.leftOutAccounts[row.AccountID] {
@@ -120,11 +119,9 @@ func placeEntries(events []Event, stored storedEntries, placements EventPlacemen
 		if err != nil {
 			return nil, err
 		}
-		growthIndex[gm.ID] = len(p.growthModels)
 		p.growthModels = append(p.growthModels, gm)
 	}
 
-	transferIndex := make(map[string]int)
 	for _, row := range stored.transferTemplates {
 		day, ok := placed(row.EventID)
 		if !ok || p.leftOutAccounts[ui.OrDefault(row.FromAccountID)] || p.leftOutAccounts[ui.OrDefault(row.ToAccountID)] {
@@ -139,32 +136,8 @@ func placeEntries(events []Event, stored storedEntries, placements EventPlacemen
 		if err != nil {
 			return nil, err
 		}
-		transferIndex[tt.ID] = len(p.transferTemplates)
 		p.transferTemplates = append(p.transferTemplates, tt)
 	}
 
-	for _, end := range stored.transferEnds {
-		day, ok := at[end.EventID]
-		i, placedEntry := transferIndex[end.TransferTemplateID]
-		if ok && placedEntry && endEarlier(&p.transferTemplates[i].EndDate, placeDate(end.EndOffset, day)) {
-			p.transferTemplates[i].EndedByEventID = end.EventID
-		}
-	}
-	for _, end := range stored.growthEnds {
-		day, ok := at[end.EventID]
-		i, placedEntry := growthIndex[end.GrowthModelID]
-		if ok && placedEntry {
-			endEarlier(&p.growthModels[i].EndDate, placeDate(end.EndOffset, day))
-		}
-	}
 	return p, nil
-}
-
-// endEarlier ends an entry on day, unless it already ends on or before it, and reports whether it did.
-func endEarlier(end **date.Date, day date.Date) bool {
-	if *end == nil || day.Before(**end) {
-		*end = &day
-		return true
-	}
-	return false
 }

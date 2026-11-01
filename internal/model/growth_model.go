@@ -48,8 +48,8 @@ func (gm GrowthModel) AppliesOn(day date.Date) bool {
 }
 
 // AccountGrowthModelInput is a growth model to save. In an Event its dates may be given as days after
-// the Event's date, its Start Date is the Event's date when it isn't given, its dates are saved as
-// offsets from the Event's date, and an end the Event gave it is lifted.
+// the Event's date, its Start Date is the Event's date when it isn't given, and its dates are saved as
+// offsets from the Event's date.
 type AccountGrowthModelInput struct {
 	ID               string
 	AccountID        string
@@ -175,10 +175,6 @@ func (s *Service) UpsertAccountGrowthModel(ctx context.Context, inp AccountGrowt
 	})
 	if err != nil {
 		return GrowthModel{}, fmt.Errorf("failed to upsert growth model: %w", err)
-	}
-	// An Event only ends entries outside it.
-	if err := s.DeleteEventEnd(ctx, inp.EventID, EventEntry{Kind: EventEntryGrowthModel, ID: gm.ID}); err != nil {
-		return GrowthModel{}, err
 	}
 	return growthModelFromDB(gm, at)
 }

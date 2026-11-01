@@ -86,18 +86,6 @@ type Event struct {
 	UpdatedAt int64
 }
 
-type EventGrowthModelEnd struct {
-	EventID       string
-	GrowthModelID string
-	EndOffset     int64
-}
-
-type EventTransferTemplateEnd struct {
-	EventID            string
-	TransferTemplateID string
-	EndOffset          int64
-}
-
 type FaviconCache struct {
 	Domain      string
 	IconData    []byte

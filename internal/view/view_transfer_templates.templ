@@ -292,9 +292,6 @@ templ TransferTemplateTableRow(view *model.TransferTemplatesView, t *model.Trans
 						} else {
 							-
 						}
-						if ended := view.GetEvent(t.EndedByEventID); ended != nil {
-							<span title={ "Ended by the Event " + ended.Name }>(ended by { ended.Name })</span>
-						}
 					</div>
 				}
 			</div>

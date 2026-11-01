@@ -108,26 +108,15 @@ func (e *eventInputForm) FromForm(r *http.Request) error {
 	return nil
 }
 
-// eventEntryForm names an entry to remove from its Event, or to end in one on EndDate, or
-// EndOffset days after the Event's date.
+// eventEntryForm names an entry to remove from its Event.
 type eventEntryForm struct {
-	Entry     model.EventEntry
-	EndDate   date.Date
-	EndOffset *date.Duration
+	Entry model.EventEntry
 }
 
 func (e *eventEntryForm) FromForm(r *http.Request) error {
 	if err := shttp.Parse(&e.Entry, model.ParseEventEntry, r.FormValue("entry"), model.EventEntry{}); err != nil {
 		return fmt.Errorf("parsing entry: %w", err)
 	}
-	end, endOffset, err := parseEntryDate(r, "end_date")
-	if err != nil {
-		return err
-	}
-	if end != nil {
-		e.EndDate = *end
-	}
-	e.EndOffset = endOffset
 	return nil
 }
 

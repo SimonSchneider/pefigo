@@ -347,7 +347,6 @@ func groupRow(id string, members []TransferScheduleRow) TransferScheduleRow {
 			EndDate:          first.EndDate,
 			BudgetCategoryID: first.BudgetCategoryID,
 			EventID:          first.EventID,
-			EndedByEventID:   first.EndedByEventID,
 			Source:           first.Source,
 		},
 		state: TransferDisabled,

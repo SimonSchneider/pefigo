@@ -70,13 +70,6 @@ func mustRemoveFromEvent(t *testing.T, svc *model.Service, entry model.EventEntr
 	}
 }
 
-func mustEventEnd(t *testing.T, svc *model.Service, inp model.EventEndInput) {
-	t.Helper()
-	if err := svc.UpsertEventEnd(t.Context(), inp); err != nil {
-		t.Fatalf("end %s in event: %v", inp.Entry, err)
-	}
-}
-
 func dateOf(d *date.Date) string {
 	if d == nil {
 		return "none"
@@ -247,31 +240,9 @@ func TestAnEntryCanOnlyJoinAnEventThatExists(t *testing.T) {
 	}
 }
 
-func TestAnEventOnlyEndsEntriesOutsideIt(t *testing.T) {
+func TestTheEventsPageListsEachEventWithItsEntries(t *testing.T) {
 	svc := newTestService(t)
 	checking := mustAccount(t, svc, "Checking")
-	ev := mustEvent(t, svc, model.EventInput{Name: "Apartment", Date: mustParseDate("2028-03-01")})
-	inside := mustTransferTemplate(t, svc, model.TransferTemplate{
-		Name: "Amortization", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(5000),
-		Recurrence: "*-*-25", Enabled: true, EventID: ev.ID,
-	})
-	err := svc.UpsertEventEnd(t.Context(), model.EventEndInput{EventID: ev.ID, Entry: model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: inside.ID}})
-	if !errors.Is(err, model.ErrInvalidInput) {
-		t.Fatalf("expected invalid input for an Event ending its own entry, got %v", err)
-	}
-	acc := model.EventEntry{Kind: model.EventEntryAccount, ID: checking.ID}
-	if err := svc.UpsertEventEnd(t.Context(), model.EventEndInput{EventID: ev.ID, Entry: acc}); !errors.Is(err, model.ErrInvalidInput) {
-		t.Fatalf("expected invalid input for an Event ending an account, got %v", err)
-	}
-}
-
-func TestTheEventsPageListsEachEventWithItsEntriesAndTheEntriesItEnds(t *testing.T) {
-	svc := newTestService(t)
-	checking := mustAccount(t, svc, "Checking")
-	savings := mustTransferTemplate(t, svc, model.TransferTemplate{
-		Name: "Savings", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(10000),
-		Recurrence: "*-*-25", StartDate: mustParseDate("2027-01-01"), Enabled: true,
-	})
 	apartment := mustEvent(t, svc, model.EventInput{Name: "Apartment", Date: mustParseDate("2028-03-01")})
 	property := mustEventAccount(t, svc, "Property", apartment.ID)
 	growth := mustGrowthModel(t, svc, model.AccountGrowthModelInput{AccountID: property.ID, AnnualRate: newFixedValue(0.02), EventID: apartment.ID})
@@ -279,7 +250,6 @@ func TestTheEventsPageListsEachEventWithItsEntriesAndTheEntriesItEnds(t *testing
 		Name: "Amortization", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(5000),
 		Recurrence: "*-*-25", StartDate: mustParseDate("2028-04-01"), Enabled: true, EventID: apartment.ID,
 	})
-	mustEventEnd(t, svc, model.EventEndInput{EventID: apartment.ID, Entry: model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: savings.ID}})
 	mustEvent(t, svc, model.EventInput{Name: "Sabbatical", Date: mustParseDate("2029-01-01"), Planned: ptr(false)})
 
 	page, err := svc.GetEventsPageData(t.Context())
@@ -299,12 +269,9 @@ func TestTheEventsPageListsEachEventWithItsEntriesAndTheEntriesItEnds(t *testing
 	if len(ev.TransferTemplates) != 1 || ev.TransferTemplates[0].ID != amortization.ID || ev.TransferTemplates[0].StartOffset() != 31*date.Day {
 		t.Errorf("expected Amortization 31 days after the Event's date, got %+v", ev.TransferTemplates)
 	}
-	if len(ev.Ends) != 1 || ev.Ends[0].Entry.ID != savings.ID || ev.Ends[0].Name != "Savings" || ev.Ends[0].EndDate != apartment.Date {
-		t.Errorf("expected the Event to end Savings on its date, got %+v", ev.Ends)
-	}
 }
 
-func TestDeletingAnEventDeletesTheEntriesItAddsAndLiftsTheEndsItDeclares(t *testing.T) {
+func TestDeletingAnEventDeletesTheEntriesItAdds(t *testing.T) {
 	svc := newTestService(t)
 	ctx := t.Context()
 	checking := mustAccount(t, svc, "Checking")
@@ -324,14 +291,13 @@ func TestDeletingAnEventDeletesTheEntriesItAddsAndLiftsTheEndsItDeclares(t *test
 		Name: "Deposit", FromAccountID: checking.ID, ToAccountID: property.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(100),
 		Recurrence: "*-*-01", StartDate: mustParseDate("2028-03-01"), Enabled: true,
 	})
-	mustEventEnd(t, svc, model.EventEndInput{EventID: apartment.ID, Entry: model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: savings.ID}})
 
 	confirm, err := svc.GetEventDeletePageData(ctx, apartment.ID)
 	if err != nil {
 		t.Fatalf("delete confirmation: %v", err)
 	}
-	if len(confirm.Event.Accounts) != 1 || len(confirm.Event.GrowthModels) != 1 || len(confirm.Event.TransferTemplates) != 1 || len(confirm.Event.Ends) != 1 {
-		t.Fatalf("expected the confirmation to list the account, growth model and Transfer Template it adds and the end it declares, got %+v", confirm.Event)
+	if len(confirm.Event.Accounts) != 1 || len(confirm.Event.GrowthModels) != 1 || len(confirm.Event.TransferTemplates) != 1 {
+		t.Fatalf("expected the confirmation to list the account, growth model and Transfer Template it adds, got %+v", confirm.Event)
 	}
 	if len(confirm.AlsoDeleted) != 1 || confirm.AlsoDeleted[0].ID != deposit.ID {
 		t.Fatalf("expected the confirmation to list Deposit, deleted with the Event's account, got %+v", confirm.AlsoDeleted)
@@ -349,12 +315,8 @@ func TestDeletingAnEventDeletesTheEntriesItAddsAndLiftsTheEndsItDeclares(t *test
 	if _, err := svc.GetTransferTemplate(ctx, amortization.ID); err == nil {
 		t.Errorf("expected the Event's Transfer Template to be deleted")
 	}
-	got := mustGetTransferTemplate(t, svc, savings.ID)
-	if got.EndDate != nil {
-		t.Errorf("expected Savings to keep running, got an End Date %s", dateOf(got.EndDate))
-	}
 	if state := transferStateOn(t, svc, savings.ID, "2028-06-25"); state != model.TransferActive {
-		t.Errorf("expected the lifted end to leave Savings active after the Event's date, got %s", state)
+		t.Errorf("expected Savings, outside the Event, to keep running, got %s", state)
 	}
 }
 
@@ -369,23 +331,13 @@ func transferStateOn(t *testing.T, svc *model.Service, id string, day string) mo
 	return "absent"
 }
 
-func TestTheBaselineSaysWhichEventEndsATransferTemplate(t *testing.T) {
-	svc := newTestService(t)
-	p := mustApartmentPlans(t, svc, "2028-03-01")
-
-	for _, tt := range mustTransferSchedule(t, svc).On(mustParseDate("2028-01-25")).Transfers() {
-		if tt.ID == p.savingsTT.ID && (tt.EndedByEventID != p.apartment.ID || dateOf(tt.EndDate) != "2028-03-01") {
-			t.Fatalf("expected Savings to end on 2028-03-01, ended by the Apartment, got %+v", tt.TransferTemplate)
-		}
-	}
-	if got := mustGetTransferTemplate(t, svc, p.savingsTT.ID); got.EndedByEventID != "" || got.EndDate != nil {
-		t.Fatalf("expected Savings as stored to have no End Date of its own, got %+v", got)
-	}
-}
-
 func TestAnEventListsItsEntriesByDate(t *testing.T) {
 	svc := newTestService(t)
 	p := mustApartmentPlans(t, svc, "2028-03-01")
+	moving := mustTransferTemplate(t, svc, model.TransferTemplate{
+		Name: "Moving costs", FromAccountID: p.checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(20000),
+		Enabled: true, EventID: p.apartment.ID,
+	})
 
 	page, err := svc.GetEventsPageData(t.Context())
 	if err != nil {
@@ -395,36 +347,7 @@ func TestAnEventListsItsEntriesByDate(t *testing.T) {
 	for _, tt := range page.Events[0].TransferTemplates {
 		names = append(names, tt.Name)
 	}
-	if want := []string{p.purchase.Name, p.smallerSavingsTT.Name, p.amortization.Name}; !slices.Equal(names, want) {
+	if want := []string{moving.Name, p.purchase.Name, p.amortization.Name}; !slices.Equal(names, want) {
 		t.Fatalf("expected the Transfer Templates by Start Date and name %v, got %v", want, names)
-	}
-}
-
-func TestSavingAnEntryIntoAnEventLiftsTheEndTheEventGaveIt(t *testing.T) {
-	svc := newTestService(t)
-	checking := mustAccount(t, svc, "Checking")
-	ev := mustEvent(t, svc, model.EventInput{Name: "Raise", Date: mustParseDate("2027-01-01")})
-	tt := mustTransferTemplate(t, svc, model.TransferTemplate{
-		Name: "Savings", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(1000),
-		Recurrence: "*-*-25", StartDate: mustParseDate("2026-01-01"), Enabled: true,
-	})
-	gm := mustGrowthModel(t, svc, model.AccountGrowthModelInput{AccountID: checking.ID, AnnualRate: newFixedValue(0.01), StartDate: mustParseDate("2026-01-01")})
-	mustEventEnd(t, svc, model.EventEndInput{EventID: ev.ID, Entry: model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: tt.ID}})
-	mustEventEnd(t, svc, model.EventEndInput{EventID: ev.ID, Entry: model.EventEntry{Kind: model.EventEntryGrowthModel, ID: gm.ID}})
-
-	tt.EventID = ev.ID
-	mustTransferTemplate(t, svc, tt)
-	if _, err := svc.UpsertAccountGrowthModel(t.Context(), model.AccountGrowthModelInput{
-		ID: gm.ID, AccountID: checking.ID, Type: gm.Type, AnnualRate: gm.AnnualRate, StartDate: gm.StartDate, EventID: ev.ID,
-	}); err != nil {
-		t.Fatalf("save growth model: %v", err)
-	}
-
-	view, err := svc.GetEventEditPageData(t.Context(), ev.ID)
-	if err != nil {
-		t.Fatalf("event page: %v", err)
-	}
-	if len(view.Event.Ends) != 0 {
-		t.Fatalf("expected an Event to end no entry in it, got %+v", view.Event.Ends)
 	}
 }

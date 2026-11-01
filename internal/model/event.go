@@ -17,9 +17,8 @@ import (
 )
 
 // Event is a named group of related changes to the plans for the future that happen around one date:
-// the Accounts, growth models and Transfer Templates it adds, and the Transfer Templates and growth
-// models outside it that it ends. Every date of its changes is an offset from its date, so moving it
-// moves them all. It is planned when the Baseline holds it at its date, and unplanned when only
+// the Accounts, growth models and Transfer Templates it adds. Every date of its changes is an offset
+// from its date, so moving it moves them all. It is planned when the Baseline holds it at its date, and unplanned when only
 // Scenarios use it.
 type Event struct {
 	ID      string
@@ -84,8 +83,7 @@ func (s *Service) ListEvents(ctx context.Context) ([]Event, error) {
 	return events, nil
 }
 
-// DeleteEvent deletes the Event with the entries it adds, and everything deleted with its Accounts,
-// and lifts the ends it declares.
+// DeleteEvent deletes the Event with the entries it adds, and everything deleted with its Accounts.
 func (s *Service) DeleteEvent(ctx context.Context, id string) error {
 	if err := s.q.DeleteEvent(ctx, id); err != nil {
 		return fmt.Errorf("deleting event: %w", err)
@@ -93,7 +91,7 @@ func (s *Service) DeleteEvent(ctx context.Context, id string) error {
 	return nil
 }
 
-// EventEntryKind is a type of entry an Event adds or ends.
+// EventEntryKind is a type of entry an Event adds.
 type EventEntryKind string
 
 const (
@@ -318,88 +316,12 @@ func (s *Service) setEntryEvent(ctx context.Context, entry EventEntry, eventID s
 	return nil
 }
 
-// EventEndInput ends a Transfer Template or growth model outside the Event on EndDate, which is the
-// Event's date when it isn't given. It is stored as days after the Event's date.
-type EventEndInput struct {
-	EventID string
-	Entry   EventEntry
-	EndDate date.Date
-	// EndOffset, when set, gives the End Date as days after the Event's date, in place of EndDate.
-	EndOffset *date.Duration
-}
-
-// UpsertEventEnd makes the Event end the entry. An Event only ends Transfer Templates and growth
-// models outside it.
-func (s *Service) UpsertEventEnd(ctx context.Context, inp EventEndInput) error {
-	at, err := s.eventDate(ctx, inp.EventID)
-	if err != nil {
-		return err
-	}
-	if inp.EventID == "" {
-		return fmt.Errorf("%w: no event to end %s in", ErrInvalidInput, inp.Entry)
-	}
-	end, err := givenDate("end", inp.EndDate, inp.EndOffset, inp.EventID, at)
-	if err != nil {
-		return err
-	}
-	if end.IsZero() {
-		end = at
-	}
-	offset := storeDate(end, at)
-	switch inp.Entry.Kind {
-	case EventEntryTransferTemplate:
-		tt, err := s.GetTransferTemplate(ctx, inp.Entry.ID)
-		if err != nil {
-			return err
-		}
-		if tt.EventID == inp.EventID {
-			return fmt.Errorf("%w: an event only ends entries outside it, and %q is in it", ErrInvalidInput, tt.Name)
-		}
-		err = s.q.UpsertTransferTemplateEnd(ctx, pdb.UpsertTransferTemplateEndParams{EventID: inp.EventID, TransferTemplateID: tt.ID, EndOffset: offset})
-		if err != nil {
-			return fmt.Errorf("ending transfer template: %w", err)
-		}
-	case EventEntryGrowthModel:
-		gm, err := s.GetGrowthModel(ctx, inp.Entry.ID)
-		if err != nil {
-			return err
-		}
-		if gm.EventID == inp.EventID {
-			return fmt.Errorf("%w: an event only ends entries outside it, and this growth model is in it", ErrInvalidInput)
-		}
-		err = s.q.UpsertGrowthModelEnd(ctx, pdb.UpsertGrowthModelEndParams{EventID: inp.EventID, GrowthModelID: gm.ID, EndOffset: offset})
-		if err != nil {
-			return fmt.Errorf("ending growth model: %w", err)
-		}
-	default:
-		return fmt.Errorf("%w: an event only ends Transfer Templates and growth models, not %s", ErrInvalidInput, inp.Entry)
-	}
-	return nil
-}
-
-// DeleteEventEnd lifts the end the Event declares for entry, if any.
-func (s *Service) DeleteEventEnd(ctx context.Context, eventID string, entry EventEntry) error {
-	var err error
-	switch entry.Kind {
-	case EventEntryTransferTemplate:
-		err = s.q.DeleteTransferTemplateEnd(ctx, pdb.DeleteTransferTemplateEndParams{EventID: eventID, TransferTemplateID: entry.ID})
-	case EventEntryGrowthModel:
-		err = s.q.DeleteGrowthModelEnd(ctx, pdb.DeleteGrowthModelEndParams{EventID: eventID, GrowthModelID: entry.ID})
-	}
-	if err != nil {
-		return fmt.Errorf("lifting the end of %s: %w", entry, err)
-	}
-	return nil
-}
-
-// storedEntries are every stored entry an Event can add or end, as stored: the dates of an Event's
-// entries are offsets from its date.
+// storedEntries are every stored entry an Event can add, as stored: the dates of an Event's entries
+// are offsets from its date.
 type storedEntries struct {
 	accounts          []pdb.Account
 	growthModels      []pdb.GrowthModel
 	transferTemplates []pdb.TransferTemplate
-	transferEnds      []pdb.EventTransferTemplateEnd
-	growthEnds        []pdb.EventGrowthModelEnd
 }
 
 func (s *Service) loadStoredEntries(ctx context.Context) (storedEntries, error) {
@@ -413,12 +335,6 @@ func (s *Service) loadStoredEntries(ctx context.Context) (storedEntries, error) 
 	}
 	if st.transferTemplates, err = s.q.GetTransferTemplates(ctx); err != nil {
 		return st, fmt.Errorf("listing transfer templates: %w", err)
-	}
-	if st.transferEnds, err = s.q.ListTransferTemplateEnds(ctx); err != nil {
-		return st, fmt.Errorf("listing transfer template ends: %w", err)
-	}
-	if st.growthEnds, err = s.q.ListGrowthModelEnds(ctx); err != nil {
-		return st, fmt.Errorf("listing growth model ends: %w", err)
 	}
 	return st, nil
 }
@@ -462,14 +378,6 @@ func (t EventTransferTemplate) EndOffset() *date.Duration {
 	return ptr(t.EndDate.Sub(t.eventDate))
 }
 
-// EventEnd is an entry outside an Event that the Event ends, and when.
-type EventEnd struct {
-	Entry   EventEntry
-	Name    string
-	EndDate date.Date
-	Offset  date.Duration
-}
-
 // NamedEventEntry is an entry with a name to show it by, and the Event it is in, if any.
 type NamedEventEntry struct {
 	EventEntry
@@ -477,13 +385,12 @@ type NamedEventEntry struct {
 	EventName string
 }
 
-// EventView is an Event at its date with the entries it adds and the entries it ends.
+// EventView is an Event at its date with the entries it adds.
 type EventView struct {
 	Event
 	Accounts          []Account
 	GrowthModels      []EventGrowthModel
 	TransferTemplates []EventTransferTemplate
-	Ends              []EventEnd
 }
 
 // growthModelName names a growth model of the account accountName.
@@ -547,7 +454,7 @@ func (e *eventEntries) eventNames() map[string]string {
 	return names
 }
 
-// view is ev with its entries and the entries it ends.
+// view is ev with its entries.
 func (e *eventEntries) view(ev Event) EventView {
 	accountNames := e.accountNames()
 	v := EventView{Event: ev}
@@ -556,39 +463,14 @@ func (e *eventEntries) view(ev Event) EventView {
 			v.Accounts = append(v.Accounts, acc)
 		}
 	}
-	growthByID := make(map[string]GrowthModel, len(e.growthModels))
 	for _, gm := range e.growthModels {
-		growthByID[gm.ID] = gm
 		if gm.EventID == ev.ID {
 			v.GrowthModels = append(v.GrowthModels, EventGrowthModel{GrowthModel: gm, AccountName: accountNames[gm.AccountID], eventDate: ev.Date})
 		}
 	}
-	transferByID := make(map[string]TransferTemplate, len(e.transferTemplates))
 	for _, tt := range e.transferTemplates {
-		transferByID[tt.ID] = tt
 		if tt.EventID == ev.ID {
 			v.TransferTemplates = append(v.TransferTemplates, EventTransferTemplate{TransferTemplate: tt, eventDate: ev.Date})
-		}
-	}
-	for _, end := range e.stored.transferEnds {
-		if end.EventID == ev.ID {
-			v.Ends = append(v.Ends, EventEnd{
-				Entry:   EventEntry{Kind: EventEntryTransferTemplate, ID: end.TransferTemplateID},
-				Name:    transferByID[end.TransferTemplateID].Name,
-				EndDate: placeDate(end.EndOffset, ev.Date),
-				Offset:  date.Duration(end.EndOffset),
-			})
-		}
-	}
-	for _, end := range e.stored.growthEnds {
-		if end.EventID == ev.ID {
-			gm := growthByID[end.GrowthModelID]
-			v.Ends = append(v.Ends, EventEnd{
-				Entry:   EventEntry{Kind: EventEntryGrowthModel, ID: end.GrowthModelID},
-				Name:    growthModelName(gm, accountNames[gm.AccountID]),
-				EndDate: placeDate(end.EndOffset, ev.Date),
-				Offset:  date.Duration(end.EndOffset),
-			})
 		}
 	}
 	slices.SortStableFunc(v.GrowthModels, func(a, b EventGrowthModel) int {
@@ -597,7 +479,6 @@ func (e *eventEntries) view(ev Event) EventView {
 	slices.SortStableFunc(v.TransferTemplates, func(a, b EventTransferTemplate) int {
 		return cmp.Or(cmp.Compare(a.StartDate, b.StartDate), cmp.Compare(a.Name, b.Name))
 	})
-	slices.SortStableFunc(v.Ends, func(a, b EventEnd) int { return cmp.Compare(a.Name, b.Name) })
 	return v
 }
 
@@ -609,7 +490,7 @@ func (e *eventEntries) event(id string) (Event, bool) {
 	return e.events[i], true
 }
 
-// EventsView is the Events page: every Event by date with its entries and the entries it ends.
+// EventsView is the Events page: every Event by date with its entries.
 type EventsView struct {
 	Events []EventView
 }
@@ -626,12 +507,10 @@ func (s *Service) GetEventsPageData(ctx context.Context) (*EventsView, error) {
 	return v, nil
 }
 
-// EventEditView is an Event's edit page: the Event with its entries, and the entries it can end. An
-// entry joins an Event from its own form.
+// EventEditView is an Event's edit page: the Event with its entries. An entry joins an Event from its
+// own form.
 type EventEditView struct {
 	Event EventView
-	// Endable are the Transfer Templates and growth models outside the Event that it doesn't end yet.
-	Endable []NamedEventEntry
 }
 
 func (v *EventEditView) IsEdit() bool {
@@ -651,30 +530,11 @@ func (s *Service) GetEventEditPageData(ctx context.Context, id string) (*EventEd
 	if !ok {
 		return nil, fmt.Errorf("getting event: %w", sql.ErrNoRows)
 	}
-	v := &EventEditView{Event: e.view(ev)}
-	eventNames := e.eventNames()
-	accountNames := e.accountNames()
-	ended := make(map[EventEntry]bool, len(v.Event.Ends))
-	for _, end := range v.Event.Ends {
-		ended[end.Entry] = true
-	}
-	endable := func(kind EventEntryKind, id, name, eventID string) {
-		entry := NamedEventEntry{EventEntry: EventEntry{Kind: kind, ID: id}, Name: name, EventName: eventNames[eventID]}
-		if eventID != ev.ID && !ended[entry.EventEntry] {
-			v.Endable = append(v.Endable, entry)
-		}
-	}
-	for _, gm := range e.growthModels {
-		endable(EventEntryGrowthModel, gm.ID, growthModelName(gm, accountNames[gm.AccountID]), gm.EventID)
-	}
-	for _, tt := range e.transferTemplates {
-		endable(EventEntryTransferTemplate, tt.ID, tt.Name, tt.EventID)
-	}
-	return v, nil
+	return &EventEditView{Event: e.view(ev)}, nil
 }
 
-// EventDeleteView confirms deleting an Event: it lists the entries the Event adds and the ends it
-// declares, and the entries outside it deleted with its Accounts.
+// EventDeleteView confirms deleting an Event: it lists the entries the Event adds, and the entries
+// outside it deleted with its Accounts.
 type EventDeleteView struct {
 	Event       EventView
 	AlsoDeleted []NamedEventEntry

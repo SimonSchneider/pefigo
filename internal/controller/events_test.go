@@ -81,7 +81,7 @@ func TestEntryFormsPutTheirEntryInAnEvent(t *testing.T) {
 	}
 }
 
-func TestTheEventPageListsItsEntriesAndRemovesEntriesAndEnds(t *testing.T) {
+func TestTheEventPageListsItsEntriesAndRemovesThem(t *testing.T) {
 	svc, srv := newSettingsServer(t)
 	ctx := t.Context()
 	checking, err := svc.UpsertAccount(ctx, model.AccountInput{Name: "Checking"})
@@ -95,20 +95,12 @@ func TestTheEventPageListsItsEntriesAndRemovesEntriesAndEnds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create transfer template: %v", err)
 	}
-	gym, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{
-		Name: "Gym", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: uncertain.NewFixed(400),
-		Recurrence: "*-*-05", StartDate: mustDate(t, "2027-01-01"), Enabled: true,
-	})
-	if err != nil {
-		t.Fatalf("create transfer template: %v", err)
-	}
 	location := postForm(t, srv, "/events/", url.Values{"name": {"Raise"}, "date": {"2027-01-01"}})
 	eventID := strings.Split(location, "/")[2]
 	if location != "/events/"+eventID+"/edit" {
 		t.Fatalf("expected saving an Event to lead to its edit page, got %s", location)
 	}
 	savingsEntry := model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: savings.ID}.String()
-	gymEntry := model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: gym.ID}.String()
 
 	// Savings joins the Event from its own form, with the dates it has in the Baseline.
 	postForm(t, srv, "/transfers/", url.Values{
@@ -118,9 +110,8 @@ func TestTheEventPageListsItsEntriesAndRemovesEntriesAndEnds(t *testing.T) {
 	if tt, err := svc.GetTransferTemplate(ctx, savings.ID); err != nil || tt.EventID != eventID || tt.StartDate != mustDate(t, "2027-01-25") {
 		t.Fatalf("expected Savings in the Event, still from 2027-01-25, got %+v (%v)", tt, err)
 	}
-	postForm(t, srv, "/events/"+eventID+"/ends/", url.Values{"entry": {gymEntry}, "end_date": {"2027-03-01"}})
 	page := getPage(t, srv, location)
-	for _, want := range []string{"Savings", "+24 days", "Gym", "2027-03-01"} {
+	for _, want := range []string{"Savings", "+24 days"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("expected the Event page to show %q", want)
 		}
@@ -128,15 +119,13 @@ func TestTheEventPageListsItsEntriesAndRemovesEntriesAndEnds(t *testing.T) {
 	if strings.Contains(page, `action="/events/`+eventID+`/entries/"`) || strings.Contains(page, "Add an existing entry") {
 		t.Errorf("expected the Event page to only list its entries, without a form adding existing ones")
 	}
+	if strings.Contains(page, "/ends/") || strings.Contains(page, "Entries it ends") {
+		t.Errorf("expected the Event page to only list the entries it adds, without ending others")
+	}
 
 	postForm(t, srv, "/events/"+eventID+"/entries/remove", url.Values{"entry": {savingsEntry}})
 	if tt, err := svc.GetTransferTemplate(ctx, savings.ID); err != nil || tt.EventID != "" {
 		t.Fatalf("expected Savings back in the Baseline, got %+v (%v)", tt, err)
-	}
-	postForm(t, srv, "/events/"+eventID+"/ends/remove", url.Values{"entry": {gymEntry}})
-	view, err := svc.GetEventEditPageData(ctx, eventID)
-	if err != nil || len(view.Event.Ends) != 0 {
-		t.Fatalf("expected the end of Gym lifted, got %+v (%v)", view, err)
 	}
 }
 
@@ -196,15 +185,6 @@ func TestEntryFormsTakeDaysAfterTheirEventsDate(t *testing.T) {
 	}
 	if page := getPage(t, srv, location); !strings.Contains(page, `name="start_date" value="+20"`) || !strings.Contains(page, `name="recurrence" value=""`) {
 		t.Errorf("expected the Transfer Template form to give the one-off as +20 with no recurrence")
-	}
-
-	savings := postForm(t, srv, "/transfers/", url.Values{
-		"name": {"Savings"}, "amount_type": {"fixed"}, "amount_fixed": {"15000"}, "recurrence": {"*-*-25"}, "start_date": {"2020-01-01"}, "enabled": {"on"},
-	})
-	postForm(t, srv, "/events/"+ev.ID+"/ends/", url.Values{"entry": {"transfer-template:" + strings.Split(savings, "/")[2]}, "end_date": {"+10"}})
-	edit, err := svc.GetEventEditPageData(ctx, ev.ID)
-	if err != nil || len(edit.Event.Ends) != 1 || edit.Event.Ends[0].EndDate != mustDate(t, "2027-09-20") {
-		t.Fatalf("expected the Apartment to end Savings on 2027-09-20, got %+v (%v)", edit, err)
 	}
 
 	resp, err := srv.Client().PostForm(srv.URL+"/transfers/", url.Values{

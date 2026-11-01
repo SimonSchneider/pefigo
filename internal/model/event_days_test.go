@@ -13,24 +13,9 @@ func days(n int64) *date.Duration {
 	return &d
 }
 
-// endOn is the End Date the Baseline gives the Transfer Template id, with the ends of its Events.
-func endOn(t *testing.T, svc *model.Service, id string, day string) string {
-	t.Helper()
-	for _, tt := range mustTransferSchedule(t, svc).On(mustParseDate(day)).Transfers() {
-		if tt.ID == id {
-			return dateOf(tt.EndDate)
-		}
-	}
-	return "absent"
-}
-
 func TestAnEntryInAnEventIsGivenInDaysAfterTheEventsDate(t *testing.T) {
 	svc := newTestService(t)
 	checking := mustAccount(t, svc, "Checking")
-	savings := mustTransferTemplate(t, svc, model.TransferTemplate{
-		Name: "Savings", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(15000),
-		Recurrence: "*-*-25", StartDate: mustParseDate("2020-01-01"), Enabled: true,
-	})
 	apartment := mustEvent(t, svc, model.EventInput{Name: "Apartment", Date: mustParseDate("2027-09-10")})
 	property := mustEventAccount(t, svc, "Property", apartment.ID)
 	amortization := mustTransferTemplate(t, svc, model.TransferTemplate{
@@ -40,16 +25,12 @@ func TestAnEntryInAnEventIsGivenInDaysAfterTheEventsDate(t *testing.T) {
 	growth := mustGrowthModel(t, svc, model.AccountGrowthModelInput{
 		AccountID: property.ID, AnnualRate: newFixedValue(0.02), StartOffset: days(-5), EndOffset: days(30), EventID: apartment.ID,
 	})
-	mustEventEnd(t, svc, model.EventEndInput{EventID: apartment.ID, Entry: model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: savings.ID}, EndOffset: days(10)})
 
 	if amortization.StartDate != mustParseDate("2027-09-30") || dateOf(amortization.EndDate) != "2027-12-19" {
 		t.Errorf("expected Amortization from 2027-09-30 to 2027-12-19, 20 and 100 days after the Event, got %s to %s", amortization.StartDate, dateOf(amortization.EndDate))
 	}
 	if growth.StartDate != mustParseDate("2027-09-05") || dateOf(growth.EndDate) != "2027-10-10" {
 		t.Errorf("expected the growth model from 2027-09-05 to 2027-10-10, 5 days before and 30 after the Event, got %s to %s", growth.StartDate, dateOf(growth.EndDate))
-	}
-	if got := endOn(t, svc, savings.ID, "2027-08-25"); got != "2027-09-20" {
-		t.Errorf("expected the Apartment to end Savings on 2027-09-20, 10 days after it, got %s", got)
 	}
 
 	moveEvent(t, svc, apartment, "2027-10-10")
@@ -61,9 +42,6 @@ func TestAnEntryInAnEventIsGivenInDaysAfterTheEventsDate(t *testing.T) {
 	growth = mustGetGrowthModel(t, svc, growth.ID)
 	if growth.StartDate != mustParseDate("2027-10-05") {
 		t.Errorf("expected the growth model to stay 5 days before the moved Event, from 2027-10-05, got %s", growth.StartDate)
-	}
-	if got := endOn(t, svc, savings.ID, "2027-08-25"); got != "2027-10-20" {
-		t.Errorf("expected Savings to end 10 days after the moved Event, on 2027-10-20, got %s", got)
 	}
 }
 

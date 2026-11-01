@@ -99,12 +99,6 @@ func forecastInputMutations() []forecastInputMutation {
 		{"RemoveFromEvent", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.RemoveFromEvent(ctx, model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: ids.eventTransferTemplate})
 		}},
-		{"UpsertEventEnd", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return svc.UpsertEventEnd(ctx, model.EventEndInput{EventID: ids.event, Entry: model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: ids.transferTemplate}})
-		}},
-		{"DeleteEventEnd", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return svc.DeleteEventEnd(ctx, ids.event, model.EventEntry{Kind: model.EventEntryGrowthModel, ID: ids.growthModel})
-		}},
 		// growth_model.go
 		{"UpsertAccountGrowthModel", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return discard(svc.UpsertAccountGrowthModel(ctx, model.AccountGrowthModelInput{
@@ -480,7 +474,6 @@ func seedForecastInputs(t *testing.T, svc *model.Service) forecastInputIDs {
 	})
 	must("event transfer template", err)
 	ids.eventTransferTemplate = ett.ID
-	must("event end", svc.UpsertEventEnd(ctx, model.EventEndInput{EventID: ev.ID, Entry: model.EventEntry{Kind: model.EventEntryGrowthModel, ID: gm.ID}}))
 
 	return ids
 }

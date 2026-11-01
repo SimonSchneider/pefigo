@@ -10,14 +10,14 @@ import (
 
 // apartmentPlans are the plans of the issue's example: a Checking and a Savings account with a monthly
 // Savings Transfer Template between them, and an Apartment Event that adds a Property and a Mortgage
-// account, the Purchase from the Mortgage to the Property on its date, a monthly Amortization from a
-// month after it, and ends Savings on its date, replacing it with a smaller Savings.
+// account, the Purchase from the Mortgage to the Property on its date, and a monthly Amortization from
+// a month after it.
 type apartmentPlans struct {
-	apartment                   model.Event
-	checking, savings           model.Account
-	property, mortgage          model.Account
-	savingsTT, smallerSavingsTT model.TransferTemplate
-	purchase, amortization      model.TransferTemplate
+	apartment              model.Event
+	checking, savings      model.Account
+	property, mortgage     model.Account
+	savingsTT              model.TransferTemplate
+	purchase, amortization model.TransferTemplate
 }
 
 // mustApartmentPlans stores the apartment plans with the Apartment Event on day and Snapshots of
@@ -45,11 +45,6 @@ func mustApartmentPlans(t *testing.T, svc *model.Service, day string) apartmentP
 	p.amortization = mustTransferTemplate(t, svc, model.TransferTemplate{
 		Name: "Amortization", FromAccountID: p.checking.ID, ToAccountID: p.mortgage.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(5000),
 		Recurrence: "*-*-25", StartDate: p.apartment.Date.Add(31 * date.Day), Enabled: true, EventID: p.apartment.ID,
-	})
-	mustEventEnd(t, svc, model.EventEndInput{EventID: p.apartment.ID, Entry: model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: p.savingsTT.ID}})
-	p.smallerSavingsTT = mustTransferTemplate(t, svc, model.TransferTemplate{
-		Name: "Smaller savings", FromAccountID: p.checking.ID, ToAccountID: p.savings.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(4000),
-		Recurrence: "*-*-25", Enabled: true, EventID: p.apartment.ID,
 	})
 	return p
 }
@@ -109,9 +104,8 @@ func TestAPlannedEventAppliesItsChangesAtItsDate(t *testing.T) {
 
 	expectPoints(t, rec.pointsOf(p.property.ID), monthlyPoints(p.property.ID, 0, 0, 3e6, 3e6)...)
 	expectPoints(t, rec.pointsOf(p.mortgage.ID), monthlyPoints(p.mortgage.ID, 0, 0, -3e6, -3e6+5000)...)
-	// The old Savings until the Event's date, the smaller one from it.
-	expectPoints(t, rec.pointsOf(p.savings.ID), monthlyPoints(p.savings.ID, 10000, 20000, 24000, 28000)...)
-	expectPoints(t, rec.pointsOf(p.checking.ID), monthlyPoints(p.checking.ID, 990000, 980000, 976000, 967000)...)
+	expectPoints(t, rec.pointsOf(p.savings.ID), monthlyPoints(p.savings.ID, 10000, 20000, 30000, 40000)...)
+	expectPoints(t, rec.pointsOf(p.checking.ID), monthlyPoints(p.checking.ID, 990000, 980000, 970000, 955000)...)
 	if !hasMarkline(rec, "Apartment", "2028-03-01") {
 		t.Errorf("expected a marker for the Apartment on 2028-03-01, got %+v", rec.setup.Marklines)
 	}
@@ -130,8 +124,8 @@ func TestMovingAPlannedEventMovesItsChangesInTheForecast(t *testing.T) {
 	}{
 		{"2028-04-28", 0, 0, 40000},
 		{"2030-02-28", 0, 0, 260000},
-		{"2030-03-28", 3e6, -3e6, 264000},
-		{"2030-04-28", 3e6, -3e6 + 5000, 268000},
+		{"2030-03-28", 3e6, -3e6, 270000},
+		{"2030-04-28", 3e6, -3e6 + 5000, 280000},
 	} {
 		got := [3]float64{balanceOn(t, rec, p.property.ID, tc.day), balanceOn(t, rec, p.mortgage.ID, tc.day), balanceOn(t, rec, p.savings.ID, tc.day)}
 		if want := [3]float64{tc.property, tc.mortgage, tc.savings}; got != want {
@@ -161,7 +155,7 @@ func TestAnUnplannedEventHasNoEffectOnTheBaseline(t *testing.T) {
 	})
 
 	t.Run("transfer schedule", func(t *testing.T) {
-		for _, tt := range []model.TransferTemplate{p.purchase, p.amortization, p.smallerSavingsTT} {
+		for _, tt := range []model.TransferTemplate{p.purchase, p.amortization} {
 			if state := transferStateOn(t, svc, tt.ID, "2028-04-25"); state != "absent" {
 				t.Errorf("expected %s left out of the Baseline, got %s", tt.Name, state)
 			}
@@ -181,7 +175,7 @@ func TestAnUnplannedEventHasNoEffectOnTheBaseline(t *testing.T) {
 			leftOut = append(leftOut, tt.Name)
 		}
 		slices.Sort(leftOut)
-		if want := []string{"Amortization", "Purchase", "Smaller savings"}; !slices.Equal(leftOut, want) {
+		if want := []string{"Amortization", "Purchase"}; !slices.Equal(leftOut, want) {
 			t.Fatalf("expected the unplanned Event's Transfer Templates listed apart, got %v", leftOut)
 		}
 	})
@@ -260,11 +254,11 @@ func TestAPlannedEventBeforeTheForecastStartOnlyCountsItsLaterChanges(t *testing
 	rec := forecastThrough(t, svc, "2028-01-31", nil)
 
 	// The Purchase is taken to be in the Snapshots, so only January's Amortization reaches the
-	// Mortgage. The old Savings has ended, and the smaller one runs.
+	// Mortgage.
 	expectPoints(t, rec.pointsOf(p.property.ID), monthlyPoints(p.property.ID, 0)...)
 	expectPoints(t, rec.pointsOf(p.mortgage.ID), monthlyPoints(p.mortgage.ID, 5000)...)
-	expectPoints(t, rec.pointsOf(p.savings.ID), monthlyPoints(p.savings.ID, 4000)...)
-	expectPoints(t, rec.pointsOf(p.checking.ID), monthlyPoints(p.checking.ID, 1e6-9000)...)
+	expectPoints(t, rec.pointsOf(p.savings.ID), monthlyPoints(p.savings.ID, 10000)...)
+	expectPoints(t, rec.pointsOf(p.checking.ID), monthlyPoints(p.checking.ID, 1e6-15000)...)
 }
 
 func TestAForecastPlacesEventsDifferentlyFromTheBaseline(t *testing.T) {
@@ -293,52 +287,11 @@ func TestAForecastPlacesEventsDifferentlyFromTheBaseline(t *testing.T) {
 
 	t.Run("baseline", func(t *testing.T) {
 		rec := forecastThrough(t, svc, "2028-04-30", nil)
-		expectPoints(t, rec.pointsOf(p.checking.ID), monthlyPoints(p.checking.ID, 990000, 980000, 976000, 967000)...)
+		expectPoints(t, rec.pointsOf(p.checking.ID), monthlyPoints(p.checking.ID, 990000, 980000, 970000, 955000)...)
 		if hasMarkline(rec, "Bonus", "2028-02-01") || !hasMarkline(rec, "Apartment", "2028-03-01") {
 			t.Errorf("expected a marker for the Apartment only, got %+v", rec.setup.Marklines)
 		}
 	})
-}
-
-func TestAnEntryEndedBySeveralPlannedEventsEndsAtTheEarliest(t *testing.T) {
-	svc := newTestService(t)
-	checking := mustAccount(t, svc, "Checking")
-	gym := mustTransferTemplate(t, svc, model.TransferTemplate{
-		Name: "Gym", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(400),
-		Recurrence: "*-*-15", StartDate: mustParseDate("2028-01-01"), Enabled: true,
-	})
-	move := mustEvent(t, svc, model.EventInput{Name: "Move", Date: mustParseDate("2028-05-01")})
-	injury := mustEvent(t, svc, model.EventInput{Name: "Injury", Date: mustParseDate("2028-03-01")})
-	entry := model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: gym.ID}
-	mustEventEnd(t, svc, model.EventEndInput{EventID: move.ID, Entry: entry})
-	mustEventEnd(t, svc, model.EventEndInput{EventID: injury.ID, Entry: entry, EndDate: mustParseDate("2028-04-01")})
-
-	if state := transferStateOn(t, svc, gym.ID, "2028-03-15"); state != model.TransferActive {
-		t.Errorf("expected Gym active before the earliest End Date, got %s", state)
-	}
-	if state := transferStateOn(t, svc, gym.ID, "2028-04-15"); state != model.TransferInactive {
-		t.Errorf("expected Gym ended on the Injury's End Date 2028-04-01, got %s", state)
-	}
-
-	moveEvent(t, svc, model.Event{ID: injury.ID, Name: injury.Name, Date: injury.Date, Planned: false}, "2028-03-01")
-	if state := transferStateOn(t, svc, gym.ID, "2028-04-15"); state != model.TransferActive {
-		t.Errorf("expected an unplanned Event's end not to apply, got %s", state)
-	}
-	if state := transferStateOn(t, svc, gym.ID, "2028-05-15"); state != model.TransferInactive {
-		t.Errorf("expected Gym ended on the Move's date, got %s", state)
-	}
-}
-
-func TestAnEventCanEndAGrowthModel(t *testing.T) {
-	svc := newTestService(t)
-	checking := mustAccount(t, svc, "Checking")
-	mustSnapshot(t, svc, checking.ID, mustParseDate("2028-01-01"), 1000)
-	gm := mustGrowthModel(t, svc, model.AccountGrowthModelInput{AccountID: checking.ID, AnnualRate: newFixedValue(0.5), StartDate: mustParseDate("2027-01-01")})
-	ev := mustEvent(t, svc, model.EventInput{Name: "Crash", Date: mustParseDate("2027-06-01")})
-	mustEventEnd(t, svc, model.EventEndInput{EventID: ev.ID, Entry: model.EventEntry{Kind: model.EventEntryGrowthModel, ID: gm.ID}})
-
-	rec := forecastThrough(t, svc, "2028-01-31", nil)
-	expectPoints(t, rec.pointsOf(checking.ID), monthlyPoints(checking.ID, 1000)...)
 }
 
 func TestEntriesThatUseALeftOutAccountAreLeftOutToo(t *testing.T) {
