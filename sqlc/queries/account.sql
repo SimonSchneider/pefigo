@@ -357,12 +357,6 @@ ORDER BY account_id,
 -- name: DeleteInvestmentRound :exec
 DELETE FROM investment_round
 WHERE id = ?;
--- name: DeleteOtherInvestmentRoundsOnDay :exec
-DELETE FROM investment_round
-WHERE account_id = sqlc.arg(account_id)
-  AND date = sqlc.arg(date)
-  AND event_id IS sqlc.narg(event_id)
-  AND id != sqlc.arg(id);
 -- name: UpsertStartupShareOption :one
 INSERT INTO startup_share_option (
     id,

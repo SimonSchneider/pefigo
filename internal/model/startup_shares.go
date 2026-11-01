@@ -330,20 +330,9 @@ func (s *Service) UpsertInvestmentRound(ctx context.Context, inp InvestmentRound
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return InvestmentRound{}, fmt.Errorf("beginning to save the investment round: %w", err)
-	}
-	defer tx.Rollback()
-	q := s.q.WithTx(tx)
-	// An account has one investment round a day in each Event, and one outside Events: saving a round
-	// on a day replaces the other round there.
-	if err := q.DeleteOtherInvestmentRoundsOnDay(ctx, pdb.DeleteOtherInvestmentRoundsOnDayParams{
-		AccountID: inp.AccountID, Date: dating.store(inp.Date), EventID: ui.WithDefaultNull(inp.EventID), ID: inp.ID,
-	}); err != nil {
-		return InvestmentRound{}, fmt.Errorf("replacing the investment round on %s: %w", inp.Date, err)
-	}
-	ir, err := q.UpsertInvestmentRound(ctx, pdb.UpsertInvestmentRoundParams{
+	// Saving a round never touches another: several may be on one day, and compareInvestmentRounds says
+	// which of them applies.
+	ir, err := s.q.UpsertInvestmentRound(ctx, pdb.UpsertInvestmentRoundParams{
 		ID:             inp.ID,
 		AccountID:      inp.AccountID,
 		Date:           dating.store(inp.Date),
@@ -356,9 +345,6 @@ func (s *Service) UpsertInvestmentRound(ctx context.Context, inp InvestmentRound
 	})
 	if err != nil {
 		return InvestmentRound{}, fmt.Errorf("failed to upsert investment round: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return InvestmentRound{}, fmt.Errorf("saving the investment round: %w", err)
 	}
 	return investmentRoundFromDB(ir, dating.at), nil
 }
@@ -402,10 +388,9 @@ func (s *Service) ListInvestmentRounds(ctx context.Context, accountID string) ([
 	return result, nil
 }
 
-// compareInvestmentRounds orders investment rounds by date, then by when they were last saved. Two
-// rounds are on one day only when they are in different Events, or one is in an Event and one isn't:
-// of those, the one saved last applies, and of two saved in the same millisecond the one with the
-// later ID.
+// compareInvestmentRounds orders investment rounds by date, then by when they were last saved, then by
+// ID. An account may have several rounds on one day, in Events or not: of those with shares and a
+// price per share, the last in this order applies, the one saved last. See latestRoundOn.
 func compareInvestmentRounds(a, b InvestmentRound) int {
 	return cmp.Or(cmp.Compare(a.Date, b.Date), a.UpdatedAt.Compare(b.UpdatedAt), cmp.Compare(a.ID, b.ID))
 }
@@ -602,7 +587,8 @@ type startupShares struct {
 }
 
 // latestRoundOn is the latest investment round on or before day with shares and a price per share,
-// or nil without one.
+// or nil without one: the round that values the account on day, in a Forecast, its Balance History and
+// its page alike. A round without shares or a price per share values nothing, so it never hides another.
 func (ss *startupShares) latestRoundOn(day date.Date) *InvestmentRound {
 	var latest *InvestmentRound
 	for i, r := range ss.rounds {
@@ -698,23 +684,14 @@ func (ss *startupShares) history(ucfg *uncertain.Config, start date.Date, isFore
 	return history
 }
 
-// balanceOn is the account's balance on day, the mean of the value derived from its latest
-// investment round and its share changes on or before day. ok is false when there is no such
-// investment round, or it has no shares or no price per share.
+// balanceOn is the account's balance on day, the mean of the value derived from the round that values
+// it on day and its share changes on or before day. ok is false without such a round.
 func (ss *startupShares) balanceOn(ucfg *uncertain.Config, day date.Date) (balance float64, ok bool) {
-	var best *InvestmentRound
-	for i := range ss.rounds {
-		if !ss.rounds[i].Date.After(day) {
-			best = &ss.rounds[i]
-		}
-	}
-	if best == nil {
+	round := ss.latestRoundOn(day)
+	if round == nil {
 		return 0, false
 	}
-	postMoneyValuation, postMoneyShares := PostMoneyValuationAndShares(best.Valuation, best.PreMoneyShares, best.Investment)
-	if !(postMoneyShares > 0) { // NaN when the round has neither a valuation nor an investment
-		return 0, false
-	}
+	postMoneyValuation, postMoneyShares := PostMoneyValuationAndShares(round.Valuation, round.PreMoneyShares, round.Investment)
 	sharesOwned, avgPurchasePrice := DeriveShareState(ss.shareChanges, day)
 	return CalculateStartupShareBalance(
 		ucfg,
@@ -728,13 +705,11 @@ func (ss *startupShares) balanceOn(ucfg *uncertain.Config, day date.Date) (balan
 }
 
 // summaryOn is what the account holds on day: the shares of its share changes on or before day, and the
-// total shares after its latest investment round on or before day.
+// total shares after the round that values it on day, or none without one.
 func (ss *startupShares) summaryOn(day date.Date) DerivedStartupShareSummary {
 	var totalShares float64
-	for _, r := range ss.rounds {
-		if !r.Date.After(day) {
-			_, totalShares = PostMoneyValuationAndShares(r.Valuation, r.PreMoneyShares, r.Investment)
-		}
+	if round := ss.latestRoundOn(day); round != nil {
+		_, totalShares = PostMoneyValuationAndShares(round.Valuation, round.PreMoneyShares, round.Investment)
 	}
 	sharesOwned, avgPrice := DeriveShareState(ss.shareChanges, day)
 	return DerivedStartupShareSummary{SharesOwned: sharesOwned, TotalShares: totalShares, AvgPurchasePricePerShare: avgPrice}
