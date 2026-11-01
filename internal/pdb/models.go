@@ -267,7 +267,6 @@ type TransferTemplate struct {
 	Priority         int64
 	Recurrence       string
 	StartDate        int64
-	EndDate          *int64
 	Enabled          bool
 	CreatedAt        int64
 	UpdatedAt        int64
@@ -281,6 +280,15 @@ type TransferTemplateCategory struct {
 	Color     *string
 	CreatedAt int64
 	UpdatedAt int64
+}
+
+type TransferTemplateEnd struct {
+	ID                 string
+	TransferTemplateID string
+	Date               int64
+	EventID            *string
+	CreatedAt          int64
+	UpdatedAt          int64
 }
 
 type User struct {

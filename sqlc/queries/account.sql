@@ -107,7 +107,6 @@ ORDER BY recurrence,
   priority,
   name,
   start_date,
-  end_date,
   created_at;
 -- name: GetTransferTemplate :one
 SELECT *
@@ -125,14 +124,13 @@ INSERT INTO transfer_template (
     priority,
     recurrence,
     start_date,
-    end_date,
     enabled,
     budget_category_id,
     event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET name = EXCLUDED.name,
   from_account_id = EXCLUDED.from_account_id,
@@ -143,7 +141,6 @@ SET name = EXCLUDED.name,
   priority = EXCLUDED.priority,
   recurrence = EXCLUDED.recurrence,
   start_date = EXCLUDED.start_date,
-  end_date = EXCLUDED.end_date,
   enabled = EXCLUDED.enabled,
   budget_category_id = EXCLUDED.budget_category_id,
   event_id = EXCLUDED.event_id,
@@ -151,6 +148,31 @@ SET name = EXCLUDED.name,
 RETURNING *;
 -- name: DeleteTransferTemplate :exec
 DELETE FROM transfer_template
+WHERE id = ?;
+-- name: ListAllTransferTemplateEnds :many
+SELECT *
+FROM transfer_template_end
+ORDER BY transfer_template_id, id;
+-- name: ListTransferTemplateEnds :many
+SELECT *
+FROM transfer_template_end
+WHERE transfer_template_id = ?
+ORDER BY id;
+-- name: GetTransferTemplateEnd :one
+SELECT *
+FROM transfer_template_end
+WHERE id = ?;
+-- name: UpsertTransferTemplateEnd :one
+INSERT INTO transfer_template_end (id, transfer_template_id, date, event_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+UPDATE
+SET transfer_template_id = EXCLUDED.transfer_template_id,
+  date = EXCLUDED.date,
+  event_id = EXCLUDED.event_id,
+  updated_at = EXCLUDED.updated_at
+RETURNING *;
+-- name: DeleteTransferTemplateEnd :exec
+DELETE FROM transfer_template_end
 WHERE id = ?;
 -- name: ListLatestSnapshotPerAccount :many
 SELECT s.*

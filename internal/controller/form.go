@@ -287,9 +287,6 @@ func (t *transferTemplateForm) FromForm(r *http.Request) error {
 		t.StartDate = *start
 	}
 	t.StartOffset = startOffset
-	if t.EndDate, t.EndOffset, err = parseEntryDate(r, "end_date"); err != nil {
-		return err
-	}
 	t.Enabled = r.FormValue("enabled") == "on"
 	t.BudgetCategoryID = ui.WithDefaultNull(r.FormValue("budget_category_id"))
 	t.EventID = r.FormValue("event_id")
@@ -542,6 +539,20 @@ func (a *billAmountInputForm) FromForm(r *http.Request) error {
 	}
 	a.Period = r.FormValue("amount_period")
 	a.Currency = r.FormValue("amount_currency")
+	return nil
+}
+
+type transferTemplateEndInputForm struct {
+	model.TransferTemplateEnd
+}
+
+func (e *transferTemplateEndInputForm) FromForm(r *http.Request) error {
+	e.ID = r.FormValue("id")
+	e.TransferTemplateID = r.FormValue("transfer_template_id")
+	if err := parseEntryDay(r, "date", &e.Date, &e.DateOffset); err != nil {
+		return err
+	}
+	e.EventID, e.OffsetEventID = r.FormValue("event_id"), r.FormValue("offset_event_id")
 	return nil
 }
 

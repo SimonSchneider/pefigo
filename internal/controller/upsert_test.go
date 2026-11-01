@@ -13,7 +13,7 @@ import (
 
 // parents are the rows the forms of upsertRoutes link to.
 type parents struct {
-	account, sourceAccount, salary, billAccount, bill string
+	account, sourceAccount, salary, billAccount, bill, transferTemplate string
 }
 
 func mustParents(t *testing.T, svc *model.Service) parents {
@@ -39,7 +39,11 @@ func mustParents(t *testing.T, svc *model.Service) parents {
 	if err != nil {
 		t.Fatalf("create bill: %v", err)
 	}
-	return parents{account.ID, sourceAccount.ID, salary.ID, billAccount.ID, bill.ID}
+	transferTemplate, err := svc.UpsertTransferTemplate(ctx, model.TransferTemplate{Name: "Gym", AmountType: model.TransferAmountFixed, StartDate: date.Today()})
+	if err != nil {
+		t.Fatalf("create transfer template: %v", err)
+	}
+	return parents{account.ID, sourceAccount.ID, salary.ID, billAccount.ID, bill.ID, transferTemplate.ID}
 }
 
 // upsertRoute is a route that saves an entity, and a valid form for it without next.
@@ -67,6 +71,7 @@ func upsertRoutes(p parents) []upsertRoute {
 		{"bill", "/bill-items/", url.Values{"bill_account_id": {p.billAccount}, "name": {"Power"}}},
 		{"bill amount", "/bill-amounts/", url.Values{"bill_id": {p.bill}, "start_date": {"2025-01-01"}, "amount": {"500"}}},
 		{"transfer template", "/transfers/", url.Values{"name": {"Saving"}, "amount_type": {"fixed"}, "recurrence": {"*-*-25"}, "start_date": {"2025-01-01"}}},
+		{"transfer template end", "/transfer-template-ends/", url.Values{"transfer_template_id": {p.transferTemplate}, "date": {"2030-01-01"}}},
 		{"transfer template category", "/transfer-template-categories/", url.Values{"name": {"Food"}}},
 		{"account type", "/account-types/", url.Values{"name": {"Pension"}}},
 		{"special date", "/special-dates/", url.Values{"name": {"Retirement"}, "date": {"2050-01-01"}}},
@@ -163,6 +168,13 @@ var lookupDeletes = []lookupDelete{
 	}},
 	{"bill", func(t *testing.T, svc *model.Service, p parents) (string, string) {
 		return "/bill-items/" + p.bill + "/delete", "/bills/" + p.billAccount + "/edit"
+	}},
+	{"transfer template end", func(t *testing.T, svc *model.Service, p parents) (string, string) {
+		end, err := svc.UpsertTransferTemplateEnd(t.Context(), model.TransferTemplateEnd{TransferTemplateID: p.transferTemplate, Date: date.Today()})
+		if err != nil {
+			t.Fatalf("create transfer template end: %v", err)
+		}
+		return "/transfer-template-ends/" + end.ID + "/delete", "/transfer-templates/" + p.transferTemplate + "/edit"
 	}},
 }
 

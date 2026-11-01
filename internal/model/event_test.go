@@ -108,8 +108,9 @@ func TestMovingAnEventMovesEveryDateOfItsEntries(t *testing.T) {
 	})
 	amortization := mustTransferTemplate(t, svc, model.TransferTemplate{
 		Name: "Amortization", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(5000),
-		Recurrence: "*-*-25", StartDate: mustParseDate("2028-04-01"), EndDate: ptr(mustParseDate("2029-03-01")), Enabled: true, EventID: apartment.ID,
+		Recurrence: "*-*-25", StartDate: mustParseDate("2028-04-01"), Enabled: true, EventID: apartment.ID,
 	})
+	mustTransferTemplateEnd(t, svc, model.TransferTemplateEnd{TransferTemplateID: amortization.ID, EventID: apartment.ID, Date: mustParseDate("2029-03-01")})
 	growth := mustGrowthModel(t, svc, model.AccountGrowthModelInput{
 		AccountID: property.ID, AnnualRate: newFixedValue(0.02), EndDate: ptr(mustParseDate("2029-03-01")), EventID: apartment.ID,
 	})
@@ -142,15 +143,20 @@ func TestAnEntryJoiningOrLeavingAnEventKeepsTheDatesItAppliesOn(t *testing.T) {
 	t.Run("transfer template", func(t *testing.T) {
 		tt := mustTransferTemplate(t, svc, model.TransferTemplate{
 			Name: "Savings", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(1000),
-			Recurrence: "*-*-25", StartDate: mustParseDate("2027-01-25"), EndDate: ptr(mustParseDate("2027-06-01")), Enabled: true,
+			Recurrence: "*-*-25", StartDate: mustParseDate("2027-01-25"), Enabled: true,
 		})
+		end := mustTransferTemplateEnd(t, svc, model.TransferTemplateEnd{TransferTemplateID: tt.ID, Date: mustParseDate("2027-06-01")})
 		entry := model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: tt.ID}
 
-		// Its form joins the Event with the dates it applies on in the Baseline.
+		// Its form joins the Event with the dates it applies on in the Baseline, bringing along its End
+		// outside every Event.
 		tt.EventID = ev.ID
 		mustTransferTemplate(t, svc, tt)
 		if got := mustGetTransferTemplate(t, svc, tt.ID); got.EventID != ev.ID || got.StartDate != mustParseDate("2027-01-25") || dateOf(got.EndDate) != "2027-06-01" {
 			t.Fatalf("expected the Transfer Template in the Event, still from 2027-01-25 to 2027-06-01, got %+v", got)
+		}
+		if got := mustGetTransferTemplateEnd(t, svc, end.ID); got.EventID != ev.ID || got.Date != mustParseDate("2027-06-01") {
+			t.Fatalf("expected its End brought into the Event on 2027-06-01, got %+v", got)
 		}
 		// Stored as +24 days, so it moves with the Event.
 		ev = moveEvent(t, svc, ev, "2027-02-01")
@@ -163,6 +169,9 @@ func TestAnEntryJoiningOrLeavingAnEventKeepsTheDatesItAppliesOn(t *testing.T) {
 		ev = moveEvent(t, svc, ev, "2027-01-01")
 		if got := mustGetTransferTemplate(t, svc, tt.ID); got.EventID != "" || got.StartDate != mustParseDate("2027-02-25") || dateOf(got.EndDate) != "2027-07-02" {
 			t.Fatalf("expected the Transfer Template in the Baseline, from 2027-02-25 to 2027-07-02 whatever the Event's date, got %+v", got)
+		}
+		if got := mustGetTransferTemplateEnd(t, svc, end.ID); got.EventID != "" {
+			t.Fatalf("expected its End to leave the Event with it, got %+v", got)
 		}
 	})
 

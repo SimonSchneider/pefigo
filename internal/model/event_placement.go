@@ -247,21 +247,8 @@ func placeEntries(events []Event, stored storedEntries, placements EventPlacemen
 	// not.
 	slices.SortStableFunc(p.growthModels, compareGrowthModels)
 
-	for _, row := range stored.transferTemplates {
-		day, ok := placed(row.EventID)
-		if !ok || p.leftOutAccounts[ui.OrDefault(row.FromAccountID)] || p.leftOutAccounts[ui.OrDefault(row.ToAccountID)] {
-			tt, err := transferTemplateFromDB(row, ownDate(own, row.EventID))
-			if err != nil {
-				return nil, err
-			}
-			p.leftOutTransferTemplates = append(p.leftOutTransferTemplates, tt)
-			continue
-		}
-		tt, err := transferTemplateFromDB(row, day)
-		if err != nil {
-			return nil, err
-		}
-		p.transferTemplates = append(p.transferTemplates, tt)
+	if err := placeTransferTemplates(p, stored, placed, own); err != nil {
+		return nil, err
 	}
 
 	placeStartupShares(p, stored, placed)
@@ -272,6 +259,46 @@ func placeEntries(events []Event, stored storedEntries, placements EventPlacemen
 		return nil, err
 	}
 	return p, nil
+}
+
+// placeTransferTemplates places the stored Transfer Templates of stored whose Events placed places, and
+// leaves out the others and those that use a left-out Account, each at its own Event's date. Each ends
+// at the earliest of its Ends whose own Events placed places. A left-out Transfer Template shows what it
+// would do with its Event planned: the Ends in its own Event count too, at that Event's own date.
+func placeTransferTemplates(p *plans, stored storedEntries, placed func(eventID *string) (date.Date, bool), own map[string]date.Date) error {
+	leftOut := make(map[string]*string) // the Event of each left-out Transfer Template, by ID
+	for _, row := range stored.transferTemplates {
+		day, ok := placed(row.EventID)
+		out := !ok || p.leftOutAccounts[ui.OrDefault(row.FromAccountID)] || p.leftOutAccounts[ui.OrDefault(row.ToAccountID)]
+		if out {
+			leftOut[row.ID], day = row.EventID, ownDate(own, row.EventID)
+		}
+		tt, err := transferTemplateFromDB(row, day)
+		if err != nil {
+			return err
+		}
+		if out {
+			p.leftOutTransferTemplates = append(p.leftOutTransferTemplates, tt)
+		} else {
+			p.transferTemplates = append(p.transferTemplates, tt)
+		}
+	}
+	ends := make(map[string][]TransferTemplateEnd)
+	for _, row := range stored.transferTemplateEnds {
+		day, ok := placed(row.EventID)
+		if eventID, out := leftOut[row.TransferTemplateID]; out && eventID != nil && row.EventID != nil && *row.EventID == *eventID {
+			day, ok = own[*eventID], true
+		}
+		if ok {
+			ends[row.TransferTemplateID] = append(ends[row.TransferTemplateID], transferTemplateEndFromDB(row, day))
+		}
+	}
+	for _, templates := range [][]TransferTemplate{p.transferTemplates, p.leftOutTransferTemplates} {
+		for i, tt := range templates {
+			templates[i] = tt.withEnds(ends[tt.ID])
+		}
+	}
+	return nil
 }
 
 // placeOwners places the Salaries or Bills of rows, each with the ID and Event idOf gives it, whose

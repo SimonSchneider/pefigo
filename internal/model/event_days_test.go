@@ -20,14 +20,15 @@ func TestAnEntryInAnEventIsGivenInDaysAfterTheEventsDate(t *testing.T) {
 	property := mustEventAccount(t, svc, "Property", apartment.ID)
 	amortization := mustTransferTemplate(t, svc, model.TransferTemplate{
 		Name: "Amortization", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(5000),
-		Recurrence: "*-*-25", StartOffset: days(20), EndOffset: days(100), Enabled: true, EventID: apartment.ID,
+		Recurrence: "*-*-25", StartOffset: days(20), Enabled: true, EventID: apartment.ID,
 	})
+	end := mustTransferTemplateEnd(t, svc, model.TransferTemplateEnd{TransferTemplateID: amortization.ID, EventID: apartment.ID, DateOffset: days(100)})
 	growth := mustGrowthModel(t, svc, model.AccountGrowthModelInput{
 		AccountID: property.ID, AnnualRate: newFixedValue(0.02), StartOffset: days(-5), EndOffset: days(30), EventID: apartment.ID,
 	})
 
-	if amortization.StartDate != mustParseDate("2027-09-30") || dateOf(amortization.EndDate) != "2027-12-19" {
-		t.Errorf("expected Amortization from 2027-09-30 to 2027-12-19, 20 and 100 days after the Event, got %s to %s", amortization.StartDate, dateOf(amortization.EndDate))
+	if amortization.StartDate != mustParseDate("2027-09-30") || end.Date != mustParseDate("2027-12-19") {
+		t.Errorf("expected Amortization from 2027-09-30 to 2027-12-19, 20 and 100 days after the Event, got %s to %s", amortization.StartDate, end.Date)
 	}
 	if growth.StartDate != mustParseDate("2027-09-05") || dateOf(growth.EndDate) != "2027-10-10" {
 		t.Errorf("expected the growth model from 2027-09-05 to 2027-10-10, 5 days before and 30 after the Event, got %s to %s", growth.StartDate, dateOf(growth.EndDate))
@@ -36,8 +37,8 @@ func TestAnEntryInAnEventIsGivenInDaysAfterTheEventsDate(t *testing.T) {
 	moveEvent(t, svc, apartment, "2027-10-10")
 
 	amortization = mustGetTransferTemplate(t, svc, amortization.ID)
-	if amortization.StartDate != mustParseDate("2027-10-30") {
-		t.Errorf("expected Amortization to stay 20 days after the moved Event, from 2027-10-30, got %s", amortization.StartDate)
+	if amortization.StartDate != mustParseDate("2027-10-30") || dateOf(amortization.EndDate) != "2028-01-18" {
+		t.Errorf("expected Amortization to stay 20 to 100 days after the moved Event, from 2027-10-30 to 2028-01-18, got %s to %s", amortization.StartDate, dateOf(amortization.EndDate))
 	}
 	growth = mustGetGrowthModel(t, svc, growth.ID)
 	if growth.StartDate != mustParseDate("2027-10-05") {
@@ -54,12 +55,13 @@ func TestDaysAfterAnEventsDateNeedAnEvent(t *testing.T) {
 	}
 	startIn20 := gym
 	startIn20.StartOffset = days(20)
-	endIn20 := gym
-	endIn20.EndOffset = days(20)
-	for _, inp := range []model.TransferTemplate{startIn20, endIn20} {
-		if _, err := svc.UpsertTransferTemplate(t.Context(), inp); !errors.Is(err, model.ErrInvalidInput) {
-			t.Errorf("expected days after an Event's date to need an Event, got %v", err)
-		}
+	if _, err := svc.UpsertTransferTemplate(t.Context(), startIn20); !errors.Is(err, model.ErrInvalidInput) {
+		t.Errorf("expected days after an Event's date to need an Event, got %v", err)
+	}
+	gym.StartOffset = nil
+	saved := mustTransferTemplate(t, svc, gym)
+	if _, err := svc.UpsertTransferTemplateEnd(t.Context(), model.TransferTemplateEnd{TransferTemplateID: saved.ID, DateOffset: days(20)}); !errors.Is(err, model.ErrInvalidInput) {
+		t.Errorf("expected an end's days after an Event's date to need an Event, got %v", err)
 	}
 	if _, err := svc.UpsertAccountGrowthModel(t.Context(), model.AccountGrowthModelInput{
 		AccountID: checking.ID, Type: model.GrowthModelFixed, StartOffset: days(0),
@@ -99,7 +101,7 @@ func TestTheTransferTemplateFormGivesAnEntryInAnEventInDaysAfterItsDate(t *testi
 	apartment := mustEvent(t, svc, model.EventInput{Name: "Apartment", Date: mustParseDate("2027-09-10")})
 	amortization := mustTransferTemplate(t, svc, model.TransferTemplate{
 		Name: "Amortization", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(5000),
-		Recurrence: "*-*-25", StartOffset: days(20), EndOffset: days(100), Enabled: true, EventID: apartment.ID,
+		Recurrence: "*-*-25", StartOffset: days(20), Enabled: true, EventID: apartment.ID,
 	})
 	purchase := mustTransferTemplate(t, svc, model.TransferTemplate{
 		Name: "Purchase", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(600000),
@@ -107,7 +109,7 @@ func TestTheTransferTemplateFormGivesAnEntryInAnEventInDaysAfterItsDate(t *testi
 	})
 	gym := mustTransferTemplate(t, svc, model.TransferTemplate{
 		Name: "Gym", FromAccountID: checking.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(300),
-		Recurrence: "*-*-01", StartDate: mustParseDate("2027-01-01"), EndDate: ptr(mustParseDate("2028-01-01")), Enabled: true,
+		Recurrence: "*-*-01", StartDate: mustParseDate("2027-01-01"), Enabled: true,
 	})
 
 	form := func(id string) *model.TransferTemplateEditView {
@@ -118,14 +120,14 @@ func TestTheTransferTemplateFormGivesAnEntryInAnEventInDaysAfterItsDate(t *testi
 		}
 		return view
 	}
-	if f := form(amortization.ID); f.StartInput() != "+20" || f.EndInput() != "+100" || f.RecurrenceInput() != "*-*-25" {
-		t.Errorf("expected Amortization's form to give +20 to +100 on *-*-25, got %q to %q on %q", f.StartInput(), f.EndInput(), f.RecurrenceInput())
+	if f := form(amortization.ID); f.StartInput() != "+20" || f.RecurrenceInput() != "*-*-25" {
+		t.Errorf("expected Amortization's form to give +20 on *-*-25, got %q on %q", f.StartInput(), f.RecurrenceInput())
 	}
-	if f := form(purchase.ID); f.StartInput() != "-3" || f.EndInput() != "" || f.RecurrenceInput() != "" {
-		t.Errorf("expected Purchase's form to give a one-off on -3, with no recurrence, got %q to %q on %q", f.StartInput(), f.EndInput(), f.RecurrenceInput())
+	if f := form(purchase.ID); f.StartInput() != "-3" || f.RecurrenceInput() != "" {
+		t.Errorf("expected Purchase's form to give a one-off on -3, with no recurrence, got %q on %q", f.StartInput(), f.RecurrenceInput())
 	}
-	if f := form(gym.ID); f.StartInput() != "2027-01-01" || f.EndInput() != "2028-01-01" || f.RecurrenceInput() != "*-*-01" {
-		t.Errorf("expected Gym's form, outside an Event, to give its dates, got %q to %q on %q", f.StartInput(), f.EndInput(), f.RecurrenceInput())
+	if f := form(gym.ID); f.StartInput() != "2027-01-01" || f.RecurrenceInput() != "*-*-01" {
+		t.Errorf("expected Gym's form, outside an Event, to give its dates, got %q on %q", f.StartInput(), f.RecurrenceInput())
 	}
 	inApartment, err := svc.GetTransferTemplateNewPageData(t.Context(), apartment.ID)
 	if err != nil {

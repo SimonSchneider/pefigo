@@ -106,10 +106,11 @@ func TestTransfersCalculatorLeavesOutDisabledAndEndedTransferTemplates(t *testin
 		Name: "Starts today", FromAccountID: checking.ID, AmountType: "fixed", AmountFixed: newFixedValue(100),
 		Recurrence: "*-*-01", StartDate: day, Enabled: true,
 	})
-	mustTransferTemplate(t, svc, model.TransferTemplate{
+	endsToday := mustTransferTemplate(t, svc, model.TransferTemplate{
 		Name: "Ends today", FromAccountID: checking.ID, AmountType: "fixed", AmountFixed: newFixedValue(100),
-		Recurrence: "*-*-01", StartDate: mustParseDate("2025-01-01"), EndDate: &day, Enabled: true,
+		Recurrence: "*-*-01", StartDate: mustParseDate("2025-01-01"), Enabled: true,
 	})
+	mustEndTransferTemplate(t, svc, endsToday.ID, day)
 	mustTransferTemplate(t, svc, model.TransferTemplate{
 		Name: "Disabled", FromAccountID: checking.ID, AmountType: "fixed", AmountFixed: newFixedValue(100),
 		Recurrence: "*-*-01", StartDate: mustParseDate("2025-01-01"), Enabled: false,

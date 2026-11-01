@@ -26,8 +26,52 @@ templ EditTransferTemplateContent(view *model.TransferTemplateEditView) {
 		}
 		<div class="flex-1 p-6 overflow-auto bg-base-100">
 			@TransferTemplateForm(view)
+			if view.IsEdit() {
+				<div class="max-w-4xl mx-auto">
+					@TransferTemplateEndsCard(view)
+				</div>
+			}
 		</div>
 	</main>
+}
+
+// TransferTemplateEndsCard lists the days the Transfer Template may end on, each in an Event or not: it
+// applies up to the earliest one the Baseline places.
+templ TransferTemplateEndsCard(view *model.TransferTemplateEditView) {
+	{{ next := templ.EscapeString("/transfer-templates/" + view.TransferTemplate.ID + "/edit") }}
+	for _, end := range view.TransferTemplate.Ends {
+		<form id={ "delete-transfer-template-end-form-" + end.ID } action={ "/transfer-template-ends/" + end.ID + "/delete?next=" + next } method="post" onsubmit="return confirm('Delete this end?')"></form>
+	}
+	<div class="mt-6 card bg-base-100 shadow-sm border border-base-300">
+		<div class="card-body p-5">
+			<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/60">Ends</h3>
+			<p class="text-sm text-base-content/60">From the earliest end, the Transfer Template no longer applies. An end may be in another Event than the Transfer Template, which then ends it without moving its Start. An end in an unplanned Event counts only where a Scenario places it.</p>
+			<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr auto auto">
+				<div class="text-xs text-base-content/50">End Date</div>
+				<div class="text-xs text-base-content/50">Event</div>
+				<div></div>
+				<div></div>
+				for _, end := range view.TransferTemplate.Ends {
+					@TransferTemplateEndRow(view, end)
+				}
+				@TransferTemplateEndRow(view, model.TransferTemplateEnd{})
+			</div>
+		</div>
+	</div>
+}
+
+templ TransferTemplateEndRow(view *model.TransferTemplateEditView, end model.TransferTemplateEnd) {
+	{{ eventID := partEventID(end.ID, end.EventID, view.PartEventID()) }}
+	<form method="post" action={ "/transfer-template-ends/?next=" + templ.EscapeString("/transfer-templates/"+view.TransferTemplate.ID+"/edit") } style="display:contents">
+		<div>
+			<input type="hidden" name="id" value={ end.ID }/>
+			<input type="hidden" name="offset_event_id" value={ end.EventID }/>
+			<input type="hidden" name="transfer_template_id" value={ view.TransferTemplate.ID }/>
+			@EntryDateInput(view.Events, end.EventID, "date", partDate(end.ID, end.Date), partStartPlaceholder(end.ID, end.EventID, view.PartEventID(), "2028-01-01"))
+		</div>
+		<div>@EventSelect(view.Events, eventID, "select-xs")</div>
+		@partRowButtons(end.ID, "delete-transfer-template-end-form-")
+	</form>
 }
 
 templ DeleteTransferTemplateButton(id string) {
@@ -129,34 +173,25 @@ templ TransferTemplateForm(view *model.TransferTemplateEditView) {
 							</div>
 						</div>
 						{{ ev := view.Event() }}
-						<div class="grid grid-cols-2 gap-4">
-							<div class="form-control">
-								<label class="label whitespace-normal">
-									<span class="label-text font-medium">
-										if ev != nil {
-											Start, days after { ev.Name }
-										} else {
-											Start Date
-										}
-									</span>
-								</label>
-								<input type="text" class="input input-bordered w-full" name="start_date" value={ view.StartInput() } placeholder={ entryDatePlaceholder(ev != nil, "2027-01-01") }/>
-							</div>
-							<div class="form-control">
-								<label class="label whitespace-normal">
-									<span class="label-text font-medium">
-										if ev != nil {
-											End, days after { ev.Name }
-										} else {
-											End Date
-										}
-									</span>
-								</label>
-								<input type="text" class="input input-bordered w-full" name="end_date" value={ view.EndInput() } placeholder="Optional"/>
-							</div>
+						<div class="form-control">
+							<label class="label whitespace-normal">
+								<span class="label-text font-medium">
+									if ev != nil {
+										Start, days after { ev.Name }
+									} else {
+										Start Date
+									}
+								</span>
+							</label>
+							<input type="text" class="input input-bordered w-full" name="start_date" value={ view.StartInput() } placeholder={ entryDatePlaceholder(ev != nil, "2027-01-01") }/>
 						</div>
 						<div class="text-sm text-base-content/60 mt-1">
-							A date such as 2027-09-30, or in an Event the days after its date, such as +20. The End's first day isn't included.
+							A date such as 2027-09-30, or in an Event the days after its date, such as +20.
+							if view.IsEdit() {
+								It ends at the earliest of its Ends, below.
+							} else {
+								Once saved, give it Ends, each in an Event or not.
+							}
 						</div>
 					</div>
 				</div>
@@ -195,7 +230,7 @@ templ TransferTemplateForm(view *model.TransferTemplateEditView) {
 						<label class="label"><span class="label-text font-medium">Event</span></label>
 						@EventSelect(view.Events, view.TransferTemplate.EventID, "select-bordered")
 						<div class="text-sm text-base-content/60 mt-1">
-							In an Event, give the Start and End as days after its date, such as +20, and they move with it. A blank Start is the Event's date. Changing the Event keeps the dates it applies on.
+							In an Event, give the Start as days after its date, such as +20, and it moves with it. A blank Start is the Event's date. Changing the Event keeps the dates it applies on, and brings along its Ends in the Event it leaves.
 						</div>
 					</div>
 				</div>
