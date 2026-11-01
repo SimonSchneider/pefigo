@@ -1,7 +1,6 @@
 package model
 
 import (
-	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -259,7 +258,7 @@ func (b Bill) GenerateTransferTemplates(ba BillAccount) []TransferTemplate {
 	enabled := ba.Enabled && b.Enabled
 
 	sorted := slices.Clone(b.Amounts)
-	slices.SortStableFunc(sorted, func(a, b BillAmount) int { return cmp.Compare(a.StartDate, b.StartDate) })
+	sortByDayAndID(sorted, BillAmount.dayAndID)
 
 	var templates []TransferTemplate
 	for i, amt := range sorted {

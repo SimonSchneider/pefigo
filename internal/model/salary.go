@@ -1,13 +1,11 @@
 package model
 
 import (
-	"cmp"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 	"strconv"
 	"time"
 
@@ -215,11 +213,8 @@ func (s Salary) GenerateTransferTemplates() ([]TransferTemplate, error) {
 
 	var templates []TransferTemplate
 	if !s.IsGross {
-		sorted := make([]SalaryAmount, len(s.Amounts))
-		copy(sorted, s.Amounts)
-		sort.Slice(sorted, func(i, j int) bool {
-			return sorted[i].StartDate < sorted[j].StartDate
-		})
+		sorted := slices.Clone(s.Amounts)
+		sortByDayAndID(sorted, SalaryAmount.dayAndID)
 		for i, amt := range sorted {
 			if s.hasEndedBy(amt.StartDate) {
 				break
@@ -1064,7 +1059,7 @@ func (s *Service) segment(ctx context.Context, sal Salary, params []SweYearlyPar
 	}
 
 	sorted := slices.Clone(sal.Amounts)
-	slices.SortStableFunc(sorted, func(a, b SalaryAmount) int { return cmp.Compare(a.StartDate, b.StartDate) })
+	sortByDayAndID(sorted, SalaryAmount.dayAndID)
 
 	calculators := make(map[int]func(float64) swe.NetSalaryResult)
 	segments := make([]SalarySegment, 0, len(dates))

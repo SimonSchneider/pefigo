@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/SimonSchneider/goslu/date"
+	"github.com/SimonSchneider/pefigo/internal/pdb"
 	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
 
@@ -273,11 +274,20 @@ func placeEntries(events []Event, stored storedEntries, placements EventPlacemen
 	return p, nil
 }
 
-// partOwner is how a part finds the placed Salary or Bill it belongs to, of owners by index of their
-// IDs: given its owner's ID and its own Event, it is its owner with the date the part's dates are stored
-// after. ok is false when either is left out.
-func partOwner[O any](owners []O, index map[string]int, placed func(eventID *string) (date.Date, bool)) func(ownerID string, eventID *string) (owner *O, day date.Date, ok bool) {
-	return func(ownerID string, eventID *string) (*O, date.Date, bool) {
+// placeOwners places the Salaries or Bills of rows, each with the ID and Event idOf gives it, whose
+// Events placed places, as fromDB makes them at their Event's date. part is how one of their parts finds
+// the placed Salary or Bill it belongs to: given its owner's ID and its own Event, it is its owner with
+// the date the part's dates are stored after. ok is false when either is left out.
+func placeOwners[R, O any](rows []R, placed func(eventID *string) (date.Date, bool), idOf func(R) (id string, eventID *string), fromDB func(R, date.Date) O) (owners []O, part func(ownerID string, eventID *string) (owner *O, day date.Date, ok bool)) {
+	index := make(map[string]int, len(rows))
+	for _, row := range rows {
+		id, eventID := idOf(row)
+		if day, ok := placed(eventID); ok {
+			index[id] = len(owners)
+			owners = append(owners, fromDB(row, day))
+		}
+	}
+	return owners, func(ownerID string, eventID *string) (*O, date.Date, bool) {
 		i, found := index[ownerID]
 		day, ok := placed(eventID)
 		if !ok || !found {
@@ -290,14 +300,10 @@ func partOwner[O any](owners []O, index map[string]int, placed func(eventID *str
 // placeBills places the Bills of stored whose Events placed places, each with the Bill Amounts and ends
 // whose own Events it places, as placeSalaries places Salaries.
 func placeBills(p *plans, stored storedEntries, placed func(eventID *string) (date.Date, bool)) error {
-	index := make(map[string]int, len(stored.bills))
-	for _, row := range stored.bills {
-		if _, ok := placed(row.EventID); ok {
-			index[row.ID] = len(p.bills)
-			p.bills = append(p.bills, billFromDB(row))
-		}
-	}
-	part := partOwner(p.bills, index, placed)
+	var part func(string, *string) (*Bill, date.Date, bool)
+	p.bills, part = placeOwners(stored.bills, placed,
+		func(b pdb.Bill) (string, *string) { return b.ID, b.EventID },
+		func(b pdb.Bill, _ date.Date) Bill { return billFromDB(b) })
 	for _, row := range stored.billAmounts {
 		if b, day, ok := part(row.BillID, row.EventID); ok {
 			amt, err := billAmountFromDB(row, day)
@@ -321,14 +327,10 @@ func placeBills(p *plans, stored storedEntries, placed func(eventID *string) (da
 // placeSalaries places the Salaries of stored whose Events placed places, each with the parts whose
 // own Events it places: a part an Event adds to a Salary outside it is left out with that Event alone.
 func placeSalaries(p *plans, stored storedEntries, placed func(eventID *string) (date.Date, bool)) error {
-	index := make(map[string]int, len(stored.salaries))
-	for _, row := range stored.salaries {
-		if day, ok := placed(row.EventID); ok {
-			index[row.ID] = len(p.salaries)
-			p.salaries = append(p.salaries, salaryFromDB(row, day))
-		}
-	}
-	part := partOwner(p.salaries, index, placed)
+	var part func(string, *string) (*Salary, date.Date, bool)
+	p.salaries, part = placeOwners(stored.salaries, placed,
+		func(s pdb.Salary) (string, *string) { return s.ID, s.EventID },
+		salaryFromDB)
 	for _, row := range stored.salaryAmounts {
 		if sal, day, ok := part(row.SalaryID, row.EventID); ok {
 			amt, err := salaryAmountFromDB(row, day)
