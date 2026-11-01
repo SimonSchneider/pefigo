@@ -5,6 +5,7 @@ import (
 
 	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/internal/model"
+	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
 
 templ PageEvents(view *model.EventsView) {
@@ -330,6 +331,16 @@ templ DeleteEventContent(view *model.EventDeleteView) {
 							To keep an entry, remove it from the Event first: it moves to the Baseline with the dates it applies on.
 						</p>
 						@EventEntriesTable(view.Event, false)
+						if len(view.AlsoDeletedOptions) > 0 {
+							<div>
+								<p class="text-sm font-medium">Also deleted with the accounts that fund them:</p>
+								<ul class="list-disc list-inside text-sm">
+									for _, o := range view.AlsoDeletedOptions {
+										<li>An Option of { ui.FormatWithThousands(o.Shares) } shares on { o.AccountName }, funded by { o.SourceAccountName }</li>
+									}
+								</ul>
+							</div>
+						}
 						if len(view.AlsoDeleted) > 0 {
 							<div>
 								<p class="text-sm font-medium">Also deleted with its accounts:</p>

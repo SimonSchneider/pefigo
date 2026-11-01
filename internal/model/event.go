@@ -534,10 +534,20 @@ func (s *Service) GetEventEditPageData(ctx context.Context, id string) (*EventEd
 }
 
 // EventDeleteView confirms deleting an Event: it lists the entries the Event adds, and the entries
-// outside it deleted with its Accounts.
+// and Options outside it deleted with its Accounts.
 type EventDeleteView struct {
 	Event       EventView
 	AlsoDeleted []NamedEventEntry
+	// AlsoDeletedOptions are the Options on Startup Share accounts outside the Event that one of its
+	// Accounts funds: they are deleted with it.
+	AlsoDeletedOptions []DeletedOption
+}
+
+// DeletedOption is an Option deleted with the Account that funds it.
+type DeletedOption struct {
+	AccountName       string // the Startup Share account the Option is on
+	SourceAccountName string // the Account that funds it
+	Shares            float64
 }
 
 func (s *Service) GetEventDeletePageData(ctx context.Context, id string) (*EventDeleteView, error) {
@@ -567,6 +577,17 @@ func (s *Service) GetEventDeletePageData(ctx context.Context, id string) (*Event
 		if tt.EventID != ev.ID && (accounts[tt.FromAccountID] || accounts[tt.ToAccountID]) {
 			v.AlsoDeleted = append(v.AlsoDeleted, NamedEventEntry{
 				EventEntry: EventEntry{Kind: EventEntryTransferTemplate, ID: tt.ID}, Name: tt.Name, EventName: eventNames[tt.EventID],
+			})
+		}
+	}
+	options, err := s.q.ListAllStartupShareOptions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing startup share options: %w", err)
+	}
+	for _, row := range options {
+		if o := startupShareOptionFromDB(row); accounts[o.SourceAccountID] && !accounts[o.AccountID] {
+			v.AlsoDeletedOptions = append(v.AlsoDeletedOptions, DeletedOption{
+				AccountName: accountNames[o.AccountID], SourceAccountName: accountNames[o.SourceAccountID], Shares: o.Shares,
 			})
 		}
 	}

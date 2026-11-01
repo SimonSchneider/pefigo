@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"slices"
 
 	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/pkg/ui"
@@ -121,6 +122,10 @@ func placeEntries(events []Event, stored storedEntries, placements EventPlacemen
 		}
 		p.growthModels = append(p.growthModels, gm)
 	}
+	// Stored offsets don't sort as the dates they place at, so the placed growth models are ordered by
+	// their dates: of two starting on the same day, the one with the later ID applies, in an Event or
+	// not.
+	slices.SortStableFunc(p.growthModels, compareGrowthModels)
 
 	for _, row := range stored.transferTemplates {
 		day, ok := placed(row.EventID)

@@ -197,8 +197,14 @@ func (s *Service) ListAccountGrowthModels(ctx context.Context, accountID string)
 		}
 		gmList[i] = gm
 	}
-	slices.SortStableFunc(gmList, func(a, b GrowthModel) int { return cmp.Compare(a.StartDate, b.StartDate) })
+	slices.SortStableFunc(gmList, compareGrowthModels)
 	return gmList, nil
+}
+
+// compareGrowthModels orders growth models by Start Date, then ID: the order the forecast applies them
+// in, where the last that applies on a day wins.
+func compareGrowthModels(a, b GrowthModel) int {
+	return cmp.Or(cmp.Compare(a.StartDate, b.StartDate), cmp.Compare(a.ID, b.ID))
 }
 
 // growthModelsAppliedOn returns, per Account, the growth model of p the forecast applies on day: the

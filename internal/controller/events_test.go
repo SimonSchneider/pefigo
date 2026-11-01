@@ -141,12 +141,26 @@ func TestDeletingAnEventIsConfirmedWithWhatItDeletes(t *testing.T) {
 		t.Fatalf("create account: %v", err)
 	}
 
+	startup, err := svc.UpsertAccount(ctx, model.AccountInput{Name: "Startup"})
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	if _, err := svc.UpsertStartupShareOption(ctx, model.StartupShareOptionInput{
+		AccountID: startup.ID, SourceAccountID: property.ID, Shares: 9000, StrikePricePerShare: 10,
+		GrantDate: mustDate(t, "2026-01-01"), EndDate: mustDate(t, "2029-01-01"),
+	}); err != nil {
+		t.Fatalf("create option: %v", err)
+	}
+
 	if page := getPage(t, srv, "/events/"+ev.ID+"/edit"); !strings.Contains(page, `href="/events/`+ev.ID+`/delete"`) {
 		t.Fatalf("expected the edit page to link to the delete confirmation")
 	}
 	page := getPage(t, srv, "/events/"+ev.ID+"/delete")
 	if !strings.Contains(page, "Property") || !strings.Contains(page, `action="/events/`+ev.ID+`/delete"`) {
 		t.Fatalf("expected the confirmation to list Property and post the delete")
+	}
+	if !strings.Contains(page, "An Option of 9,000 shares on Startup, funded by Property") {
+		t.Errorf("expected the confirmation to list the Option that Property funds")
 	}
 
 	if location := postForm(t, srv, "/events/"+ev.ID+"/delete", nil); location != "/events" {

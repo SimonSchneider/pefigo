@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/pkg/finance"
@@ -76,9 +77,15 @@ func (s *Service) loadForecast(ctx context.Context, placements EventPlacements) 
 		schedule:      schedule,
 	}
 	for accountID, ss := range allStartupShares {
-		if !p.leftOutAccounts[accountID] {
-			f.startupShares[accountID] = ss
+		if p.leftOutAccounts[accountID] {
+			continue
 		}
+		// An Option funded by a left-out Account is left out with it, as a Transfer Template from it is.
+		placed := *ss
+		placed.options = slices.DeleteFunc(slices.Clone(ss.options), func(o StartupShareOption) bool {
+			return p.leftOutAccounts[o.SourceAccountID]
+		})
+		f.startupShares[accountID] = &placed
 	}
 	// A Startup Share account's balance is derived, so its Snapshots are ignored.
 	for _, row := range snapshotRows {
