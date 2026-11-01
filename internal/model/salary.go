@@ -46,10 +46,12 @@ type Salary struct {
 	// computed. See Service.loadSalaries.
 	segments    []SalarySegment
 	segmentsErr error
-	// paid is how the Baseline pays a Salary loaded for its pages, whose parts are each at their own
-	// Event's date: a Salary without parts when the Baseline leaves it out. It is nil for a Salary as it
-	// is paid. See Salary.payment.
+	// paid is how a Salary loaded for its pages, whose parts are each at their own Event's date, is
+	// paid: as the Baseline pays it, or, when the Baseline leaves it out with its Event, as it would be
+	// paid with its Event at its own date. It is nil for a Salary as it is paid. See Salary.payment.
 	paid *Salary
+	// leftOut is whether the Baseline leaves the loaded Salary out with its unplanned Event.
+	leftOut bool
 }
 
 // SalaryEnd is a day a Salary may end on: from it, no Salary Amount applies and nothing of the Salary
@@ -65,8 +67,8 @@ type SalaryEnd struct {
 	OffsetEventID string
 }
 
-// payment is the Salary as it is paid: how the Baseline pays it when it is loaded for its pages, and
-// the Salary itself otherwise.
+// payment is the Salary as it is paid: as loaded for its pages, how the Baseline pays it, or how it
+// would be paid with its unplanned Event at its date. It is the Salary itself otherwise.
 func (s Salary) payment() Salary {
 	if s.paid != nil {
 		return *s.paid
@@ -74,9 +76,10 @@ func (s Salary) payment() Salary {
 	return s
 }
 
-// InBaseline reports whether the Baseline pays the Salary: not when its Event is unplanned.
+// InBaseline reports whether the Baseline pays the Salary: not when its Event is unplanned. Its pages
+// then show what it would pay with its Event at its date.
 func (s Salary) InBaseline() bool {
-	return s.paid == nil || s.paid.ID != ""
+	return !s.leftOut
 }
 
 // End is the first day the Salary pays nothing: the earliest of its Ends, or nil without one.
@@ -354,62 +357,78 @@ func (s *Service) UpsertSalary(ctx context.Context, inp Salary) (Salary, error) 
 
 // ListSalaries returns every Salary, loaded as loadSalaries loads it.
 func (s *Service) ListSalaries(ctx context.Context) ([]Salary, error) {
-	return s.loadSalaries(ctx, "")
+	loaded, err := s.loadSalaries(ctx, "")
+	return loaded.salaries, err
 }
 
 // GetSalary returns the Salary id, loaded as loadSalaries loads it.
 func (s *Service) GetSalary(ctx context.Context, id string) (Salary, error) {
-	salaries, err := s.loadSalaries(ctx, id)
+	loaded, err := s.loadSalaries(ctx, id)
 	if err != nil {
 		return Salary{}, err
 	}
-	return salaries[0], nil
+	return loaded.salaries[0], nil
 }
 
 // loadSalaries returns every Salary, or only the Salary id when id isn't empty, with every part of it
-// at its own Event's date, as its forms edit it. What it pays is how the Baseline pays it: its Salary
-// Segments and current amount leave out what unplanned Events add or end, and a Salary in an unplanned
-// Event pays nothing. A Gross Salary the Baseline pays is segmented once, or carries the error that kept
-// it from being segmented.
-func (s *Service) loadSalaries(ctx context.Context, id string) ([]Salary, error) {
+// at its own Event's date, as its forms edit it, and with the Events it shows. What it pays is how the
+// Baseline pays it: its Salary Segments and current amount leave out what unplanned Events add or end.
+// A Salary in an unplanned Event pays what it would with every Event at its own date. A Gross Salary is
+// segmented once, or carries the error that kept it from being segmented.
+func (s *Service) loadSalaries(ctx context.Context, id string) (loadedSalaries, error) {
 	events, err := s.ListEvents(ctx)
 	if err != nil {
-		return nil, err
+		return loadedSalaries{}, err
 	}
 	stored, err := s.loadStoredEntries(ctx)
 	if err != nil {
-		return nil, err
+		return loadedSalaries{}, err
 	}
 	own, err := placeEntries(events, stored, asStored(events))
 	if err != nil {
-		return nil, err
+		return loadedSalaries{}, err
 	}
 	baseline, err := placeEntries(events, stored, nil)
 	if err != nil {
-		return nil, err
+		return loadedSalaries{}, err
 	}
-	if err := s.segmentSalaries(ctx, baseline.salaries); err != nil {
-		return nil, err
+	inBaseline := make(map[string]bool, len(baseline.salaries))
+	for _, sal := range baseline.salaries {
+		inBaseline[sal.ID] = true
 	}
-	paid := make(map[string]*Salary, len(baseline.salaries))
-	for i := range baseline.salaries {
-		paid[baseline.salaries[i].ID] = &baseline.salaries[i]
+	paying := slices.Clone(baseline.salaries)
+	for _, sal := range own.salaries {
+		if !inBaseline[sal.ID] {
+			paying = append(paying, sal)
+		}
+	}
+	if err := s.segmentSalaries(ctx, paying); err != nil {
+		return loadedSalaries{}, err
+	}
+	paid := make(map[string]*Salary, len(paying))
+	for i := range paying {
+		paid[paying[i].ID] = &paying[i]
 	}
 	var salaries []Salary
 	for _, sal := range own.salaries {
 		if id != "" && sal.ID != id {
 			continue
 		}
-		sal.paid = paid[sal.ID]
-		if sal.paid == nil {
-			sal.paid = &Salary{}
-		}
+		sal.paid, sal.leftOut = paid[sal.ID], !inBaseline[sal.ID]
 		salaries = append(salaries, sal)
 	}
 	if id != "" && len(salaries) == 0 {
-		return nil, fmt.Errorf("getting salary: %w", sql.ErrNoRows)
+		return loadedSalaries{}, fmt.Errorf("getting salary: %w", sql.ErrNoRows)
 	}
-	return salaries, nil
+	return loadedSalaries{salaries: salaries, events: events, accounts: accountsListFromDB(stored.accounts)}, nil
+}
+
+// loadedSalaries are Salaries loaded for their pages, with the Events and accounts they were loaded
+// with, which their pages show.
+type loadedSalaries struct {
+	salaries []Salary
+	events   []Event
+	accounts []Account
 }
 
 // segmentSalaries segments each Gross Salary of salaries, or keeps the error that kept it from being
@@ -981,15 +1000,11 @@ func (v *SalariesView) GetEvent(id string) *Event {
 }
 
 func (s *Service) GetSalariesPageData(ctx context.Context) (*SalariesView, error) {
-	salaries, err := s.ListSalaries(ctx)
+	loaded, err := s.loadSalaries(ctx, "")
 	if err != nil {
 		return nil, err
 	}
-	events, err := s.ListEvents(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return &SalariesView{Salaries: salaries, Events: KeyBy(events, func(e Event) string { return e.ID })}, nil
+	return &SalariesView{Salaries: loaded.salaries, Events: KeyBy(loaded.events, func(e Event) string { return e.ID })}, nil
 }
 
 // GetSalaryNewPageData is the page of a new Salary in the Event eventID, or in the Baseline for "".
@@ -1015,27 +1030,19 @@ func (s *Service) GetSalaryNewPageData(ctx context.Context, eventID string) (*Sa
 }
 
 func (s *Service) GetSalaryEditPageData(ctx context.Context, id string) (*SalaryEditView, error) {
-	sal, err := s.GetSalary(ctx, id)
+	loaded, err := s.loadSalaries(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("getting salary: %w", err)
-	}
-	accs, err := s.ListAccounts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing accounts: %w", err)
 	}
 	categories, err := s.ListCategories(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
-	events, err := s.ListEvents(ctx)
-	if err != nil {
-		return nil, err
-	}
 	return &SalaryEditView{
-		Salary:     sal,
-		Accounts:   accs,
+		Salary:     loaded.salaries[0],
+		Accounts:   loaded.accounts,
 		Categories: categories,
-		Events:     events,
+		Events:     loaded.events,
 	}, nil
 }
 

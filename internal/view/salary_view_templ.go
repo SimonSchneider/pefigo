@@ -361,7 +361,7 @@ func SalaryEditContent(view *model.SalaryEditView) templ.Component {
 		}
 		segments, segmentsErr := view.Salary.Segments()
 		if !view.Salary.InBaseline() {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<div role=\"alert\" class=\"alert alert-info alert-soft text-sm m-4 mb-0\"><span>Its Event is unplanned, so the Baseline pays nothing of this Salary: it has no Salary Breakdown.</span></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<div role=\"alert\" class=\"alert alert-info alert-soft text-sm m-4 mb-0\"><span>Its Event is unplanned, so the Baseline pays nothing of this Salary. It shows what the Salary would pay with its Event at its date.</span></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

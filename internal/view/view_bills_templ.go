@@ -794,7 +794,7 @@ func BillEditContent(view *model.BillEditView) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if view.IsEdit() && !view.Bill.InBaseline() {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "<div role=\"alert\" class=\"alert alert-info alert-soft text-sm mb-3\"><span>Its Event is unplanned, so the Baseline charges nothing of this Bill.</span></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "<div role=\"alert\" class=\"alert alert-info alert-soft text-sm mb-3\"><span>Its Event is unplanned, so the Baseline charges nothing of this Bill. It shows what the Bill would charge with its Event at its date.</span></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

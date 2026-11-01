@@ -274,7 +274,7 @@ templ BillEditContent(view *model.BillEditView) {
 			<div>
 				if view.IsEdit() && !view.Bill.InBaseline() {
 					<div role="alert" class="alert alert-info alert-soft text-sm mb-3">
-						<span>Its Event is unplanned, so the Baseline charges nothing of this Bill.</span>
+						<span>Its Event is unplanned, so the Baseline charges nothing of this Bill. It shows what the Bill would charge with its Event at its date.</span>
 					</div>
 				}
 				<form action={ "/bill-items/?next=" + templ.EscapeString("/bill-items/"+view.Bill.ID+"/edit") } method="post">

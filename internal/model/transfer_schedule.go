@@ -23,13 +23,88 @@ type TransferSchedule struct {
 	leftOut []TransferTemplate
 }
 
-// TransferSchedule is the Baseline's Transfer Schedule.
+// TransferSchedule is the Baseline's Transfer Schedule. What it leaves out are also the Transfer
+// Templates that the Salaries and Bills of unplanned Events would pay and charge, with every Event at its
+// own date.
 func (s *Service) TransferSchedule(ctx context.Context) (*TransferSchedule, error) {
-	p, err := s.placeEvents(ctx, nil)
+	events, err := s.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stored, err := s.loadStoredEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	p, err := placeEntries(events, stored, nil)
 	if err != nil {
 		return nil, fmt.Errorf("placing the events: %w", err)
 	}
-	return s.transferSchedule(ctx, p)
+	ts, err := s.transferSchedule(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	own, err := placeEntries(events, stored, asStored(events))
+	if err != nil {
+		return nil, fmt.Errorf("placing the events at their dates: %w", err)
+	}
+	leftOut, err := s.leftOutSalaryAndBillTemplates(ctx, p, own)
+	if err != nil {
+		return nil, err
+	}
+	ts.leftOut = append(ts.leftOut, leftOut...)
+	sortTransferTemplates(ts.leftOut)
+	return ts, nil
+}
+
+// leftOutSalaryAndBillTemplates are what the Salaries and Bills of own that p leaves out pay and charge,
+// each in its Event. A Gross Salary whose Net Salary is unknown pays nothing here: it counts in nothing.
+func (s *Service) leftOutSalaryAndBillTemplates(ctx context.Context, p, own *plans) ([]TransferTemplate, error) {
+	placedSalaries := make(map[string]bool, len(p.salaries))
+	for _, sal := range p.salaries {
+		placedSalaries[sal.ID] = true
+	}
+	var salaries []Salary
+	for _, sal := range own.salaries {
+		if !placedSalaries[sal.ID] {
+			salaries = append(salaries, sal)
+		}
+	}
+	if err := s.segmentSalaries(ctx, salaries); err != nil {
+		return nil, err
+	}
+	var templates []TransferTemplate
+	for _, sal := range salaries {
+		paid, err := sal.GenerateTransferTemplates()
+		if err != nil {
+			continue
+		}
+		for _, t := range paid {
+			t.EventID = sal.EventID
+			templates = append(templates, t)
+		}
+	}
+
+	placedBills := make(map[string]bool, len(p.bills))
+	for _, b := range p.bills {
+		placedBills[b.ID] = true
+	}
+	billEvents := make(map[string]string)
+	var bills []Bill
+	for _, b := range own.bills {
+		if !placedBills[b.ID] {
+			bills = append(bills, b)
+			billEvents[b.ID] = b.EventID
+		}
+	}
+	charged, err := s.billTransferTemplates(ctx, bills)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range charged {
+		t.EventID = billEvents[t.Source.EntityID]
+		templates = append(templates, t)
+	}
+	return templates, nil
 }
 
 // transferSchedule is the Transfer Schedule of p: its Transfer Templates with those generated from

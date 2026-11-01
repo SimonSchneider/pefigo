@@ -597,8 +597,8 @@ templ TransferTemplatesContent(view *model.TransferTemplatesView) {
 }
 
 // LeftOutTransferTemplates lists the Transfer Templates the Events leave out of the Baseline: those
-// of unplanned Events, at their Events' dates, and those that use their Accounts. They count in
-// nothing on this page.
+// of unplanned Events and of their Salaries and Bills, at their Events' dates, and those that use their
+// Accounts. They count in nothing on this page.
 templ LeftOutTransferTemplates(view *model.TransferTemplatesView) {
 	<div class="card bg-base-100 shadow-sm border border-base-300">
 		<div class="card-body">

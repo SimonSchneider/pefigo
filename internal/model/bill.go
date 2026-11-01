@@ -42,9 +42,12 @@ type Bill struct {
 	// Ends are the days the Bill may end on: no Bill Amount applies from the earliest of them.
 	Ends []BillEnd
 	// baseline is how the Baseline charges a Bill loaded for its pages, whose Bill Amounts and ends are
-	// each at their own Event's date: a Bill without Bill Amounts when the Baseline leaves it out. It is
-	// nil for a Bill as it is charged. See Bill.charged.
+	// each at their own Event's date. It is nil for a Bill as it is charged, and for one the Baseline
+	// leaves out with its Event, which is charged as it would be with its Event at its own date. See
+	// Bill.charged.
 	baseline *Bill
+	// leftOut is whether the Baseline leaves the loaded Bill out with its unplanned Event.
+	leftOut bool
 }
 
 // BillEnd is a day a Bill may end on: from it, no Bill Amount applies. In an Event its date is stored
@@ -61,7 +64,7 @@ type BillEnd struct {
 }
 
 // charged is the Bill as it is charged: how the Baseline charges it when it is loaded for its pages,
-// and the Bill itself otherwise.
+// and the Bill itself otherwise, with its Event at its own date when the Baseline leaves it out.
 func (b Bill) charged() Bill {
 	if b.baseline != nil {
 		return *b.baseline
@@ -69,9 +72,10 @@ func (b Bill) charged() Bill {
 	return b
 }
 
-// InBaseline reports whether the Baseline charges the Bill: not when its Event is unplanned.
+// InBaseline reports whether the Baseline charges the Bill: not when its Event is unplanned. Its pages
+// then show what it would charge with its Event at its date.
 func (b Bill) InBaseline() bool {
-	return b.baseline == nil || b.baseline.ID != ""
+	return !b.leftOut
 }
 
 // End is the first day no Bill Amount of the Bill applies: the earliest of its Ends, or nil without
@@ -350,37 +354,38 @@ func sortBillParts(b *Bill) {
 }
 
 // loadBillAccounts returns every Bill account with its Bills, each with its Bill Amounts and ends at
-// their own Event's dates, as its forms edit them, and what it charges as the Baseline charges it: it
-// leaves out what unplanned Events add or end, and a Bill in an unplanned Event charges nothing. Every
-// Bill Amount has its amount in the Default Currency: one in another currency converted at the latest
-// Exchange Rate. It fails when the Default Currency can't be read, or when no Exchange Rate needed was
-// ever fetched.
-func (s *Service) loadBillAccounts(ctx context.Context) ([]BillAccount, error) {
+// their own Event's dates, as its forms edit them, with the Events and accounts its pages show. What
+// a Bill charges is how the Baseline charges it: it leaves out what unplanned Events add or end, and a
+// Bill in an unplanned Event charges what it would with every Event at its own date. Every Bill Amount
+// has its amount in the Default Currency: one in another currency converted at the latest Exchange
+// Rate. It fails when the Default Currency can't be read, or when no Exchange Rate needed was ever
+// fetched.
+func (s *Service) loadBillAccounts(ctx context.Context) (loadedBillAccounts, error) {
 	events, err := s.ListEvents(ctx)
 	if err != nil {
-		return nil, err
+		return loadedBillAccounts{}, err
 	}
 	stored, err := s.loadStoredEntries(ctx)
 	if err != nil {
-		return nil, err
+		return loadedBillAccounts{}, err
 	}
 	own, err := placeEntries(events, stored, asStored(events))
 	if err != nil {
-		return nil, err
+		return loadedBillAccounts{}, err
 	}
 	baseline, err := placeEntries(events, stored, nil)
 	if err != nil {
-		return nil, err
+		return loadedBillAccounts{}, err
 	}
 	convert, err := s.billAmountConverter(ctx)
 	if err != nil {
-		return nil, err
+		return loadedBillAccounts{}, err
 	}
 	if err := convert(own.bills); err != nil {
-		return nil, err
+		return loadedBillAccounts{}, err
 	}
 	if err := convert(baseline.bills); err != nil {
-		return nil, err
+		return loadedBillAccounts{}, err
 	}
 	charged := make(map[string]*Bill, len(baseline.bills))
 	for i := range baseline.bills {
@@ -388,11 +393,21 @@ func (s *Service) loadBillAccounts(ctx context.Context) ([]BillAccount, error) {
 	}
 	for i, b := range own.bills {
 		own.bills[i].baseline = charged[b.ID]
-		if own.bills[i].baseline == nil {
-			own.bills[i].baseline = &Bill{}
-		}
+		own.bills[i].leftOut = charged[b.ID] == nil
 	}
-	return s.billAccountsOf(ctx, own.bills)
+	accounts, err := s.billAccountsOf(ctx, own.bills)
+	if err != nil {
+		return loadedBillAccounts{}, err
+	}
+	return loadedBillAccounts{billAccounts: accounts, events: events, accounts: accountsListFromDB(stored.accounts)}, nil
+}
+
+// loadedBillAccounts are Bill accounts loaded for their pages, with the Events and accounts they were
+// loaded with, which their pages show.
+type loadedBillAccounts struct {
+	billAccounts []BillAccount
+	events       []Event
+	accounts     []Account
 }
 
 // billAccountsOf is every Bill account with the bills of it, in their order.
@@ -771,7 +786,7 @@ func (v BillEditView) PartEventID() string {
 }
 
 func (s *Service) GetBillAccountsPageData(ctx context.Context) (*BillsView, error) {
-	accounts, err := s.loadBillAccounts(ctx)
+	loaded, err := s.loadBillAccounts(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -779,17 +794,13 @@ func (s *Service) GetBillAccountsPageData(ctx context.Context) (*BillsView, erro
 	if err != nil {
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
-	for i := range accounts {
-		SortBillsByAmount(accounts[i].Bills)
-	}
-	events, err := s.ListEvents(ctx)
-	if err != nil {
-		return nil, err
+	for i := range loaded.billAccounts {
+		SortBillsByAmount(loaded.billAccounts[i].Bills)
 	}
 	return &BillsView{
-		BillAccounts: accounts,
+		BillAccounts: loaded.billAccounts,
 		Categories:   KeyBy(categories, func(c TransferTemplateCategory) string { return c.ID }),
-		Events:       KeyBy(events, func(e Event) string { return e.ID }),
+		Events:       KeyBy(loaded.events, func(e Event) string { return e.ID }),
 	}, nil
 }
 
@@ -809,40 +820,32 @@ func (s *Service) GetBillAccountNewPageData(ctx context.Context) (*BillAccountEd
 }
 
 func (s *Service) GetBillAccountEditPageData(ctx context.Context, id string) (*BillAccountEditView, error) {
-	accounts, err := s.loadBillAccounts(ctx)
+	loaded, err := s.loadBillAccounts(ctx)
 	if err != nil {
 		return nil, err
 	}
-	i := slices.IndexFunc(accounts, func(ba BillAccount) bool { return ba.ID == id })
+	i := slices.IndexFunc(loaded.billAccounts, func(ba BillAccount) bool { return ba.ID == id })
 	if i < 0 {
 		return nil, fmt.Errorf("getting bill account: %w", sql.ErrNoRows)
-	}
-	accs, err := s.ListAccounts(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing accounts: %w", err)
 	}
 	categories, err := s.ListCategories(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
-	events, err := s.ListEvents(ctx)
-	if err != nil {
-		return nil, err
-	}
 	return &BillAccountEditView{
-		BillAccount: accounts[i],
-		Accounts:    accs,
+		BillAccount: loaded.billAccounts[i],
+		Accounts:    loaded.accounts,
 		Categories:  categories,
-		Events:      events,
+		Events:      loaded.events,
 	}, nil
 }
 
 func (s *Service) GetBillEditPageData(ctx context.Context, billID string) (*BillEditView, error) {
-	accounts, err := s.loadBillAccounts(ctx)
+	loaded, err := s.loadBillAccounts(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for _, ba := range accounts {
+	for _, ba := range loaded.billAccounts {
 		for _, bill := range ba.Bills {
 			if bill.ID != billID {
 				continue
@@ -851,16 +854,12 @@ func (s *Service) GetBillEditPageData(ctx context.Context, billID string) (*Bill
 			if err != nil {
 				return nil, fmt.Errorf("listing categories: %w", err)
 			}
-			events, err := s.ListEvents(ctx)
-			if err != nil {
-				return nil, err
-			}
 			return &BillEditView{
 				Bill:         bill,
 				BillAccount:  ba,
-				BillAccounts: accounts,
+				BillAccounts: loaded.billAccounts,
 				Categories:   categories,
-				Events:       events,
+				Events:       loaded.events,
 			}, nil
 		}
 	}

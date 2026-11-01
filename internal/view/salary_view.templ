@@ -133,7 +133,7 @@ templ SalaryEditContent(view *model.SalaryEditView) {
 		{{ segments, segmentsErr := view.Salary.Segments() }}
 		if !view.Salary.InBaseline() {
 			<div role="alert" class="alert alert-info alert-soft text-sm m-4 mb-0">
-				<span>Its Event is unplanned, so the Baseline pays nothing of this Salary: it has no Salary Breakdown.</span>
+				<span>Its Event is unplanned, so the Baseline pays nothing of this Salary. It shows what the Salary would pay with its Event at its date.</span>
 			</div>
 		}
 		if len(segments) > 0 || segmentsErr != nil {
