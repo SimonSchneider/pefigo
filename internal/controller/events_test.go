@@ -81,7 +81,7 @@ func TestEntryFormsPutTheirEntryInAnEvent(t *testing.T) {
 	}
 }
 
-func TestTheEventPageAddsAndRemovesEntriesAndEnds(t *testing.T) {
+func TestTheEventPageListsItsEntriesAndRemovesEntriesAndEnds(t *testing.T) {
 	svc, srv := newSettingsServer(t)
 	ctx := t.Context()
 	checking, err := svc.UpsertAccount(ctx, model.AccountInput{Name: "Checking"})
@@ -109,13 +109,12 @@ func TestTheEventPageAddsAndRemovesEntriesAndEnds(t *testing.T) {
 	}
 	savingsEntry := model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: savings.ID}.String()
 	gymEntry := model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: gym.ID}.String()
-	if page := getPage(t, srv, location); !strings.Contains(page, `value="`+savingsEntry+`"`) {
-		t.Fatalf("expected the edit page to offer adding Savings")
-	}
 
-	if got := postForm(t, srv, "/events/"+eventID+"/entries/", url.Values{"entry": {savingsEntry}}); got != location {
-		t.Errorf("expected adding an entry to lead back to the Event, got %s", got)
-	}
+	// Savings joins the Event from its own form, with the dates it has in the Baseline.
+	postForm(t, srv, "/transfers/", url.Values{
+		"id": {savings.ID}, "name": {"Savings"}, "from_account_id": {checking.ID}, "amount_type": {"fixed"}, "amount_fixed": {"1000"},
+		"recurrence": {"*-*-25"}, "start_date": {"2027-01-25"}, "event_id": {eventID}, "enabled": {"on"},
+	})
 	if tt, err := svc.GetTransferTemplate(ctx, savings.ID); err != nil || tt.EventID != eventID || tt.StartDate != mustDate(t, "2027-01-25") {
 		t.Fatalf("expected Savings in the Event, still from 2027-01-25, got %+v (%v)", tt, err)
 	}
@@ -125,6 +124,9 @@ func TestTheEventPageAddsAndRemovesEntriesAndEnds(t *testing.T) {
 		if !strings.Contains(page, want) {
 			t.Errorf("expected the Event page to show %q", want)
 		}
+	}
+	if strings.Contains(page, `action="/events/`+eventID+`/entries/"`) || strings.Contains(page, "Add an existing entry") {
+		t.Errorf("expected the Event page to only list its entries, without a form adding existing ones")
 	}
 
 	postForm(t, srv, "/events/"+eventID+"/entries/remove", url.Values{"entry": {savingsEntry}})

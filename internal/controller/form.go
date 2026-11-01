@@ -108,7 +108,7 @@ func (e *eventInputForm) FromForm(r *http.Request) error {
 	return nil
 }
 
-// eventEntryForm names an entry to add to an Event, remove from one, or end in one on EndDate, or
+// eventEntryForm names an entry to remove from its Event, or to end in one on EndDate, or
 // EndOffset days after the Event's date.
 type eventEntryForm struct {
 	Entry     model.EventEntry

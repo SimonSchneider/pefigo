@@ -96,9 +96,6 @@ func forecastInputMutations() []forecastInputMutation {
 		{"DeleteEvent", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.DeleteEvent(ctx, ids.event)
 		}},
-		{"AddToEvent", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
-			return svc.AddToEvent(ctx, ids.event, model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: ids.transferTemplate})
-		}},
 		{"RemoveFromEvent", func(ctx context.Context, svc *model.Service, ids forecastInputIDs) error {
 			return svc.RemoveFromEvent(ctx, model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: ids.eventTransferTemplate})
 		}},

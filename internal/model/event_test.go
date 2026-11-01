@@ -63,13 +63,6 @@ func mustGetGrowthModel(t *testing.T, svc *model.Service, id string) model.Growt
 	return gm
 }
 
-func mustAddToEvent(t *testing.T, svc *model.Service, eventID string, entry model.EventEntry) {
-	t.Helper()
-	if err := svc.AddToEvent(t.Context(), eventID, entry); err != nil {
-		t.Fatalf("add %s to event: %v", entry, err)
-	}
-}
-
 func mustRemoveFromEvent(t *testing.T, svc *model.Service, entry model.EventEntry) {
 	t.Helper()
 	if err := svc.RemoveFromEvent(t.Context(), entry); err != nil {
@@ -160,7 +153,9 @@ func TestAnEntryJoiningOrLeavingAnEventKeepsTheDatesItAppliesOn(t *testing.T) {
 		})
 		entry := model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: tt.ID}
 
-		mustAddToEvent(t, svc, ev.ID, entry)
+		// Its form joins the Event with the dates it applies on in the Baseline.
+		tt.EventID = ev.ID
+		mustTransferTemplate(t, svc, tt)
 		if got := mustGetTransferTemplate(t, svc, tt.ID); got.EventID != ev.ID || got.StartDate != mustParseDate("2027-01-25") || dateOf(got.EndDate) != "2027-06-01" {
 			t.Fatalf("expected the Transfer Template in the Event, still from 2027-01-25 to 2027-06-01, got %+v", got)
 		}
@@ -185,7 +180,8 @@ func TestAnEntryJoiningOrLeavingAnEventKeepsTheDatesItAppliesOn(t *testing.T) {
 		})
 		entry := model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: tt.ID}
 
-		mustAddToEvent(t, svc, ev.ID, entry)
+		tt.EventID = ev.ID
+		mustTransferTemplate(t, svc, tt)
 		ev = moveEvent(t, svc, ev, "2027-01-11")
 		if got := mustGetTransferTemplate(t, svc, tt.ID); got.Recurrence != "2027-03-20" {
 			t.Fatalf("expected the one-off to move ten days with the Event, got %s", got.Recurrence)
@@ -201,7 +197,9 @@ func TestAnEntryJoiningOrLeavingAnEventKeepsTheDatesItAppliesOn(t *testing.T) {
 		gm := mustGrowthModel(t, svc, model.AccountGrowthModelInput{AccountID: checking.ID, AnnualRate: newFixedValue(0.01), StartDate: mustParseDate("2027-01-25")})
 		entry := model.EventEntry{Kind: model.EventEntryGrowthModel, ID: gm.ID}
 
-		mustAddToEvent(t, svc, ev.ID, entry)
+		mustGrowthModel(t, svc, model.AccountGrowthModelInput{
+			ID: gm.ID, AccountID: gm.AccountID, Type: gm.Type, AnnualRate: gm.AnnualRate, StartDate: gm.StartDate, EndDate: gm.EndDate, EventID: ev.ID,
+		})
 		if got := mustGetGrowthModel(t, svc, gm.ID); got.EventID != ev.ID || got.StartDate != mustParseDate("2027-01-25") || got.EndDate != nil {
 			t.Fatalf("expected the growth model in the Event, still from 2027-01-25, got %+v", got)
 		}
@@ -217,7 +215,9 @@ func TestAnEntryJoiningOrLeavingAnEventKeepsTheDatesItAppliesOn(t *testing.T) {
 		acc := mustAccount(t, svc, "Car")
 		entry := model.EventEntry{Kind: model.EventEntryAccount, ID: acc.ID}
 
-		mustAddToEvent(t, svc, ev.ID, entry)
+		if _, err := svc.UpsertAccount(t.Context(), model.AccountInput{ID: acc.ID, Name: acc.Name, EventID: ev.ID}); err != nil {
+			t.Fatalf("put the account in the Event: %v", err)
+		}
 		if got, err := svc.GetAccount(t.Context(), acc.ID); err != nil || got.EventID != ev.ID {
 			t.Fatalf("expected the account in the Event, got %+v (%v)", got, err)
 		}
@@ -231,8 +231,16 @@ func TestAnEntryJoiningOrLeavingAnEventKeepsTheDatesItAppliesOn(t *testing.T) {
 func TestAnEntryCanOnlyJoinAnEventThatExists(t *testing.T) {
 	svc := newTestService(t)
 	acc := mustAccount(t, svc, "Checking")
-	if err := svc.AddToEvent(t.Context(), "missing", model.EventEntry{Kind: model.EventEntryAccount, ID: acc.ID}); !errors.Is(err, model.ErrInvalidInput) {
-		t.Fatalf("expected invalid input for an Event that doesn't exist, got %v", err)
+	if _, err := svc.UpsertTransferTemplate(t.Context(), model.TransferTemplate{
+		Name: "Savings", FromAccountID: acc.ID, AmountType: model.TransferAmountFixed, AmountFixed: newFixedValue(1000),
+		Recurrence: "*-*-25", StartDate: mustParseDate("2027-01-25"), Enabled: true, EventID: "missing",
+	}); !errors.Is(err, model.ErrInvalidInput) {
+		t.Fatalf("expected invalid input for a Transfer Template in an Event that doesn't exist, got %v", err)
+	}
+	if _, err := svc.UpsertAccountGrowthModel(t.Context(), model.AccountGrowthModelInput{
+		AccountID: acc.ID, Type: model.GrowthModelFixed, StartDate: mustParseDate("2027-01-25"), EventID: "missing",
+	}); !errors.Is(err, model.ErrInvalidInput) {
+		t.Fatalf("expected invalid input for a growth model in an Event that doesn't exist, got %v", err)
 	}
 	if _, err := svc.UpsertAccount(t.Context(), model.AccountInput{Name: "Car", EventID: "missing"}); !errors.Is(err, model.ErrInvalidInput) {
 		t.Fatalf("expected invalid input for an account in an Event that doesn't exist, got %v", err)

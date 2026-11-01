@@ -138,9 +138,6 @@ func NewHandler(svc *model.Service, public fs.FS) http.Handler {
 	mux.Handle("POST /events/{$}", h.eventUpsert())
 	mux.Handle("GET /events/{id}/delete", h.eventDeletePage())
 	mux.Handle("POST /events/{id}/delete", h.eventDelete())
-	mux.Handle("POST /events/{id}/entries/{$}", h.eventAction("adding to event", func(ctx context.Context, eventID string, f eventEntryForm) error {
-		return h.svc.AddToEvent(ctx, eventID, f.Entry)
-	}))
 	mux.Handle("POST /events/{id}/entries/remove", h.eventAction("removing from event", func(ctx context.Context, _ string, f eventEntryForm) error {
 		return h.svc.RemoveFromEvent(ctx, f.Entry)
 	}))

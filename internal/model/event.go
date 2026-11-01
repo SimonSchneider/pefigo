@@ -279,19 +279,6 @@ func ownDate(dates map[string]date.Date, eventID *string) date.Date {
 	return dates[*eventID]
 }
 
-// AddToEvent makes entry one of the Event eventID's entries, moving it out of any other Event. Its
-// dates become offsets from the Event's date, so the days it applies on don't change. If the Event
-// ended it, that end is lifted, since an Event only ends entries outside it.
-func (s *Service) AddToEvent(ctx context.Context, eventID string, entry EventEntry) error {
-	if eventID == "" {
-		return fmt.Errorf("%w: no event to add %s to", ErrInvalidInput, entry)
-	}
-	if _, err := s.eventDate(ctx, eventID); err != nil {
-		return err
-	}
-	return s.setEntryEvent(ctx, entry, eventID)
-}
-
 // RemoveFromEvent puts entry in the Baseline, out of its Event. Its dates become the absolute dates
 // they are at with the Event at its current date.
 func (s *Service) RemoveFromEvent(ctx context.Context, entry EventEntry) error {
@@ -639,12 +626,10 @@ func (s *Service) GetEventsPageData(ctx context.Context) (*EventsView, error) {
 	return v, nil
 }
 
-// EventEditView is an Event's edit page: the Event with its entries, the entries that can be added to
-// it, and the entries it can end.
+// EventEditView is an Event's edit page: the Event with its entries, and the entries it can end. An
+// entry joins an Event from its own form.
 type EventEditView struct {
 	Event EventView
-	// Addable are the entries outside the Event, any of which can be added to it.
-	Addable []NamedEventEntry
 	// Endable are the Transfer Templates and growth models outside the Event that it doesn't end yet.
 	Endable []NamedEventEntry
 }
@@ -673,24 +658,17 @@ func (s *Service) GetEventEditPageData(ctx context.Context, id string) (*EventEd
 	for _, end := range v.Event.Ends {
 		ended[end.Entry] = true
 	}
-	add := func(kind EventEntryKind, id, name, eventID string) {
-		if eventID == ev.ID {
-			return
-		}
+	endable := func(kind EventEntryKind, id, name, eventID string) {
 		entry := NamedEventEntry{EventEntry: EventEntry{Kind: kind, ID: id}, Name: name, EventName: eventNames[eventID]}
-		v.Addable = append(v.Addable, entry)
-		if kind != EventEntryAccount && !ended[entry.EventEntry] {
+		if eventID != ev.ID && !ended[entry.EventEntry] {
 			v.Endable = append(v.Endable, entry)
 		}
 	}
-	for _, acc := range e.accounts {
-		add(EventEntryAccount, acc.ID, acc.Name, acc.EventID)
-	}
 	for _, gm := range e.growthModels {
-		add(EventEntryGrowthModel, gm.ID, growthModelName(gm, accountNames[gm.AccountID]), gm.EventID)
+		endable(EventEntryGrowthModel, gm.ID, growthModelName(gm, accountNames[gm.AccountID]), gm.EventID)
 	}
 	for _, tt := range e.transferTemplates {
-		add(EventEntryTransferTemplate, tt.ID, tt.Name, tt.EventID)
+		endable(EventEntryTransferTemplate, tt.ID, tt.Name, tt.EventID)
 	}
 	return v, nil
 }

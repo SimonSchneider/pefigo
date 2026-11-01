@@ -356,20 +356,11 @@ templ EventEntriesCard(view *model.EventEditView) {
 		<div class="card-body p-5 gap-3">
 			<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/60">Entries it adds</h3>
 			@EventEntriesTable(view.Event, true)
-			<form method="post" action={ templ.SafeURL("/events/" + view.Event.ID + "/entries/") } class="flex flex-wrap items-end gap-2">
-				<div class="form-control flex-1 min-w-64">
-					<label class="label"><span class="label-text text-xs">Add an existing entry, keeping the dates it applies on</span></label>
-					<select class="select select-sm select-bordered w-full" name="entry">
-						@EntryOptions(view.Addable)
-					</select>
-				</div>
-				<button type="submit" class="btn btn-sm btn-primary">Add</button>
-			</form>
 			<div class="flex flex-wrap gap-2 text-sm">
 				<span class="text-base-content/60">New in this Event:</span>
 				<a class="link" href={ templ.SafeURL("/accounts/new?event_id=" + view.Event.ID) }>Account</a>
 				<a class="link" href={ templ.SafeURL("/transfer-templates/new?event_id=" + view.Event.ID) }>Transfer Template</a>
-				<span class="text-base-content/50">Growth models are added on their account's page.</span>
+				<span class="text-base-content/50">Growth models are added on their account's page, and an existing entry joins from the Event select on its own form.</span>
 			</div>
 		</div>
 	</div>
