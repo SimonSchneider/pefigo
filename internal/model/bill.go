@@ -703,6 +703,15 @@ func (s *Service) DeleteBillEnd(ctx context.Context, id string) error {
 type BillsView struct {
 	BillAccounts []BillAccount
 	Categories   map[string]TransferTemplateCategory
+	Events       map[string]Event
+}
+
+// GetEvent is the Event id, or nil for "" or an Event that doesn't exist.
+func (v *BillsView) GetEvent(id string) *Event {
+	if ev, ok := v.Events[id]; ok {
+		return &ev
+	}
+	return nil
 }
 
 func (v *BillsView) GetBudgetCategory(id *string) *TransferTemplateCategory {
@@ -720,6 +729,7 @@ type BillAccountEditView struct {
 	BillAccount BillAccount
 	Accounts    []Account
 	Categories  []TransferTemplateCategory
+	Events      []Event
 }
 
 func (v BillAccountEditView) IsEdit() bool {
@@ -729,6 +739,7 @@ func (v BillAccountEditView) IsEdit() bool {
 func (v *BillAccountEditView) BillsView() *BillsView {
 	return &BillsView{
 		Categories: KeyBy(v.Categories, func(c TransferTemplateCategory) string { return c.ID }),
+		Events:     KeyBy(v.Events, func(e Event) string { return e.ID }),
 	}
 }
 
@@ -737,10 +748,17 @@ type BillEditView struct {
 	BillAccount  BillAccount
 	BillAccounts []BillAccount
 	Categories   []TransferTemplateCategory
+	Events       []Event
 }
 
 func (v BillEditView) IsEdit() bool {
 	return v.Bill.ID != ""
+}
+
+// PartEventID is the Event a new Bill Amount or end of the Bill is in, unless its form picks another:
+// the Bill's.
+func (v BillEditView) PartEventID() string {
+	return v.Bill.EventID
 }
 
 func (s *Service) GetBillAccountsPageData(ctx context.Context) (*BillsView, error) {
@@ -755,9 +773,14 @@ func (s *Service) GetBillAccountsPageData(ctx context.Context) (*BillsView, erro
 	for i := range accounts {
 		SortBillsByAmount(accounts[i].Bills)
 	}
+	events, err := s.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return &BillsView{
 		BillAccounts: accounts,
 		Categories:   KeyBy(categories, func(c TransferTemplateCategory) string { return c.ID }),
+		Events:       KeyBy(events, func(e Event) string { return e.ID }),
 	}, nil
 }
 
@@ -793,10 +816,15 @@ func (s *Service) GetBillAccountEditPageData(ctx context.Context, id string) (*B
 	if err != nil {
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
+	events, err := s.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return &BillAccountEditView{
 		BillAccount: accounts[i],
 		Accounts:    accs,
 		Categories:  categories,
+		Events:      events,
 	}, nil
 }
 
@@ -814,11 +842,16 @@ func (s *Service) GetBillEditPageData(ctx context.Context, billID string) (*Bill
 			if err != nil {
 				return nil, fmt.Errorf("listing categories: %w", err)
 			}
+			events, err := s.ListEvents(ctx)
+			if err != nil {
+				return nil, err
+			}
 			return &BillEditView{
 				Bill:         bill,
 				BillAccount:  ba,
 				BillAccounts: accounts,
 				Categories:   categories,
+				Events:       events,
 			}, nil
 		}
 	}

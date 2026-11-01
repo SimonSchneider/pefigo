@@ -18,9 +18,10 @@ import (
 )
 
 // Event is a named group of related changes to the plans for the future that happen around one date:
-// the Accounts, growth models and Transfer Templates it adds. Every date of its changes is an offset
-// from its date, so moving it moves them all. It is planned when the Baseline holds it at its date, and unplanned when only
-// Scenarios use it.
+// the Accounts, growth models, Transfer Templates, Salaries and Bills it adds, and the dated parts it
+// adds to Salaries, Bills and Startup Share accounts, in or outside it. Every date of its changes is an
+// offset from its date, so moving it moves them all. It is planned when the Baseline holds it at its
+// date, and unplanned when only Scenarios use it.
 type Event struct {
 	ID      string
 	Name    string

@@ -25,6 +25,18 @@ func eventEditURL(id string) templ.SafeURL {
 	return templ.SafeURL("/events/" + id + "/edit")
 }
 
+// eventPartOwnerURL is the page of the Salary, Bill or account the part makes up, where it is edited.
+func eventPartOwnerURL(part model.EventPart) templ.SafeURL {
+	switch part.Kind {
+	case model.EventEntryBill, model.EventEntryBillAmount, model.EventEntryBillEnd:
+		return templ.SafeURL("/bill-items/" + part.OwnerID + "/edit")
+	case model.EventEntryInvestmentRound, model.EventEntryShareChange:
+		return templ.SafeURL("/accounts/" + part.OwnerID + "/edit")
+	default:
+		return templ.SafeURL("/salaries/" + part.OwnerID + "/edit")
+	}
+}
+
 // formatOffset is how long after an Event's date one of its dates is, such as "+31 days".
 // entryDatePlaceholder is the placeholder of an entry's Start: +0, the Event's date, in an Event, and
 // the example date otherwise.
@@ -74,6 +86,44 @@ func eventBadgeTitle(ev *model.Event) string {
 		return "In the planned Event " + ev.Name + " on " + ev.Date.String()
 	}
 	return "In the unplanned Event " + ev.Name + ": left out of the Baseline"
+}
+
+// EntryDateInput is the field name of a date d of an entry in the Event eventID: in an Event the days
+// after its date, such as +20, and otherwise the date. A new entry's is blank.
+templ EntryDateInput(events []model.Event, eventID, name string, d *date.Date, placeholder string) {
+	<input type="text" class="input input-xs w-full" placeholder={ placeholder } title="A date, or in an Event the days after its date, such as +20" name={ name } value={ model.DateInput(events, eventID, d) }/>
+}
+
+// partEventID is the Event the row of a dated part selects: its own, or for a new part, defaultEventID,
+// the Event of what it is part of.
+func partEventID(id, eventID, defaultEventID string) string {
+	if id == "" {
+		return defaultEventID
+	}
+	return eventID
+}
+
+// partDate is the date d of the part id for its row: none for a new part.
+func partDate(id string, d date.Date) *date.Date {
+	if id == "" {
+		return nil
+	}
+	return &d
+}
+
+// partStartPlaceholder is the placeholder of a dated part's first day: +0, the Event's date, in an
+// Event, and example otherwise.
+func partStartPlaceholder(id, eventID, defaultEventID, example string) string {
+	return entryDatePlaceholder(partEventID(id, eventID, defaultEventID) != "", example)
+}
+
+// partEndPlaceholder is the placeholder of a dated part's End: days after the Event's date in an Event,
+// and example otherwise.
+func partEndPlaceholder(id, eventID, defaultEventID, example string) string {
+	if partEventID(id, eventID, defaultEventID) != "" {
+		return "+180"
+	}
+	return example
 }
 
 // EventSelect picks the Event an entry is in, or none for the Baseline.
@@ -149,7 +199,7 @@ templ EventCard(ev model.EventView) {
 
 // EventEntriesTable lists the entries ev adds, with a button to remove each from it when editable.
 templ EventEntriesTable(ev model.EventView, editable bool) {
-	if len(ev.Accounts)+len(ev.GrowthModels)+len(ev.TransferTemplates) == 0 {
+	if len(ev.Accounts)+len(ev.GrowthModels)+len(ev.TransferTemplates)+len(ev.Parts) == 0 {
 		<p class="text-sm text-base-content/50">Adds no entries.</p>
 	} else {
 		<div class="overflow-x-auto">
@@ -214,6 +264,29 @@ templ EventEntriesTable(ev model.EventView, editable bool) {
 							</td>
 							if editable {
 								<td class="text-right">@RemoveFromEventButton(ev.ID, model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: tt.ID})</td>
+							}
+						</tr>
+					}
+					for _, part := range ev.Parts {
+						<tr>
+							<td class="text-xs text-base-content/60">{ part.Kind.Label() }</td>
+							<td><a class="link link-hover" href={ eventPartOwnerURL(part) }>{ part.OwnerName }</a></td>
+							<td>
+								if part.StartDate != nil {
+									@OffsetDate(*part.StartDate, part.StartOffset())
+								} else {
+									<span class="text-base-content/50">-</span>
+								}
+							</td>
+							<td>
+								if part.EndDate != nil {
+									@OffsetDate(*part.EndDate, part.EndOffset())
+								} else {
+									<span class="text-base-content/50">-</span>
+								}
+							</td>
+							if editable {
+								<td class="text-right">@RemoveFromEventButton(ev.ID, part.EventEntry)</td>
 							}
 						</tr>
 					}
@@ -313,7 +386,10 @@ templ EventEntriesCard(view *model.EventEditView) {
 				<span class="text-base-content/60">New in this Event:</span>
 				<a class="link" href={ templ.SafeURL("/accounts/new?event_id=" + view.Event.ID) }>Account</a>
 				<a class="link" href={ templ.SafeURL("/transfer-templates/new?event_id=" + view.Event.ID) }>Transfer Template</a>
-				<span class="text-base-content/50">Growth models are added on their account's page, and an existing entry joins from the Event select on its own form.</span>
+				<a class="link" href={ templ.SafeURL("/salaries/new?event_id=" + view.Event.ID) }>Salary</a>
+				<span class="text-base-content/50">
+					Growth models, Bills and what an Event adds to a Salary, Bill or Startup Share account, such as parental leave, a Bill Amount, an end or an investment round, are added on their own pages. An existing entry joins from the Event select on its own form.
+				</span>
 			</div>
 		</div>
 	</div>

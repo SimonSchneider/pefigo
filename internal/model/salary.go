@@ -20,18 +20,18 @@ import (
 )
 
 type Salary struct {
-	ID                    string
-	Name                  string
-	ToAccountID           string
-	PensionAccountID      string
-	Priority              int64
-	Recurrence            date.Cron
-	BudgetCategoryID      *string
-	Enabled               bool
-	Kommun                string
-	Forsamling            string
-	ChurchMember          bool
-	IsGross               bool
+	ID               string
+	Name             string
+	ToAccountID      string
+	PensionAccountID string
+	Priority         int64
+	Recurrence       date.Cron
+	BudgetCategoryID *string
+	Enabled          bool
+	Kommun           string
+	Forsamling       string
+	ChurchMember     bool
+	IsGross          bool
 	// EventID is the Event the Salary is in, or "" in the Baseline. A Salary has no dates of its own:
 	// when its Event is left out, it is left out with every part of it.
 	EventID               string

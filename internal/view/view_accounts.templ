@@ -277,17 +277,18 @@ templ StartupEventTimeline(view *model.AccountEditView) {
 	<div class="mt-3 card bg-base-100 shadow-sm border border-base-300">
 		<div class="card-body p-3">
 			<h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Investment Rounds</h3>
-			<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr 1fr auto auto">
+			<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr 1fr 1fr auto auto">
 				<div class="text-xs text-base-content/50">Date</div>
 				<div class="text-xs text-base-content/50">Pre-Money Valuation</div>
 				<div class="text-xs text-base-content/50">Pre-Money Shares</div>
 				<div class="text-xs text-base-content/50">Investment</div>
+				<div class="text-xs text-base-content/50">Event</div>
 				<div></div>
 				<div></div>
 				for _, round := range view.InvestmentRounds {
-					@InvestmentRoundRow(view.Account.ID, round)
+					@InvestmentRoundRow(view, round)
 				}
-				@InvestmentRoundRow(view.Account.ID, model.InvestmentRound{})
+				@InvestmentRoundRow(view, model.InvestmentRound{})
 			</div>
 		</div>
 	</div>
@@ -295,16 +296,17 @@ templ StartupEventTimeline(view *model.AccountEditView) {
 	<div class="mt-3 card bg-base-100 shadow-sm border border-base-300">
 		<div class="card-body p-3">
 			<h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Share Changes</h3>
-			<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr auto auto">
+			<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: 1fr 1fr 1fr 1fr auto auto">
 				<div class="text-xs text-base-content/50">Date</div>
 				<div class="text-xs text-base-content/50">Shares (+/-)</div>
 				<div class="text-xs text-base-content/50">Total Price</div>
+				<div class="text-xs text-base-content/50">Event</div>
 				<div></div>
 				<div></div>
 				for _, sc := range view.ShareChanges {
-					@ShareChangeRow(view.Account.ID, sc)
+					@ShareChangeRow(view, sc)
 				}
-				@ShareChangeRow(view.Account.ID, model.ShareChange{})
+				@ShareChangeRow(view, model.ShareChange{})
 			</div>
 		</div>
 	</div>
@@ -329,56 +331,36 @@ templ StartupEventTimeline(view *model.AccountEditView) {
 	</div>
 }
 
-templ InvestmentRoundRow(accountID string, round model.InvestmentRound) {
-	<form method="post" action={ "/investment-rounds/?next=" + templ.EscapeString("/accounts/"+accountID+"/edit") } style="display:contents">
+templ InvestmentRoundRow(view *model.AccountEditView, round model.InvestmentRound) {
+	{{ eventID := partEventID(round.ID, round.EventID, view.Account.EventID) }}
+	<form method="post" action={ "/investment-rounds/?next=" + templ.EscapeString("/accounts/"+view.Account.ID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ round.ID }/>
-			<input type="hidden" name="account_id" value={ accountID }/>
-			<input type="text" class="input input-xs w-full" placeholder="2024-01-01" name="date" value={ round.GetDateString() }/>
+			<input type="hidden" name="offset_event_id" value={ round.EventID }/>
+			<input type="hidden" name="account_id" value={ view.Account.ID }/>
+			@EntryDateInput(view.Events, round.EventID, "date", partDate(round.ID, round.Date), partStartPlaceholder(round.ID, round.EventID, view.Account.EventID, "2024-01-01"))
 		</div>
 		<div><input type="number" step="any" class="input input-xs w-full" placeholder="1000000" name="valuation" value={ round.GetValuationString() }/></div>
 		<div><input type="number" step="any" class="input input-xs w-full" placeholder="10000" name="pre_money_shares" value={ round.GetPreMoneySharesString() }/></div>
 		<div><input type="number" step="any" class="input input-xs w-full" placeholder="0" name="investment" value={ round.GetInvestmentString() }/></div>
-		<button type="submit" class="btn btn-xs btn-square btn-primary btn-ghost" title={ rowActionTitle(round.ID != "") }>
-			if round.ID != "" {
-				@IconCheck("w-3.5 h-3.5")
-			} else {
-				@IconPlus("w-3.5 h-3.5")
-			}
-		</button>
-		if round.ID != "" {
-			<button type="submit" form={ "delete-round-form-" + round.ID } class="btn btn-xs btn-square btn-ghost text-error" title="Delete">
-				@IconX("w-3.5 h-3.5")
-			</button>
-		} else {
-			<div></div>
-		}
+		<div>@EventSelect(view.Events, eventID, "select-xs")</div>
+		@partRowButtons(round.ID, "delete-round-form-")
 	</form>
 }
 
-templ ShareChangeRow(accountID string, sc model.ShareChange) {
-	<form method="post" action={ "/share-changes/?next=" + templ.EscapeString("/accounts/"+accountID+"/edit") } style="display:contents">
+templ ShareChangeRow(view *model.AccountEditView, sc model.ShareChange) {
+	{{ eventID := partEventID(sc.ID, sc.EventID, view.Account.EventID) }}
+	<form method="post" action={ "/share-changes/?next=" + templ.EscapeString("/accounts/"+view.Account.ID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ sc.ID }/>
-			<input type="hidden" name="account_id" value={ accountID }/>
-			<input type="text" class="input input-xs w-full" placeholder="2024-01-01" name="date" value={ sc.GetDateString() }/>
+			<input type="hidden" name="offset_event_id" value={ sc.EventID }/>
+			<input type="hidden" name="account_id" value={ view.Account.ID }/>
+			@EntryDateInput(view.Events, sc.EventID, "date", partDate(sc.ID, sc.Date), partStartPlaceholder(sc.ID, sc.EventID, view.Account.EventID, "2024-01-01"))
 		</div>
 		<div><input type="number" step="any" class="input input-xs w-full" placeholder="100" name="delta_shares" value={ sc.GetDeltaSharesString() }/></div>
 		<div><input type="number" step="any" class="input input-xs w-full" placeholder="5000" name="total_price" value={ sc.GetTotalPriceString() }/></div>
-		<button type="submit" class="btn btn-xs btn-square btn-primary btn-ghost" title={ rowActionTitle(sc.ID != "") }>
-			if sc.ID != "" {
-				@IconCheck("w-3.5 h-3.5")
-			} else {
-				@IconPlus("w-3.5 h-3.5")
-			}
-		</button>
-		if sc.ID != "" {
-			<button type="submit" form={ "delete-share-change-form-" + sc.ID } class="btn btn-xs btn-square btn-ghost text-error" title="Delete">
-				@IconX("w-3.5 h-3.5")
-			</button>
-		} else {
-			<div></div>
-		}
+		<div>@EventSelect(view.Events, eventID, "select-xs")</div>
+		@partRowButtons(sc.ID, "delete-share-change-form-")
 	</form>
 }
 

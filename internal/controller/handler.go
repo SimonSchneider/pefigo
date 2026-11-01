@@ -183,6 +183,8 @@ func NewHandler(svc *model.Service, public fs.FS) http.Handler {
 	mux.Handle("POST /salary-amounts/{id}/delete", h.salaryAmountDelete())
 	mux.Handle("POST /salary-adjustments/{$}", h.salaryAdjustmentUpsert())
 	mux.Handle("POST /salary-adjustments/{id}/delete", h.salaryAdjustmentDelete())
+	mux.Handle("POST /salary-ends/{$}", h.salaryEndUpsert())
+	mux.Handle("POST /salary-ends/{id}/delete", h.salaryEndDelete())
 	mux.Handle("POST /partial-parental-leaves/{$}", h.partialParentalLeaveUpsert())
 	mux.Handle("POST /partial-parental-leaves/{id}/delete", h.partialParentalLeaveDelete())
 	mux.Handle("POST /full-parental-leaves/{$}", h.fullParentalLeaveUpsert())
@@ -198,6 +200,8 @@ func NewHandler(svc *model.Service, public fs.FS) http.Handler {
 	mux.Handle("POST /bill-items/{id}/delete", h.billDelete())
 	mux.Handle("POST /bill-amounts/{$}", h.billAmountUpsert())
 	mux.Handle("POST /bill-amounts/{id}/delete", h.billAmountDelete())
+	mux.Handle("POST /bill-ends/{$}", h.billEndUpsert())
+	mux.Handle("POST /bill-ends/{id}/delete", h.billEndDelete())
 	mux.Handle("GET /favicons/{domain}", h.faviconHandler())
 
 	mux.Handle("POST /settings/currency", h.currencySettingsSave())
@@ -431,6 +435,20 @@ func (h *Handler) salaryAdjustmentDelete() http.Handler {
 	return deleteHandler(h.svc.DeleteSalaryAdjustment, "/salaries")
 }
 
+func (h *Handler) salaryEndUpsert() http.Handler {
+	return upsertHandler("salary end", func(ctx context.Context, f salaryEndInputForm) (model.SalaryEnd, error) {
+		return h.svc.UpsertSalaryEnd(ctx, f.SalaryEnd)
+	}, func(e model.SalaryEnd) string {
+		return salaryEditURL(e.SalaryID)
+	})
+}
+
+func (h *Handler) salaryEndDelete() http.Handler {
+	return deleteWithLookupHandler(h.svc.GetSalaryEnd, h.svc.DeleteSalaryEnd, func(e model.SalaryEnd) string {
+		return salaryEditURL(e.SalaryID)
+	})
+}
+
 func (h *Handler) partialParentalLeaveUpsert() http.Handler {
 	return upsertHandler("partial parental leave", func(ctx context.Context, f partialParentalLeaveInputForm) (model.PartialParentalLeave, error) {
 		return h.svc.UpsertPartialParentalLeave(ctx, f.PartialParentalLeave)
@@ -533,6 +551,20 @@ func (h *Handler) billAmountUpsert() http.Handler {
 
 func (h *Handler) billAmountDelete() http.Handler {
 	return deleteHandler(h.svc.DeleteBillAmount, "/bills")
+}
+
+func (h *Handler) billEndUpsert() http.Handler {
+	return upsertHandler("bill end", func(ctx context.Context, f billEndInputForm) (model.BillEnd, error) {
+		return h.svc.UpsertBillEnd(ctx, f.BillEnd)
+	}, func(e model.BillEnd) string {
+		return billEditURL(e.BillID)
+	})
+}
+
+func (h *Handler) billEndDelete() http.Handler {
+	return deleteWithLookupHandler(h.svc.GetBillEnd, h.svc.DeleteBillEnd, func(e model.BillEnd) string {
+		return billEditURL(e.BillID)
+	})
 }
 
 func (h *Handler) faviconHandler() http.Handler {

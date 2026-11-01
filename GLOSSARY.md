@@ -45,7 +45,7 @@ _Avoid_: debts
 ### Salaries
 
 **Salary**:
-Income paid into an account on a recurrence. Its Salary Amounts each apply from their Start Date until the next one starts.
+Income paid into an account on a recurrence. Its Salary Amounts each apply from their Start Date until the next one starts, and none from its End Date, the earliest day it is ended on.
 
 **Salary Amount**:
 What a Salary pays on each recurrence from its Start Date: before tax for a Gross Salary, after tax otherwise.
@@ -136,7 +136,7 @@ The plans for the future as they are stored, with no Scenario applied. Its Forec
 _Avoid_: current plan, base scenario, default scenario
 
 **Event**:
-A named group of related changes to the plans for the future that happen around one date, such as buying an apartment. It adds entries, such as Accounts, growth models, Transfer Templates, Salaries and Bills. Every date in an Event is relative to the Event's date, so moving the Event moves every change in it. An Event is planned when the Baseline holds it at its date, grouping related entries there, and unplanned when only Scenarios use it. Its changes before the Forecast Start don't count, as Transfers before it are taken to be in the Snapshots.
+A named group of related changes to the plans for the future that happen around one date, such as buying an apartment. It adds entries, such as Accounts, growth models, Transfer Templates, Salaries and Bills, and dated parts to Salaries, Bills and Startup Share Accounts outside it, such as parental leave, an investment round or an End Date. Every date in an Event is relative to the Event's date, so moving the Event moves every change in it. An Event is planned when the Baseline holds it at its date, grouping related entries there, and unplanned when only Scenarios use it. Its changes before the Forecast Start don't count, as Transfers before it are taken to be in the Snapshots.
 _Avoid_: life event, decision, plan change, bundle
 
 **Scenario**:
