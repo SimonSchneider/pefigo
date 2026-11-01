@@ -23,8 +23,10 @@ type Account struct {
 	TypeID                string
 	BudgetCategoryID      *string
 	IsISK                 bool
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	// EventID is the Event that adds the account, or "" in the Baseline.
+	EventID   string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // hasCashFlow reports whether the account's interest is paid out on its cash-flow frequency, rather
@@ -76,6 +78,7 @@ type AccountInput struct {
 	TypeID                string
 	BudgetCategoryID      *string
 	IsISK                 bool
+	EventID               string
 }
 
 func accountFromDB(a pdb.Account) Account {
@@ -88,6 +91,7 @@ func accountFromDB(a pdb.Account) Account {
 		TypeID:                ui.OrDefault(a.TypeID),
 		BudgetCategoryID:      a.BudgetCategoryID,
 		IsISK:                 a.IsIsk != 0,
+		EventID:               ui.OrDefault(a.EventID),
 		CreatedAt:             time.UnixMilli(a.CreatedAt),
 		UpdatedAt:             time.UnixMilli(a.UpdatedAt),
 	}
@@ -127,6 +131,9 @@ func (s *Service) UpsertAccount(ctx context.Context, inp AccountInput) (Account,
 	if err := errors.Join(checkRequired("name", inp.Name), inp.checkCashFlow()); err != nil {
 		return Account{}, err
 	}
+	if _, err := s.eventDate(ctx, inp.EventID); err != nil {
+		return Account{}, err
+	}
 	var (
 		q   = s.q
 		acc pdb.Account
@@ -146,6 +153,7 @@ func (s *Service) UpsertAccount(ctx context.Context, inp AccountInput) (Account,
 			TypeID:                ui.WithDefaultNull(inp.TypeID),
 			BudgetCategoryID:      inp.BudgetCategoryID,
 			IsIsk:                 isIsk,
+			EventID:               ui.WithDefaultNull(inp.EventID),
 			UpdatedAt:             time.Now().UnixMilli(),
 		})
 	} else {
@@ -158,6 +166,7 @@ func (s *Service) UpsertAccount(ctx context.Context, inp AccountInput) (Account,
 			TypeID:                ui.WithDefaultNull(inp.TypeID),
 			BudgetCategoryID:      inp.BudgetCategoryID,
 			IsIsk:                 isIsk,
+			EventID:               ui.WithDefaultNull(inp.EventID),
 			CreatedAt:             time.Now().UnixMilli(),
 			UpdatedAt:             time.Now().UnixMilli(),
 		})
@@ -211,21 +220,17 @@ func accountsListFromDB(dbAccs []pdb.Account) []Account {
 	return accs
 }
 
-func accountsListFromDBDetailed(dbAccs []pdb.Account, snapshots map[string]AccountSnapshot, growthModels map[string]pdb.GrowthModel, startupShareAccounts map[string]StartupShareAccount) []AccountDetailed {
-	accs := make([]AccountDetailed, len(dbAccs))
-	for i := range dbAccs {
-		accs[i].Account = accountFromDB(dbAccs[i])
-		if snapshot, ok := snapshots[accs[i].ID]; ok {
+func accountsDetailed(accounts []Account, snapshots map[string]AccountSnapshot, growthModels map[string]GrowthModel, startupShareAccounts map[string]StartupShareAccount) []AccountDetailed {
+	accs := make([]AccountDetailed, len(accounts))
+	for i, acc := range accounts {
+		accs[i].Account = acc
+		if snapshot, ok := snapshots[acc.ID]; ok {
 			accs[i].LastSnapshot = &snapshot
 		}
-		if gm, ok := growthModels[accs[i].ID]; ok {
-			gmd, err := growthModelFromDB(gm)
-			if err != nil {
-				panic(err)
-			}
-			accs[i].GrowthModel = &gmd
+		if gm, ok := growthModels[acc.ID]; ok {
+			accs[i].GrowthModel = &gm
 		}
-		if ssa, ok := startupShareAccounts[accs[i].ID]; ok {
+		if ssa, ok := startupShareAccounts[acc.ID]; ok {
 			accs[i].StartupShareAccount = &ssa
 		}
 	}
@@ -253,10 +258,18 @@ func (s *Service) ListAccounts(ctx context.Context) ([]Account, error) {
 	return accountsListFromDB(accs), nil
 }
 
+// ListBudgetAccounts returns the Baseline's accounts with a budget category, each with its latest
+// Snapshot and the growth model applied on today.
 func (s *Service) ListBudgetAccounts(ctx context.Context, today date.Date) ([]AccountDetailed, error) {
-	budgetAccs, err := s.q.GetBudgetAccounts(ctx)
+	p, err := s.placeEvents(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list budget accounts: %w", err)
+		return nil, err
+	}
+	var budgetAccs []Account
+	for _, acc := range p.accounts {
+		if acc.BudgetCategoryID != nil {
+			budgetAccs = append(budgetAccs, acc)
+		}
 	}
 	if len(budgetAccs) == 0 {
 		return nil, nil
@@ -265,18 +278,15 @@ func (s *Service) ListBudgetAccounts(ctx context.Context, today date.Date) ([]Ac
 	if err != nil {
 		return nil, err
 	}
-	growthModelsMap, err := s.growthModelsAppliedOn(ctx, today)
-	if err != nil {
-		return nil, err
-	}
-	return accountsListFromDBDetailed(budgetAccs, snapshots, growthModelsMap, nil), nil
+	return accountsDetailed(budgetAccs, snapshots, growthModelsAppliedOn(p, today), nil), nil
 }
 
-// ListAccountsDetailed returns every account with its latest Snapshot and the growth model applied on
-// today. A Startup Share account without Snapshots shows its derived balance on today instead,
-// dated on the investment round it is valued by.
+// ListAccountsDetailed returns every account with its latest Snapshot and the growth model the
+// Baseline applies on today, so an account of an unplanned Event has none. A Startup Share account
+// without Snapshots shows its derived balance on today instead, dated on the investment round it is
+// valued by.
 func (s *Service) ListAccountsDetailed(ctx context.Context, today date.Date) ([]AccountDetailed, error) {
-	accs, err := s.q.ListAccounts(ctx)
+	accs, err := s.ListAccounts(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +294,7 @@ func (s *Service) ListAccountsDetailed(ctx context.Context, today date.Date) ([]
 	if err != nil {
 		return nil, err
 	}
-	growthModelsMap, err := s.growthModelsAppliedOn(ctx, today)
+	p, err := s.placeEvents(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -303,23 +313,34 @@ func (s *Service) ListAccountsDetailed(ctx context.Context, today date.Date) ([]
 			snapshots[accountID] = AccountSnapshot{AccountID: accountID, Date: round.Date, Balance: ss.growthOn(today).Balance(ucfg)}
 		}
 	}
-	return accountsListFromDBDetailed(accs, snapshots, growthModelsMap, startupShareAccounts), nil
+	return accountsDetailed(accs, snapshots, growthModelsAppliedOn(p, today), startupShareAccounts), nil
 }
 
 type AccountsView struct {
 	Accounts     []AccountDetailed
 	AccountTypes AccountTypesWithFilter
 	Categories   map[string]TransferTemplateCategory
+	Events       map[string]Event
 	NetWorth     NetWorth
 }
 
-func NewAccountsView(accounts []AccountDetailed, accountTypes []AccountTypeWithFilter, categories []TransferTemplateCategory) *AccountsView {
+func NewAccountsView(accounts []AccountDetailed, accountTypes []AccountTypeWithFilter, categories []TransferTemplateCategory, events []Event) *AccountsView {
 	return &AccountsView{
 		Accounts:     accounts,
 		AccountTypes: accountTypes,
 		Categories:   KeyBy(categories, func(c TransferTemplateCategory) string { return c.ID }),
+		Events:       KeyBy(events, func(e Event) string { return e.ID }),
 		NetWorth:     newNetWorth(accounts),
 	}
+}
+
+// GetEvent is the Event id, or nil for "" or an Event that doesn't exist.
+func (v *AccountsView) GetEvent(id string) *Event {
+	ev, ok := v.Events[id]
+	if !ok {
+		return nil
+	}
+	return &ev
 }
 
 func (v *AccountsView) GetBudgetCategory(id *string) *TransferTemplateCategory {
@@ -340,6 +361,7 @@ func (v *AccountsView) GetAccountType(typeID string) AccountTypeWithFilter {
 type AccountEditView struct {
 	Account                    Account
 	Accounts                   []Account
+	Events                     []Event
 	GrowthModels               []GrowthModel
 	AccountTypes               AccountTypesWithFilter
 	Categories                 []TransferTemplateCategory
@@ -404,6 +426,16 @@ func (v *AccountEditView) AccountFormMode() string {
 	return "standard"
 }
 
+// GetEventName is the name of the Event id, or "" for none.
+func (v *AccountEditView) GetEventName(id string) string {
+	for _, ev := range v.Events {
+		if ev.ID == id {
+			return ev.Name
+		}
+	}
+	return ""
+}
+
 func (v *AccountEditView) GetAccountTypeName(typeID string) string {
 	return v.AccountTypes.GetAccountType(typeID).Name
 }
@@ -421,10 +453,15 @@ func (s *Service) GetAccountsPageData(ctx context.Context, excludedTypeIDs []str
 	if err != nil {
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
-	return NewAccountsView(accs, accountTypes, categories), nil
+	events, err := s.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewAccountsView(accs, accountTypes, categories, events), nil
 }
 
-func (s *Service) GetAccountNewPageData(ctx context.Context, excludedTypeIDs []string) (*AccountEditView, error) {
+// GetAccountNewPageData is the page of a new account in the Event eventID, or in the Baseline for "".
+func (s *Service) GetAccountNewPageData(ctx context.Context, excludedTypeIDs []string, eventID string) (*AccountEditView, error) {
 	accs, err := s.ListAccounts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing accounts: %w", err)
@@ -437,8 +474,14 @@ func (s *Service) GetAccountNewPageData(ctx context.Context, excludedTypeIDs []s
 	if err != nil {
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
+	events, err := s.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return &AccountEditView{
+		Account:      Account{EventID: eventID},
 		Accounts:     accs,
+		Events:       events,
 		AccountTypes: accountTypes,
 		Categories:   categories,
 	}, nil
@@ -506,9 +549,14 @@ func (s *Service) GetAccountEditPageData(ctx context.Context, accountID string, 
 	if err != nil {
 		return nil, fmt.Errorf("listing categories: %w", err)
 	}
+	events, err := s.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return &AccountEditView{
 		Account:                    acc,
 		Accounts:                   accs,
+		Events:                     events,
 		GrowthModels:               growthModels,
 		AccountTypes:               accountTypes,
 		Categories:                 categories,

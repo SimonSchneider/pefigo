@@ -2,25 +2,39 @@
 (function() {
   'use strict';
 
+  function childRowsOf(templateId) {
+    return document.querySelectorAll('tr[data-parent-id="' + templateId + '"]');
+  }
+
+  // collapse hides every row below row: its children, and theirs, which collapse too.
+  function collapse(row) {
+    row.classList.add('collapsed');
+    const childRows = childRowsOf(row.getAttribute('data-template-id'));
+    for (let i = 0; i < childRows.length; i++) {
+      childRows[i].classList.add('hidden');
+      if (childRows[i].hasAttribute('data-template-id')) {
+        collapse(childRows[i]);
+      }
+    }
+  }
+
+  // expand shows the children of row; a child that is a group stays collapsed.
+  function expand(row) {
+    row.classList.remove('collapsed');
+    const childRows = childRowsOf(row.getAttribute('data-template-id'));
+    for (let i = 0; i < childRows.length; i++) {
+      childRows[i].classList.remove('hidden');
+    }
+  }
+
   function toggleChildren(parentRow) {
     const templateId = parentRow.getAttribute('data-template-id');
-    if (!templateId) return;
+    if (!templateId || childRowsOf(templateId).length === 0) return;
 
-    const childRows = document.querySelectorAll('tr[data-parent-id="' + templateId + '"]');
-    if (childRows.length === 0) return;
-
-    const isCollapsed = parentRow.classList.contains('collapsed');
-
-    if (isCollapsed) {
-      parentRow.classList.remove('collapsed');
-      for (let i = 0; i < childRows.length; i++) {
-        childRows[i].classList.remove('hidden');
-      }
+    if (parentRow.classList.contains('collapsed')) {
+      expand(parentRow);
     } else {
-      parentRow.classList.add('collapsed');
-      for (let i = 0; i < childRows.length; i++) {
-        childRows[i].classList.add('hidden');
-      }
+      collapse(parentRow);
     }
   }
 

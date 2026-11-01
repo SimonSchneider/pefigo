@@ -136,7 +136,7 @@ The plans for the future as they are stored, with no Scenario applied. Its Forec
 _Avoid_: current plan, base scenario, default scenario
 
 **Event**:
-A named group of related changes to the plans for the future that happen around one date, such as buying an apartment. It adds entries, such as Accounts, growth models, Transfer Templates, Salaries and Bills, and ends existing ones: changing an entry is ending it and adding its replacement. Every date in an Event is relative to the Event's date, so moving the Event moves every change in it. An Event is planned when the Baseline holds it at its date, grouping related entries there, and unplanned when only Scenarios use it. Its changes before the Forecast Start don't count, as Transfers before it are taken to be in the Snapshots.
+A named group of related changes to the plans for the future that happen around one date, such as buying an apartment. It adds entries, such as Accounts, growth models, Transfer Templates, Salaries and Bills. Every date in an Event is relative to the Event's date, so moving the Event moves every change in it. An Event is planned when the Baseline holds it at its date, grouping related entries there, and unplanned when only Scenarios use it. Its changes before the Forecast Start don't count, as Transfers before it are taken to be in the Snapshots.
 _Avoid_: life event, decision, plan change, bundle
 
 **Scenario**:

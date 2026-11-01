@@ -12,18 +12,29 @@ import (
 	"github.com/SimonSchneider/pefigo/pkg/finance"
 )
 
-// TransferSchedule is every Transfer Template: the stored ones and those generated from Salaries and
-// Bills. It decides which of them apply on a day and for how much, so its callers never compare a day
-// against a Start Date or End Date, or check Enabled or a recurrence, themselves. See ADR 0003.
+// TransferSchedule is every Transfer Template of the plans for the future with the Events placed: the
+// stored ones and those generated from Salaries and Bills. It decides which of them apply on a day and
+// for how much, so its callers never compare a day against a Start Date or End Date, or check Enabled
+// or a recurrence, themselves. See ADR 0003.
 type TransferSchedule struct {
 	templates []TransferTemplate // sorted by recurrence, priority, name and Start Date
+	// leftOut are the Transfer Templates the Events leave out: those of a left-out Event, at its own
+	// date, and those that use one of its Accounts.
+	leftOut []TransferTemplate
 }
 
+// TransferSchedule is the Baseline's Transfer Schedule.
 func (s *Service) TransferSchedule(ctx context.Context) (*TransferSchedule, error) {
-	templates, err := s.ListTransferTemplates(ctx)
+	p, err := s.placeEvents(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("listing DB transfer templates: %w", err)
+		return nil, fmt.Errorf("placing the events: %w", err)
 	}
+	return s.transferSchedule(ctx, p)
+}
+
+// transferSchedule is the Transfer Schedule of p: its Transfer Templates with those generated from
+// Salaries and Bills, but those that use an Account p leaves out.
+func (s *Service) transferSchedule(ctx context.Context, p *plans) (*TransferSchedule, error) {
 	salaryTemplates, err := s.generateSalaryTransferTemplates(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("generating salary transfer templates: %w", err)
@@ -32,10 +43,26 @@ func (s *Service) TransferSchedule(ctx context.Context) (*TransferSchedule, erro
 	if err != nil {
 		return nil, fmt.Errorf("generating bill transfer templates: %w", err)
 	}
-	all := append(templates, salaryTemplates...)
-	all = append(all, billTemplates...)
-	sortTransferTemplates(all)
-	return &TransferSchedule{templates: all}, nil
+	ts := &TransferSchedule{
+		templates: slices.Clone(p.transferTemplates),
+		leftOut:   slices.Clone(p.leftOutTransferTemplates),
+	}
+	for _, t := range append(salaryTemplates, billTemplates...) {
+		if p.usesLeftOutAccount(t) {
+			ts.leftOut = append(ts.leftOut, t)
+		} else {
+			ts.templates = append(ts.templates, t)
+		}
+	}
+	sortTransferTemplates(ts.templates)
+	sortTransferTemplates(ts.leftOut)
+	return ts, nil
+}
+
+// LeftOut returns the Transfer Templates the Events leave out of the schedule, sorted as the
+// schedule is.
+func (ts *TransferSchedule) LeftOut() []TransferTemplate {
+	return ts.leftOut
 }
 
 // checkRecurrences fails on the first Transfer Template whose recurrence isn't a valid date pattern,
@@ -229,17 +256,23 @@ func (d *TransferScheduleDay) Monthly() []ScheduledTransfer {
 	return monthly
 }
 
-// TransferScheduleRow is one row of the Transfer Template table: a Transfer Template, or a group of the
-// Transfer Templates that share a name, priority, recurrence and Accounts, such as the segments of a
-// Bill. A group spans its Members' dates, is Active when one of them is, is Disabled when all of them
-// are, and its Amount is their total.
+// TransferScheduleRow is one row of the Transfer Template table: a Transfer Template, or a group of
+// rows. The Transfer Templates that share a name, priority, recurrence, Accounts, Event and the Salary
+// or Bill they are generated from, such as the segments of a Bill, are one group, and the Bills of a Bill Account are one group of those rows. A
+// group spans its Members' dates, is Active when one of them is, is Disabled when all of them are, and
+// its Amount is their total.
 type TransferScheduleRow struct {
 	ScheduledTransfer
-	Members []ScheduledTransfer
+	Members []TransferScheduleRow
 }
 
 func (r TransferScheduleRow) IsGroup() bool {
 	return len(r.Members) > 0
+}
+
+// isBillAccount reports whether the row is the group of a Bill Account's Bills.
+func (r TransferScheduleRow) isBillAccount() bool {
+	return r.Source.Type == TransferSourceBill && r.Source.EntityID == ""
 }
 
 // Rows groups the evaluated Transfer Templates for display, so grouping changes no amount.
@@ -249,32 +282,69 @@ func (d *TransferScheduleDay) Rows() []TransferScheduleRow {
 		priority   int64
 		recurrence date.Cron
 		from, to   string
+		eventID    string
+		// source is the Salary or Bill the Transfer Template is generated from: one Bill's segments
+		// group, two Bills of one name don't.
+		source TransferTemplateSource
 	}
-	groups := make(map[groupKey][]ScheduledTransfer)
+	groups := make(map[groupKey][]TransferScheduleRow)
 	var order []groupKey
 	for _, t := range d.transfers {
-		k := groupKey{name: t.Name, priority: t.Priority, recurrence: t.Recurrence, from: t.FromAccountID, to: t.ToAccountID}
+		k := groupKey{
+			name: t.Name, priority: t.Priority, recurrence: t.Recurrence, from: t.FromAccountID, to: t.ToAccountID, eventID: t.EventID,
+			source: TransferTemplateSource{Type: t.Source.Type, EntityID: t.Source.EntityID},
+		}
 		if _, ok := groups[k]; !ok {
 			order = append(order, k)
 		}
-		groups[k] = append(groups[k], t)
+		groups[k] = append(groups[k], TransferScheduleRow{ScheduledTransfer: t})
 	}
 	rows := make([]TransferScheduleRow, 0, len(order))
 	for _, k := range order {
 		if members := groups[k]; len(members) == 1 {
-			rows = append(rows, TransferScheduleRow{ScheduledTransfer: members[0]})
+			rows = append(rows, members[0])
 		} else {
-			rows = append(rows, groupRow(members))
+			rows = append(rows, groupRow("group-"+members[0].ID, members))
 		}
 	}
-	return rows
+	return foldBillAccounts(rows)
 }
 
-func groupRow(members []ScheduledTransfer) TransferScheduleRow {
+// foldBillAccounts puts the rows of each Bill Account's Bills in one group, named after the Bill
+// Account, where its first Bill was.
+func foldBillAccounts(rows []TransferScheduleRow) []TransferScheduleRow {
+	bills := make(map[string][]TransferScheduleRow)
+	for _, row := range rows {
+		if row.Source.Type == TransferSourceBill {
+			bills[row.Source.BillAccountID] = append(bills[row.Source.BillAccountID], row)
+		}
+	}
+	folded := make([]TransferScheduleRow, 0, len(rows))
+	for _, row := range rows {
+		if row.Source.Type != TransferSourceBill {
+			folded = append(folded, row)
+			continue
+		}
+		members, ok := bills[row.Source.BillAccountID]
+		if !ok {
+			continue
+		}
+		delete(bills, row.Source.BillAccountID)
+		group := groupRow("bill-account-"+row.Source.BillAccountID, members)
+		group.Name = row.Source.BillAccountName
+		group.BudgetCategoryID = nil
+		group.Source = TransferTemplateSource{Type: TransferSourceBill, Label: row.Source.BillAccountName, BillAccountID: row.Source.BillAccountID}
+		folded = append(folded, group)
+	}
+	return folded
+}
+
+// groupRow is the group id of members, named and placed as its first member.
+func groupRow(id string, members []TransferScheduleRow) TransferScheduleRow {
 	first := members[0]
 	group := ScheduledTransfer{
 		TransferTemplate: TransferTemplate{
-			ID:               "group-" + first.ID,
+			ID:               id,
 			Name:             first.Name,
 			FromAccountID:    first.FromAccountID,
 			ToAccountID:      first.ToAccountID,
@@ -283,6 +353,7 @@ func groupRow(members []ScheduledTransfer) TransferScheduleRow {
 			StartDate:        first.StartDate,
 			EndDate:          first.EndDate,
 			BudgetCategoryID: first.BudgetCategoryID,
+			EventID:          first.EventID,
 			Source:           first.Source,
 		},
 		state: TransferDisabled,

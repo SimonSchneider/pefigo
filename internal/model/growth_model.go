@@ -1,15 +1,18 @@
 package model
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/goslu/sid"
 	"github.com/SimonSchneider/pefigo/internal/pdb"
 	"github.com/SimonSchneider/pefigo/pkg/finance"
+	"github.com/SimonSchneider/pefigo/pkg/ui"
 	"github.com/SimonSchneider/pefigo/pkg/uncertain"
 )
 
@@ -27,6 +30,9 @@ type GrowthModel struct {
 	AnnualVolatility uncertain.Value
 	StartDate        date.Date
 	EndDate          *date.Date
+	// EventID is the Event the growth model is in, or "" in the Baseline. In an Event its Start and
+	// End Dates are stored as offsets from the Event's date.
+	EventID string
 }
 
 func (gm GrowthModel) GetEndDateString() string {
@@ -41,6 +47,9 @@ func (gm GrowthModel) AppliesOn(day date.Date) bool {
 	return (&finance.TimeFrameGrowth{StartDate: gm.StartDate, EndDate: gm.EndDate}).IsActiveOn(day)
 }
 
+// AccountGrowthModelInput is a growth model to save. In an Event its dates may be given as days after
+// the Event's date, its Start Date is the Event's date when it isn't given, and its dates are saved as
+// offsets from the Event's date.
 type AccountGrowthModelInput struct {
 	ID               string
 	AccountID        string
@@ -49,6 +58,22 @@ type AccountGrowthModelInput struct {
 	AnnualVolatility uncertain.Value
 	StartDate        date.Date
 	EndDate          *date.Date
+	EventID          string
+	// StartOffset and EndOffset, when set, give the Start and End Dates in an Event as days after the
+	// Event's date, in place of StartDate and EndDate.
+	StartOffset *date.Duration
+	EndOffset   *date.Duration
+	// OffsetEventID is the Event StartOffset and EndOffset are days after, as for a Transfer Template.
+	// It is EventID when blank.
+	OffsetEventID string
+}
+
+// input is the growth model as an input that saves it unchanged.
+func (gm GrowthModel) input() AccountGrowthModelInput {
+	return AccountGrowthModelInput{
+		ID: gm.ID, AccountID: gm.AccountID, Type: gm.Type, AnnualRate: gm.AnnualRate, AnnualVolatility: gm.AnnualVolatility,
+		StartDate: gm.StartDate, EndDate: gm.EndDate, EventID: gm.EventID,
+	}
 }
 
 type GrowthModels []GrowthModel
@@ -83,7 +108,9 @@ func (gms GrowthModels) ToFinance() (finance.GrowthModel, error) {
 	return finance.NewGrowthCombined(fgms...), nil
 }
 
-func growthModelFromDB(g pdb.GrowthModel) (GrowthModel, error) {
+// growthModelFromDB is the stored growth model g with its Event at at: its stored dates are offsets
+// from at.
+func growthModelFromDB(g pdb.GrowthModel, at date.Date) (GrowthModel, error) {
 	var annualRate, annualVolatility uncertain.Value
 	if err := annualRate.Decode(g.AnnualGrowthRate); err != nil {
 		return GrowthModel{}, fmt.Errorf("decoding annual growth rate: %w", err)
@@ -91,23 +118,36 @@ func growthModelFromDB(g pdb.GrowthModel) (GrowthModel, error) {
 	if err := annualVolatility.Decode(g.AnnualVolatility); err != nil {
 		return GrowthModel{}, fmt.Errorf("decoding annual volatility: %w", err)
 	}
-	var endDate *date.Date
-	if g.EndDate != nil {
-		d := date.Date(*g.EndDate)
-		endDate = &d
-	}
 	return GrowthModel{
 		ID:               g.ID,
 		AccountID:        g.AccountID,
 		Type:             g.ModelType,
 		AnnualRate:       annualRate,
 		AnnualVolatility: annualVolatility,
-		StartDate:        date.Date(g.StartDate),
-		EndDate:          endDate,
+		StartDate:        placeDate(g.StartDate, at),
+		EndDate:          placeEndDate(g.EndDate, at),
+		EventID:          ui.OrDefault(g.EventID),
 	}, nil
 }
 
 func (s *Service) UpsertAccountGrowthModel(ctx context.Context, inp AccountGrowthModelInput) (GrowthModel, error) {
+	at, err := s.eventDate(ctx, inp.EventID)
+	if err != nil {
+		return GrowthModel{}, err
+	}
+	offsetEventID, offsetAt, err := s.offsetEvent(ctx, inp.OffsetEventID, inp.EventID, at)
+	if err != nil {
+		return GrowthModel{}, err
+	}
+	startDate, startErr := givenDate("start", inp.StartDate, inp.StartOffset, offsetEventID, offsetAt)
+	endDate, endErr := givenEndDate(inp.EndDate, inp.EndOffset, offsetEventID, offsetAt)
+	if err := errors.Join(startErr, endErr); err != nil {
+		return GrowthModel{}, err
+	}
+	inp.StartDate, inp.EndDate = startDate, endDate
+	if inp.EventID != "" && inp.StartDate.IsZero() {
+		inp.StartDate = at
+	}
 	if err := errors.Join(checkRequired("account", inp.AccountID), checkRequired("start date", inp.StartDate)); err != nil {
 		return GrowthModel{}, err
 	}
@@ -116,10 +156,6 @@ func (s *Service) UpsertAccountGrowthModel(ctx context.Context, inp AccountGrowt
 	}
 	if err := checkEndDate(inp.StartDate, inp.EndDate); err != nil {
 		return GrowthModel{}, err
-	}
-	var endDate *int64
-	if inp.EndDate != nil {
-		endDate = ptr(int64(*inp.EndDate))
 	}
 	if inp.ID == "" {
 		inp.ID = sid.MustNewString(32)
@@ -138,51 +174,57 @@ func (s *Service) UpsertAccountGrowthModel(ctx context.Context, inp AccountGrowt
 		ModelType:        inp.Type,
 		AnnualGrowthRate: annualRate,
 		AnnualVolatility: annualVolatility,
-		StartDate:        int64(inp.StartDate),
-		EndDate:          endDate,
+		StartDate:        storeDate(inp.StartDate, at),
+		EndDate:          storeEndDate(inp.EndDate, at),
+		EventID:          ui.WithDefaultNull(inp.EventID),
 		CreatedAt:        time.Now().UnixMilli(),
 		UpdatedAt:        time.Now().UnixMilli(),
 	})
 	if err != nil {
 		return GrowthModel{}, fmt.Errorf("failed to upsert growth model: %w", err)
 	}
-	return growthModelFromDB(gm)
+	return growthModelFromDB(gm, at)
 }
 
+// ListAccountGrowthModels returns the account's growth models, each in an Event at the Event's date.
 func (s *Service) ListAccountGrowthModels(ctx context.Context, accountID string) ([]GrowthModel, error) {
 	gms, err := s.q.GetGrowthModelsByAccount(ctx, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list account growth models: %w", err)
 	}
+	dates, err := s.eventDates(ctx)
+	if err != nil {
+		return nil, err
+	}
 	gmList := make([]GrowthModel, len(gms))
 	for i, g := range gms {
-		gm, err := growthModelFromDB(g)
+		gm, err := growthModelFromDB(g, ownDate(dates, g.EventID))
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert growth model from db: %w", err)
 		}
 		gmList[i] = gm
 	}
+	slices.SortStableFunc(gmList, compareGrowthModels)
 	return gmList, nil
 }
 
-// growthModelsAppliedOn returns, per Account, the growth model the forecast applies on day: the
+// compareGrowthModels orders growth models by Start Date, then ID: the order the forecast applies them
+// in, where the last that applies on a day wins.
+func compareGrowthModels(a, b GrowthModel) int {
+	return cmp.Or(cmp.Compare(a.StartDate, b.StartDate), cmp.Compare(a.ID, b.ID))
+}
+
+// growthModelsAppliedOn returns, per Account, the growth model of p the forecast applies on day: the
 // latest-starting one that applies, as finance.GrowthCombined picks it.
-func (s *Service) growthModelsAppliedOn(ctx context.Context, day date.Date) (map[string]pdb.GrowthModel, error) {
-	gms, err := s.q.ListGrowthModels(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing growth models: %w", err)
-	}
-	applied := make(map[string]pdb.GrowthModel)
-	for _, g := range gms {
-		gm, err := growthModelFromDB(g)
-		if err != nil {
-			return nil, fmt.Errorf("converting growth model from db: %w", err)
-		}
-		if gm.AppliesOn(day) {
-			applied[g.AccountID] = g
+func growthModelsAppliedOn(p *plans, day date.Date) map[string]GrowthModel {
+	applied := make(map[string]GrowthModel)
+	for _, gm := range p.growthModels {
+		current, ok := applied[gm.AccountID]
+		if gm.AppliesOn(day) && (!ok || !gm.StartDate.Before(current.StartDate)) {
+			applied[gm.AccountID] = gm
 		}
 	}
-	return applied, nil
+	return applied
 }
 
 func (s *Service) DeleteAccountGrowthModel(ctx context.Context, id string) error {
@@ -192,12 +234,17 @@ func (s *Service) DeleteAccountGrowthModel(ctx context.Context, id string) error
 	return nil
 }
 
+// GetGrowthModel returns the growth model, in an Event at the Event's date.
 func (s *Service) GetGrowthModel(ctx context.Context, id string) (GrowthModel, error) {
 	g, err := s.q.GetGrowthModel(ctx, id)
 	if err != nil {
 		return GrowthModel{}, fmt.Errorf("failed to get account growth model: %w", err)
 	}
-	gm, err := growthModelFromDB(g)
+	at, err := s.eventDate(ctx, ui.OrDefault(g.EventID))
+	if err != nil {
+		return GrowthModel{}, err
+	}
+	gm, err := growthModelFromDB(g, at)
 	if err != nil {
 		return GrowthModel{}, fmt.Errorf("failed to convert growth model from db: %w", err)
 	}

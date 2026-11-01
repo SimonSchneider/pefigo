@@ -3,6 +3,7 @@ package view;
 import (
 	"strconv"
 
+	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/internal/model"
 	"github.com/SimonSchneider/pefigo/pkg/ui"
 )
@@ -96,6 +97,10 @@ templ AccountForm(view *model.AccountEditView) {
 									}
 								</select>
 							</div>
+						</div>
+						<div class="form-control mt-2">
+							<label class="label label-text text-xs pb-1">Event</label>
+							@EventSelect(view.Events, view.Account.EventID, "select-sm")
 						</div>
 						<!-- Standard mode fields -->
 						<div id="standard_fields"
@@ -224,18 +229,19 @@ templ AccountForm(view *model.AccountEditView) {
 					<div class="mt-3 card bg-base-100 shadow-sm border border-base-300">
 						<div class="card-body p-3">
 							<h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Growth Models</h3>
-							<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: auto 1fr 1fr 1fr 1fr auto auto">
+							<div class="grid items-center gap-x-2 gap-y-1 mt-1" style="grid-template-columns: auto 1fr 1fr 1fr 1fr 1fr auto auto">
 								<div class="text-xs text-base-content/50">Type</div>
 								<div class="text-xs text-base-content/50">Annual Rate</div>
 								<div class="text-xs text-base-content/50">Volatility</div>
 								<div class="text-xs text-base-content/50">Start Date</div>
 								@EndDateColumnHeader()
+								<div class="text-xs text-base-content/50">Event</div>
 								<div></div>
 								<div></div>
 								for _, growthModel := range view.GrowthModels {
-									@GrowthModelRow(view.Account.ID, growthModel)
+									@GrowthModelRow(view.Account.ID, view.Events, growthModel)
 								}
-								@GrowthModelRow(view.Account.ID, model.GrowthModel{})
+								@GrowthModelRow(view.Account.ID, view.Events, model.GrowthModel{})
 							</div>
 						</div>
 					</div>
@@ -416,10 +422,11 @@ templ StartupShareOptionRow(accountID string, accounts []model.Account, option m
 	</form>
 }
 
-templ GrowthModelRow(accountID string, growthModel model.GrowthModel) {
+templ GrowthModelRow(accountID string, events []model.Event, growthModel model.GrowthModel) {
 	<form method="post" action={ "/growth-models/?next=" + templ.EscapeString("/accounts/"+accountID+"/edit") } style="display:contents">
 		<div>
 			<input type="hidden" name="id" value={ growthModel.ID }/>
+			<input type="hidden" name="offset_event_id" value={ growthModel.EventID }/>
 			<input type="hidden" name="account_id" value={ accountID }/>
 			<select class="select select-xs w-full" name="type">
 				<option
@@ -438,8 +445,14 @@ templ GrowthModelRow(accountID string, growthModel model.GrowthModel) {
 		</div>
 		<div><input type="text" class="input input-xs w-full" placeholder="0.05" name="annual_rate" value={ growthModel.AnnualRate.SimpleEncode() }/></div>
 		<div><input type="text" class="input input-xs w-full" placeholder="0.10" name="annual_volatility" value={ growthModel.AnnualVolatility.SimpleEncode() }/></div>
-		<div><input type="text" class="input input-xs w-full" placeholder="2024-01-01" name="start_date" value={ growthModel.StartDate.String() }/></div>
-		<div><input type="text" class="input input-xs w-full" placeholder="End" name="end_date" value={ growthModel.GetEndDateString() }/></div>
+		{{ var start *date.Date }}
+		if growthModel.ID != "" {
+			{{ start = &growthModel.StartDate }}
+		}
+		{{ inEvent := growthModel.EventID != "" }}
+		<div><input type="text" class="input input-xs w-full" placeholder={ entryDatePlaceholder(inEvent, "2024-01-01") } title="A date, or in an Event the days after its date, such as +20" name="start_date" value={ model.DateInput(events, growthModel.EventID, start) }/></div>
+		<div><input type="text" class="input input-xs w-full" placeholder="End" title="A date, or in an Event the days after its date, such as +20" name="end_date" value={ model.DateInput(events, growthModel.EventID, growthModel.EndDate) }/></div>
+		<div>@EventSelect(events, growthModel.EventID, "select-xs")</div>
 		<button type="submit" class="btn btn-xs btn-square btn-primary btn-ghost" title={ rowActionTitle(growthModel.ID != "") }>
 			if growthModel.ID != "" {
 				@IconCheck("w-3.5 h-3.5")
@@ -468,7 +481,12 @@ templ AccountsStatCardRow(view *model.AccountsView) {
 
 templ AccountTableRow(view *model.AccountsView, account *model.AccountDetailed) {
 	<tr class="hover:bg-base-200/50 transition-colors">
-		<td class="font-medium">{ account.Name }</td>
+		<td class="font-medium">
+			<div class="flex items-center gap-2">
+				<span>{ account.Name }</span>
+				@EventBadge(view.GetEvent(account.EventID))
+			</div>
+		</td>
 		<td>
 			if account.TypeID != "" {
 				@AccountTypeBadge(view.GetAccountType(account.TypeID).AccountType)

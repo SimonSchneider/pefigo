@@ -440,7 +440,7 @@ type DashboardForecastSeries struct {
 }
 
 // ForecastDashboardData is what the dashboard chart starts from: one series per Account Type and
-// the date lines of today and the Special Dates.
+// the date lines of today, the Special Dates and the planned Events.
 type ForecastDashboardData struct {
 	Series    []DashboardForecastSeries `json:"series"`
 	Marklines []Markline                `json:"marklines"`
@@ -489,8 +489,12 @@ func (s *Service) GetDashboardForecastHistory(ctx context.Context, rows []Foreca
 	if err != nil {
 		return nil, fmt.Errorf("listing special dates: %w", err)
 	}
+	events, err := s.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return &ForecastDashboardData{
 		Series:    series,
-		Marklines: dateLines(specialDates, today),
+		Marklines: dateLines(specialDates, placedEvents(events, nil), today),
 	}, nil
 }

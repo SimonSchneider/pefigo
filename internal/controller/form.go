@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/goslu/static/shttp"
@@ -28,6 +29,7 @@ func (a *accountInputForm) FromForm(r *http.Request) error {
 	a.TypeID = r.FormValue("type_id")
 	a.BudgetCategoryID = ui.WithDefaultNull(r.FormValue("budget_category_id"))
 	a.IsISK = r.FormValue("is_isk") == "on"
+	a.EventID = r.FormValue("event_id")
 	if r.FormValue("account_form_mode") == "startup" {
 		var startupShares startupShareAccountInputForm
 		if err := startupShares.FromForm(r); err != nil {
@@ -77,13 +79,67 @@ func (a *accountGrowthModelInputForm) FromForm(r *http.Request) error {
 	if err := shttp.Parse(&a.AnnualVolatility, ui.ParseUncertainValue, r.FormValue("annual_volatility"), uncertain.Value{}); err != nil {
 		return fmt.Errorf("parsing annual volatility: %w", err)
 	}
-	if err := shttp.Parse(&a.StartDate, date.ParseDate, r.FormValue("start_date"), date.Date(0)); err != nil {
-		return fmt.Errorf("parsing start date: %w", err)
+	start, startOffset, err := parseEntryDate(r, "start_date")
+	if err != nil {
+		return err
 	}
-	if err := shttp.Parse(&a.EndDate, ui.ParseNullable(date.ParseDate), r.FormValue("end_date"), nil); err != nil {
-		return fmt.Errorf("parsing end date: %w", err)
+	if start != nil {
+		a.StartDate = *start
+	}
+	a.StartOffset = startOffset
+	if a.EndDate, a.EndOffset, err = parseEntryDate(r, "end_date"); err != nil {
+		return err
+	}
+	a.EventID = r.FormValue("event_id")
+	a.OffsetEventID = r.FormValue("offset_event_id")
+	return nil
+}
+
+type eventInputForm struct {
+	model.EventInput
+}
+
+func (e *eventInputForm) FromForm(r *http.Request) error {
+	e.ID = r.FormValue("id")
+	e.Name = r.FormValue("name")
+	if err := shttp.Parse(&e.Date, date.ParseDate, r.FormValue("date"), date.Date(0)); err != nil {
+		return fmt.Errorf("parsing date: %w", err)
+	}
+	e.Planned = ptr(r.FormValue("unplanned") != "on")
+	return nil
+}
+
+// eventEntryForm names an entry to remove from its Event.
+type eventEntryForm struct {
+	Entry model.EventEntry
+}
+
+func (e *eventEntryForm) FromForm(r *http.Request) error {
+	if err := shttp.Parse(&e.Entry, model.ParseEventEntry, r.FormValue("entry"), model.EventEntry{}); err != nil {
+		return fmt.Errorf("parsing entry: %w", err)
 	}
 	return nil
+}
+
+// parseEntryDate parses the form field named field of an entry that may be in an Event: a date, such
+// as 2027-09-30, or days after the Event's date, such as +20. A blank field gives neither.
+func parseEntryDate(r *http.Request, field string) (*date.Date, *date.Duration, error) {
+	val := strings.TrimSpace(r.FormValue(field))
+	if val == "" {
+		return nil, nil, nil
+	}
+	if d, err := date.ParseDate(val); err == nil {
+		return &d, nil, nil
+	}
+	days, err := ui.ParseDays(val)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parsing %s: %q is neither a date, such as 2027-09-30, nor days after an Event's date, such as +20", field, val)
+	}
+	return nil, &days, nil
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }
 
 type startupShareAccountInputForm struct {
@@ -206,14 +262,21 @@ func (t *transferTemplateForm) FromForm(r *http.Request) error {
 	if err := shttp.Parse(&t.Recurrence, ui.ParseDateCron, r.FormValue("recurrence"), date.Cron("")); err != nil {
 		return fmt.Errorf("parsing recurrence: %w", err)
 	}
-	if err := shttp.Parse(&t.StartDate, date.ParseDate, r.FormValue("start_date"), date.Date(0)); err != nil {
-		return fmt.Errorf("parsing effective from: %w", err)
+	start, startOffset, err := parseEntryDate(r, "start_date")
+	if err != nil {
+		return err
 	}
-	if err := shttp.Parse(&t.EndDate, ui.ParseNullable(date.ParseDate), r.FormValue("end_date"), nil); err != nil {
-		return fmt.Errorf("parsing effective to: %w", err)
+	if start != nil {
+		t.StartDate = *start
+	}
+	t.StartOffset = startOffset
+	if t.EndDate, t.EndOffset, err = parseEntryDate(r, "end_date"); err != nil {
+		return err
 	}
 	t.Enabled = r.FormValue("enabled") == "on"
 	t.BudgetCategoryID = ui.WithDefaultNull(r.FormValue("budget_category_id"))
+	t.EventID = r.FormValue("event_id")
+	t.OffsetEventID = r.FormValue("offset_event_id")
 	return nil
 }
 

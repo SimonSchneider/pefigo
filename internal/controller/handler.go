@@ -97,6 +97,11 @@ func billEditURL(billID string) string {
 	return fmt.Sprintf("/bill-items/%s/edit", billID)
 }
 
+// eventEditURL is the edit page of the Event eventID, which lists its entries.
+func eventEditURL(eventID string) string {
+	return fmt.Sprintf("/events/%s/edit", eventID)
+}
+
 // transferTemplateEditURL is the edit page of the transfer template transferTemplateID.
 func transferTemplateEditURL(transferTemplateID string) string {
 	return fmt.Sprintf("/transfer-templates/%s/edit", transferTemplateID)
@@ -126,6 +131,16 @@ func NewHandler(svc *model.Service, public fs.FS) http.Handler {
 	mux.Handle("GET /special-dates/{id}/edit", h.specialDateEditPage())
 	mux.Handle("POST /special-dates/{$}", h.specialDateUpsert())
 	mux.Handle("POST /special-dates/{id}/delete", h.specialDateDelete())
+
+	mux.Handle("GET /events", h.eventsPage())
+	mux.Handle("GET /events/new", h.eventNewPage())
+	mux.Handle("GET /events/{id}/edit", h.eventEditPage())
+	mux.Handle("POST /events/{$}", h.eventUpsert())
+	mux.Handle("GET /events/{id}/delete", h.eventDeletePage())
+	mux.Handle("POST /events/{id}/delete", h.eventDelete())
+	mux.Handle("POST /events/{id}/entries/remove", h.eventAction("removing from event", func(ctx context.Context, _ string, f eventEntryForm) error {
+		return h.svc.RemoveFromEvent(ctx, f.Entry)
+	}))
 
 	mux.Handle("GET /snapshots-table", h.snapshotsTablePage())
 	mux.Handle("POST /snapshots-table/modify-date", h.snapshotsTableModifyDate())
@@ -249,7 +264,7 @@ func (h *Handler) accountsPage() http.Handler {
 
 func (h *Handler) accountNewPage() http.Handler {
 	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		data, err := h.svc.GetAccountNewPageData(ctx, extractExcludedTypeIDs(r))
+		data, err := h.svc.GetAccountNewPageData(ctx, extractExcludedTypeIDs(r), r.URL.Query().Get("event_id"))
 		if err != nil {
 			return fmt.Errorf("getting account new page data: %w", err)
 		}
@@ -582,7 +597,7 @@ func (h *Handler) transferTemplatesPage() http.Handler {
 
 func (h *Handler) transferTemplatesNewPage() http.Handler {
 	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		data, err := h.svc.GetTransferTemplateNewPageData(ctx)
+		data, err := h.svc.GetTransferTemplateNewPageData(ctx, r.URL.Query().Get("event_id"))
 		if err != nil {
 			return fmt.Errorf("getting transfer template new page data: %w", err)
 		}
@@ -707,6 +722,78 @@ func (h *Handler) accountTypeUpsert() http.Handler {
 
 func (h *Handler) accountTypeDelete() http.Handler {
 	return deleteHandler(h.svc.DeleteAccountType, "/settings?tab=categories")
+}
+
+// ---- Events ----
+
+func (h *Handler) eventsPage() http.Handler {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		data, err := h.svc.GetEventsPageData(ctx)
+		if err != nil {
+			return fmt.Errorf("getting events page data: %w", err)
+		}
+		return view.NewView(ctx, w, r).Render(view.Page("Events", view.PageEvents(data)))
+	})
+}
+
+func (h *Handler) eventNewPage() http.Handler {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		data, err := h.svc.GetEventNewPageData(ctx)
+		if err != nil {
+			return fmt.Errorf("getting event new page data: %w", err)
+		}
+		return view.NewView(ctx, w, r).Render(view.Page("Events", view.PageEditEvent(data)))
+	})
+}
+
+func (h *Handler) eventEditPage() http.Handler {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		data, err := h.svc.GetEventEditPageData(ctx, r.PathValue("id"))
+		if err != nil {
+			return fmt.Errorf("getting event edit page data: %w", err)
+		}
+		return view.NewView(ctx, w, r).Render(view.Page("Events", view.PageEditEvent(data)))
+	})
+}
+
+func (h *Handler) eventUpsert() http.Handler {
+	return upsertHandler("event", func(ctx context.Context, f eventInputForm) (model.Event, error) {
+		return h.svc.UpsertEvent(ctx, f.EventInput)
+	}, func(ev model.Event) string {
+		return eventEditURL(ev.ID)
+	})
+}
+
+// eventDeletePage confirms deleting an Event, listing what it deletes.
+func (h *Handler) eventDeletePage() http.Handler {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		data, err := h.svc.GetEventDeletePageData(ctx, r.PathValue("id"))
+		if err != nil {
+			return fmt.Errorf("getting event delete page data: %w", err)
+		}
+		return view.NewView(ctx, w, r).Render(view.Page("Events", view.PageDeleteEvent(data)))
+	})
+}
+
+func (h *Handler) eventDelete() http.Handler {
+	return deleteHandler(h.svc.DeleteEvent, "/events")
+}
+
+// eventAction decodes an entry of the Event in the path, acts on it with act and redirects to next,
+// falling back to the Event's edit page. what names the action in an error.
+func (h *Handler) eventAction(what string, act func(ctx context.Context, eventID string, f eventEntryForm) error) http.Handler {
+	return errHandler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		var form eventEntryForm
+		if err := srvu.Decode(r, &form, false); err != nil {
+			return fmt.Errorf("decoding input: %w", err)
+		}
+		eventID := r.PathValue("id")
+		if err := act(ctx, eventID, form); err != nil {
+			return fmt.Errorf("%s: %w", what, err)
+		}
+		shttp.RedirectToNext(w, r, eventEditURL(eventID))
+		return nil
+	})
 }
 
 // ---- Special Dates ----

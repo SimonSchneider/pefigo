@@ -586,7 +586,7 @@ func TestDashboardForecastStreamSendsEveryPointAsADateAndABalance(t *testing.T) 
 		t.Fatalf("expected the series %v, got %v", want, names)
 	}
 	for _, m := range decodeList(t, setup["marklines"]) {
-		expectDay(t, expectFields(t, m, "date", "color", "name")["date"])
+		expectDay(t, expectFields(t, m, "date", "color", "name", "bottom")["date"])
 	}
 	var ids []string
 	for range 4 {

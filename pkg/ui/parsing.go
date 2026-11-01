@@ -129,3 +129,13 @@ func OrDefault[T any](val *T) T {
 func ParseDateCron(val string) (date.Cron, error) {
 	return date.Cron(val), nil
 }
+
+// ParseDays parses a whole number of days with an optional sign, such as "+20", "20" or "-5": the
+// days an entry in an Event is after the Event's date.
+func ParseDays(val string) (date.Duration, error) {
+	n, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%q is not a whole number of days, such as +20 or -5", val)
+	}
+	return date.Duration(n), nil
+}

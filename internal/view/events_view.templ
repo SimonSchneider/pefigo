@@ -1,0 +1,370 @@
+package view
+
+import (
+	"fmt"
+
+	"github.com/SimonSchneider/goslu/date"
+	"github.com/SimonSchneider/pefigo/internal/model"
+	"github.com/SimonSchneider/pefigo/pkg/ui"
+)
+
+templ PageEvents(view *model.EventsView) {
+	@Layout("/events", EventsContent(view))
+}
+
+templ PageEditEvent(view *model.EventEditView) {
+	@Layout("/events", EditEventContent(view))
+}
+
+templ PageDeleteEvent(view *model.EventDeleteView) {
+	@Layout("/events", DeleteEventContent(view))
+}
+
+// eventEditURL is the edit page of the Event id.
+func eventEditURL(id string) templ.SafeURL {
+	return templ.SafeURL("/events/" + id + "/edit")
+}
+
+// formatOffset is how long after an Event's date one of its dates is, such as "+31 days".
+// entryDatePlaceholder is the placeholder of an entry's Start: +0, the Event's date, in an Event, and
+// the example date otherwise.
+func entryDatePlaceholder(inEvent bool, example string) string {
+	if inEvent {
+		return "+0"
+	}
+	return example
+}
+
+func formatOffset(d date.Duration) string {
+	unit := "days"
+	if d == 1 || d == -1 {
+		unit = "day"
+	}
+	if d < 0 {
+		return fmt.Sprintf("%d %s", d, unit)
+	}
+	return fmt.Sprintf("+%d %s", d, unit)
+}
+
+// EventBadge marks an entry with the Event it is in, linking to the Event. An unplanned Event's badge
+// is outlined, since the Baseline leaves its entries out.
+templ EventBadge(ev *model.Event) {
+	if ev != nil {
+		<a
+			href={ eventEditURL(ev.ID) }
+			class={ "badge badge-sm gap-1 whitespace-nowrap", templ.KV("badge-secondary", ev.Planned), templ.KV("badge-outline badge-secondary", !ev.Planned) }
+			title={ eventBadgeTitle(ev) }
+		>
+			@IconCalendarEvent("w-3 h-3")
+			{ ev.Name }
+		</a>
+	}
+}
+
+// eventOptionLabel names ev in an Event select: its name, date and whether it is unplanned.
+func eventOptionLabel(ev model.Event) string {
+	if ev.Planned {
+		return fmt.Sprintf("%s (%s)", ev.Name, ev.Date)
+	}
+	return fmt.Sprintf("%s (%s, unplanned)", ev.Name, ev.Date)
+}
+
+func eventBadgeTitle(ev *model.Event) string {
+	if ev.Planned {
+		return "In the planned Event " + ev.Name + " on " + ev.Date.String()
+	}
+	return "In the unplanned Event " + ev.Name + ": left out of the Baseline"
+}
+
+// EventSelect picks the Event an entry is in, or none for the Baseline.
+templ EventSelect(events []model.Event, selected string, class string) {
+	<select class={ "select w-full", class } name="event_id">
+		<option value="">None (Baseline)</option>
+		for _, ev := range events {
+			<option
+				value={ ev.ID }
+				if ev.ID == selected {
+					selected
+				}
+			>{ eventOptionLabel(ev) }</option>
+		}
+	</select>
+}
+
+templ PlannedBadge(planned bool) {
+	if planned {
+		<span class="badge badge-success badge-sm">Planned</span>
+	} else {
+		<span class="badge badge-ghost badge-sm" title="Left out of the Baseline: only Scenarios use it">Unplanned</span>
+	}
+}
+
+templ NewEventButton() {
+	<a class="btn btn-primary" href="/events/new" title="New Event">
+		New Event
+		@IconPlus("w-4 h-4")
+	</a>
+}
+
+templ EventsContent(view *model.EventsView) {
+	<main class="flex-1 flex flex-col min-h-0">
+		@Header("Events", NewEventButton())
+		<div class="flex-1 p-6 overflow-auto bg-base-100">
+			<div class="flex flex-col gap-4 max-w-5xl">
+				<p class="text-sm text-base-content/60">
+					An Event groups related changes around one date. Every date in it is relative to the Event's date, so moving the Event moves them all. A planned Event is in the Baseline; an unplanned one is left out of it.
+				</p>
+				if len(view.Events) == 0 {
+					<div class="card bg-base-100 shadow-sm border border-base-300">
+						<div class="card-body items-center text-center text-base-content/70">
+							@NoDataImg()
+							<p class="text-lg font-medium">No Events yet</p>
+							<p>Group the changes of a plan, such as buying an apartment, into an Event.</p>
+						</div>
+					</div>
+				}
+				for _, ev := range view.Events {
+					@EventCard(ev)
+				}
+			</div>
+		</div>
+	</main>
+}
+
+templ EventCard(ev model.EventView) {
+	<div class={ "card bg-base-100 shadow-sm border border-base-300", templ.KV("opacity-75", !ev.Planned) }>
+		<div class="card-body p-4 gap-3">
+			<div class="flex flex-wrap items-center gap-3">
+				<a href={ eventEditURL(ev.ID) } class="text-lg font-semibold link link-hover">{ ev.Name }</a>
+				<span class="font-mono text-sm">{ ev.Date.String() }</span>
+				@PlannedBadge(ev.Planned)
+				<a class="btn btn-ghost btn-xs ml-auto" title={ "Edit " + ev.Name } href={ eventEditURL(ev.ID) }>
+					@IconPencil("w-4 h-4")
+				</a>
+			</div>
+			@EventEntriesTable(ev, false)
+		</div>
+	</div>
+}
+
+// EventEntriesTable lists the entries ev adds, with a button to remove each from it when editable.
+templ EventEntriesTable(ev model.EventView, editable bool) {
+	if len(ev.Accounts)+len(ev.GrowthModels)+len(ev.TransferTemplates) == 0 {
+		<p class="text-sm text-base-content/50">Adds no entries.</p>
+	} else {
+		<div class="overflow-x-auto">
+			<table class="table table-sm w-full">
+				<thead class="bg-base-200/60">
+					<tr>
+						<th>Adds</th>
+						<th>Name</th>
+						<th>Start Date</th>
+						@EndDateHeaderCell()
+						if editable {
+							<th></th>
+						}
+					</tr>
+				</thead>
+				<tbody>
+					for _, acc := range ev.Accounts {
+						<tr>
+							<td class="text-xs text-base-content/60">Account</td>
+							<td><a class="link link-hover" href={ templ.SafeURL("/accounts/" + acc.ID + "/edit") }>{ acc.Name }</a></td>
+							<td class="text-base-content/50">-</td>
+							<td class="text-base-content/50">-</td>
+							if editable {
+								<td class="text-right">@RemoveFromEventButton(ev.ID, model.EventEntry{Kind: model.EventEntryAccount, ID: acc.ID})</td>
+							}
+						</tr>
+					}
+					for _, gm := range ev.GrowthModels {
+						<tr>
+							<td class="text-xs text-base-content/60">Growth model</td>
+							<td>
+								<a class="link link-hover" href={ templ.SafeURL("/accounts/" + gm.AccountID + "/edit") }>{ gm.AccountName }</a>
+								<span class="text-xs text-base-content/60">{ gm.Type } { gm.AnnualRate.SimpleEncode() }</span>
+							</td>
+							<td>@OffsetDate(gm.StartDate, gm.StartOffset())</td>
+							<td>
+								if gm.EndDate != nil {
+									@OffsetDate(*gm.EndDate, *gm.EndOffset())
+								} else {
+									<span class="text-base-content/50">-</span>
+								}
+							</td>
+							if editable {
+								<td class="text-right">@RemoveFromEventButton(ev.ID, model.EventEntry{Kind: model.EventEntryGrowthModel, ID: gm.ID})</td>
+							}
+						</tr>
+					}
+					for _, tt := range ev.TransferTemplates {
+						<tr>
+							<td class="text-xs text-base-content/60">Transfer Template</td>
+							<td>
+								<a class="link link-hover" href={ templ.SafeURL("/transfer-templates/" + tt.ID + "/edit") }>{ tt.Name }</a>
+								<span class="text-xs text-base-content/60 font-mono">{ string(tt.Recurrence) }</span>
+							</td>
+							<td>@OffsetDate(tt.StartDate, tt.StartOffset())</td>
+							<td>
+								if tt.EndDate != nil {
+									@OffsetDate(*tt.EndDate, *tt.EndOffset())
+								} else {
+									<span class="text-base-content/50">-</span>
+								}
+							</td>
+							if editable {
+								<td class="text-right">@RemoveFromEventButton(ev.ID, model.EventEntry{Kind: model.EventEntryTransferTemplate, ID: tt.ID})</td>
+							}
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ EndDateHeaderCell() {
+	<th>
+		@EndDateColumnHeader()
+	</th>
+}
+
+// OffsetDate is a date of an Event with how long after the Event's date it is.
+templ OffsetDate(d date.Date, offset date.Duration) {
+	<span class="font-mono whitespace-nowrap">{ d.String() }</span>
+	<span class="text-xs text-base-content/50 whitespace-nowrap">{ formatOffset(offset) }</span>
+}
+
+templ RemoveFromEventButton(eventID string, entry model.EventEntry) {
+	<form method="post" action={ templ.SafeURL("/events/" + eventID + "/entries/remove") }>
+		<input type="hidden" name="entry" value={ entry.String() }/>
+		<button type="submit" class="btn btn-ghost btn-xs" title="Remove from the Event, keeping its dates">
+			@IconX("w-3.5 h-3.5")
+		</button>
+	</form>
+}
+
+templ DeleteEventLink(id string) {
+	<a class="btn btn-error" href={ templ.SafeURL("/events/" + id + "/delete") }>Delete</a>
+}
+
+templ EditEventContent(view *model.EventEditView) {
+	<main class="flex-1 flex flex-col min-h-0">
+		if view.IsEdit() {
+			@Header("Edit Event", DeleteEventLink(view.Event.ID))
+		} else {
+			@Header("New Event", BackButton("/events"))
+		}
+		<div class="flex-1 p-6 overflow-auto bg-base-100">
+			<div class="max-w-4xl mx-auto flex flex-col gap-4">
+				@EventForm(view)
+				if view.IsEdit() {
+					@EventEntriesCard(view)
+				}
+			</div>
+		</div>
+	</main>
+}
+
+templ EventForm(view *model.EventEditView) {
+	<form action="/events/" method="post">
+		<div class="card bg-base-100 shadow-sm border border-base-300">
+			<div class="card-body p-5">
+				<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/60 mb-3">Event</h3>
+				<input type="hidden" name="id" value={ view.Event.ID }/>
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+					<div class="form-control">
+						<label class="label"><span class="label-text font-medium">Name</span></label>
+						<input type="text" class="input input-bordered w-full" placeholder="Buy an apartment" name="name" value={ view.Event.Name }/>
+					</div>
+					<div class="form-control">
+						<label class="label"><span class="label-text font-medium">Date</span></label>
+						{{ day := "" }}
+						if !view.Event.Date.IsZero() {
+							{{ day = view.Event.Date.String() }}
+						}
+						<input type="date" class="input input-bordered w-full" name="date" value={ day }/>
+						<div class="text-sm text-base-content/60 mt-1">Moving it moves every date in the Event</div>
+					</div>
+				</div>
+				<label class="flex items-center gap-2 cursor-pointer mt-4">
+					<input
+						type="checkbox"
+						class="checkbox"
+						name="unplanned"
+						if !view.Event.Planned {
+							checked
+						}
+					/>
+					<span class="label-text">Unplanned: leave it out of the Baseline, for Scenarios only</span>
+				</label>
+				@SaveButton(view.IsEdit())
+			</div>
+		</div>
+	</form>
+}
+
+templ EventEntriesCard(view *model.EventEditView) {
+	<div class="card bg-base-100 shadow-sm border border-base-300">
+		<div class="card-body p-5 gap-3">
+			<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/60">Entries it adds</h3>
+			@EventEntriesTable(view.Event, true)
+			<div class="flex flex-wrap gap-2 text-sm">
+				<span class="text-base-content/60">New in this Event:</span>
+				<a class="link" href={ templ.SafeURL("/accounts/new?event_id=" + view.Event.ID) }>Account</a>
+				<a class="link" href={ templ.SafeURL("/transfer-templates/new?event_id=" + view.Event.ID) }>Transfer Template</a>
+				<span class="text-base-content/50">Growth models are added on their account's page, and an existing entry joins from the Event select on its own form.</span>
+			</div>
+		</div>
+	</div>
+}
+
+templ DeleteEventContent(view *model.EventDeleteView) {
+	<main class="flex-1 flex flex-col min-h-0">
+		@Header("Delete " + view.Event.Name, BackButton(string(eventEditURL(view.Event.ID))))
+		<div class="flex-1 p-6 overflow-auto bg-base-100">
+			<div class="max-w-4xl mx-auto flex flex-col gap-4">
+				<div class="card bg-base-100 shadow-sm border border-error/40">
+					<div class="card-body p-5 gap-3">
+						<p>
+							Deleting <strong>{ view.Event.Name }</strong> on { view.Event.Date.String() } deletes the entries it adds.
+							To keep an entry, remove it from the Event first: it moves to the Baseline with the dates it applies on.
+						</p>
+						@EventEntriesTable(view.Event, false)
+						if len(view.AlsoDeletedOptions) > 0 {
+							<div>
+								<p class="text-sm font-medium">Also deleted with the accounts that fund them:</p>
+								<ul class="list-disc list-inside text-sm">
+									for _, o := range view.AlsoDeletedOptions {
+										<li>An Option of { ui.FormatWithThousands(o.Shares) } shares on { o.AccountName }, funded by { o.SourceAccountName }</li>
+									}
+								</ul>
+							</div>
+						}
+						if len(view.AlsoDeleted) > 0 {
+							<div>
+								<p class="text-sm font-medium">Also deleted with its accounts:</p>
+								<ul class="list-disc list-inside text-sm">
+									for _, e := range view.AlsoDeleted {
+										<li>
+											{ e.Name }
+											if e.EventName != "" {
+												<span class="text-base-content/60">(in { e.EventName })</span>
+											}
+										</li>
+									}
+								</ul>
+							</div>
+						}
+						<div class="flex gap-2 mt-2">
+							<form method="post" action={ templ.SafeURL("/events/" + view.Event.ID + "/delete") }>
+								<button class="btn btn-error" type="submit">Delete the Event and its entries</button>
+							</form>
+							<a class="btn" href={ eventEditURL(view.Event.ID) }>Cancel</a>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</main>
+}

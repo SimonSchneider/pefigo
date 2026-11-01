@@ -35,7 +35,7 @@ type Transfer struct {
 // Forecast that starts on day.
 func (s *Service) ComputeTransfersView(ctx context.Context, day date.Date, amounts map[string]float64) (*TransfersView, error) {
 	view := &TransfersView{Day: day}
-	f, err := s.loadForecast(ctx)
+	f, err := s.loadForecast(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("loading the Forecast: %w", err)
 	}

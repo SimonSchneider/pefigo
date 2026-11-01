@@ -1,6 +1,7 @@
 package view;
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/SimonSchneider/pefigo/internal/model"
@@ -40,6 +41,7 @@ templ DeleteTransferTemplateButton(id string) {
 templ TransferTemplateForm(view *model.TransferTemplateEditView) {
 	<form action={ "/transfers/?next=" + templ.EscapeString("/transfer-templates") } method="post">
 		<input type="hidden" name="id" value={ view.TransferTemplate.ID }/>
+		<input type="hidden" name="offset_event_id" value={ view.TransferTemplate.EventID }/>
 		<div class="max-w-4xl mx-auto">
 			<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 				<!-- Basic Information -->
@@ -120,26 +122,41 @@ templ TransferTemplateForm(view *model.TransferTemplateEditView) {
 					<div class="card-body p-5">
 						<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/60 mb-3">Schedule</h3>
 						<div class="form-control">
-							<label class="label"><span class="label-text font-medium">Recurrence (Cron Expression)</span></label>
-							<input type="text" class="input input-bordered w-full" placeholder="*-*-25" name="recurrence" value={ view.TransferTemplate.Recurrence }/>
+							<label class="label"><span class="label-text font-medium">Recurrence</span></label>
+							<input type="text" class="input input-bordered w-full" placeholder="*-*-25" name="recurrence" value={ view.RecurrenceInput() }/>
 							<div class="text-sm text-base-content/60 mt-1">
-								Leave empty for one-time transfers. Use cron syntax (e.g., "*-*-25" for monthly on 25th)
+								Leave empty for a one-time transfer on the Start. Otherwise a date pattern, such as *-*-25 for the 25th of every month.
 							</div>
 						</div>
+						{{ ev := view.Event() }}
 						<div class="grid grid-cols-2 gap-4">
 							<div class="form-control">
-								<label class="label"><span class="label-text font-medium">Start Date</span></label>
-								<input type="text" class="input input-bordered w-full" name="start_date" value={ view.TransferTemplate.StartDate.String() }/>
+								<label class="label whitespace-normal">
+									<span class="label-text font-medium">
+										if ev != nil {
+											Start, days after { ev.Name }
+										} else {
+											Start Date
+										}
+									</span>
+								</label>
+								<input type="text" class="input input-bordered w-full" name="start_date" value={ view.StartInput() } placeholder={ entryDatePlaceholder(ev != nil, "2027-01-01") }/>
 							</div>
 							<div class="form-control">
-								<label class="label"><span class="label-text font-medium">End Date</span></label>
-								{{ endDate := "" }}
-								if view.TransferTemplate.EndDate != nil {
-									{{ endDate = view.TransferTemplate.EndDate.String() }}
-								}
-								<input type="text" class="input input-bordered w-full" name="end_date" value={ endDate } placeholder="Optional"/>
-								<div class="text-sm text-base-content/60 mt-1">First day not included</div>
+								<label class="label whitespace-normal">
+									<span class="label-text font-medium">
+										if ev != nil {
+											End, days after { ev.Name }
+										} else {
+											End Date
+										}
+									</span>
+								</label>
+								<input type="text" class="input input-bordered w-full" name="end_date" value={ view.EndInput() } placeholder="Optional"/>
 							</div>
+						</div>
+						<div class="text-sm text-base-content/60 mt-1">
+							A date such as 2027-09-30, or in an Event the days after its date, such as +20. The End's first day isn't included.
 						</div>
 					</div>
 				</div>
@@ -166,6 +183,19 @@ templ TransferTemplateForm(view *model.TransferTemplateEditView) {
 						</select>
 						<div class="text-sm text-base-content/60 mt-1">
 							Assign a budget category to include this template in the monthly budget summary
+						</div>
+					</div>
+				</div>
+			</div>
+			<!-- Event -->
+			<div class="card bg-base-100 shadow-sm border border-base-300">
+				<div class="card-body p-5">
+					<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/60 mb-3">Event</h3>
+					<div class="form-control">
+						<label class="label"><span class="label-text font-medium">Event</span></label>
+						@EventSelect(view.Events, view.TransferTemplate.EventID, "select-bordered")
+						<div class="text-sm text-base-content/60 mt-1">
+							In an Event, give the Start and End as days after its date, such as +20, and they move with it. A blank Start is the Event's date. Changing the Event keeps the dates it applies on.
 						</div>
 					</div>
 				</div>
@@ -199,7 +229,7 @@ templ TransferTemplateForm(view *model.TransferTemplateEditView) {
 templ TransferTemplatesStatCardRow(view *model.TransferTemplatesView) {
 	<div class="flex flex-row flex-wrap gap-4">
 		@StatCard("Net Income", ui.FormatWithThousands(view.MonthlyIncome+view.MonthlyExpenses), "Net income of all accounts", IconTrendingUp("w-10 h-10 text-green-600"))
-		@StatCard("Total Templates", strconv.Itoa(len(view.Rows)), "number of templates", IconCashBanknote("w-10 h-10"))
+		@StatCard("Total Templates", strconv.Itoa(view.TemplateCount()), "number of templates", IconCashBanknote("w-10 h-10"))
 		@StatCard("Total Income", ui.FormatWithThousands(view.MonthlyIncome), "Total income of all accounts", IconTrendingUp("w-10 h-10 text-green-600"))
 		@StatCard("Total Expenses", ui.FormatWithThousands(view.MonthlyExpenses), "Total expenses of all accounts", IconTrendingDown("w-10 h-10 text-red-600"))
 	</div>
@@ -248,6 +278,7 @@ templ TransferTemplateTableRow(view *model.TransferTemplatesView, t *model.Trans
 							{ t.Source.Type }
 						</div>
 					}
+					@EventBadge(view.GetEvent(t.EventID))
 				</div>
 				if t.StartDate > 0 || t.EndDate != nil {
 					<div class="text-xs text-base-content/40 ml-6">
@@ -326,6 +357,11 @@ templ TransferTemplateTableRow(view *model.TransferTemplatesView, t *model.Trans
 		<!-- Actions -->
 		<td class="text-right">
 			<div class="flex items-center justify-end gap-1 row-actions">
+				if isGroup && t.Source.IsGenerated() {
+					<a class="btn btn-ghost btn-xs" title={ "Edit " + t.Source.Label } href={ sourceEditURL(t.Source) } onclick="event.stopPropagation()">
+						@IconPencil("w-4 h-4")
+					</a>
+				}
 				if !isGroup {
 					if t.Source.IsGenerated() {
 						<a class="btn btn-ghost btn-xs" title={ "Edit " + t.Source.Label } href={ sourceEditURL(t.Source) }>
@@ -347,16 +383,49 @@ templ TransferTemplateTableRow(view *model.TransferTemplatesView, t *model.Trans
 	</tr>
 }
 
-templ TransferTemplateMemberRow(view *model.TransferTemplatesView, parentID string, t *model.ScheduledTransfer) {
+// TransferTemplateMembers are the rows of the members of row, depth groups deep, each hidden until
+// row is expanded. A member that is a group, such as a Bill of several amounts in its Bill Account,
+// expands in turn.
+templ TransferTemplateMembers(view *model.TransferTemplatesView, row *model.TransferScheduleRow, depth int) {
+	for _, member := range row.Members {
+		@TransferTemplateMemberRow(view, row.ID, &member, depth)
+		if member.IsGroup() {
+			@TransferTemplateMembers(view, &member, depth+1)
+		}
+	}
+}
+
+templ TransferTemplateMemberRow(view *model.TransferTemplatesView, parentID string, t *model.TransferScheduleRow, depth int) {
+	{{ isGroup := t.IsGroup() }}
 	<tr
-		class="hover:bg-base-200/50 transition-colors bg-base-100/50 hidden"
+		class={
+			"hover:bg-base-200/50 transition-colors bg-base-100/50 hidden",
+			templ.KV("cursor-pointer collapsed", isGroup),
+		}
 		data-parent-id={ parentID }
+		if isGroup {
+			data-template-id={ t.ID }
+			onclick="window.toggleTemplateRow(this)"
+		}
 	>
-		<td class="font-medium" style="padding-left:2.5rem;">
+		<td class="font-medium" style={ fmt.Sprintf("padding-left:%.1frem;", 0.5+2*float64(depth)) }>
 			<div class="flex items-stretch gap-2">
 				<div style="background-color:var(--color-base-content);opacity:0.2;" class="shrink-0"></div>
 				<div class="flex flex-col gap-0.5">
 				<div class="flex items-center gap-2">
+					if isGroup {
+						<button
+							type="button"
+							class="collapse-toggle btn btn-ghost btn-xs p-0 min-h-0 h-4 w-4 shrink-0"
+							title="Toggle its amounts"
+						>
+							<svg class="w-3 h-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+							</svg>
+						</button>
+					} else {
+						<span class="w-4 shrink-0"></span>
+					}
 					switch t.ActiveState() {
 						case "Active":
 							<span class="inline-block w-2 h-2 rounded-full bg-success shrink-0" title="Active"></span>
@@ -371,6 +440,7 @@ templ TransferTemplateMemberRow(view *model.TransferTemplatesView, parentID stri
 							{ t.Source.Type }
 						</a>
 					}
+					@EventBadge(view.GetEvent(t.EventID))
 				</div>
 				if t.StartDate > 0 || t.EndDate != nil {
 					<div class="text-xs text-base-content/40 ml-6">
@@ -432,20 +502,22 @@ templ TransferTemplateMemberRow(view *model.TransferTemplatesView, parentID stri
 					{{ class = "text-green-600" }}
 				}
 				@BalanceBadge(t.Amount, false, class)
-				if t.AmountType == model.TransferAmountPercent {
-					<span class="text-xs text-base-content/40">{ ui.FormatPercent(t.AmountPercent) }%</span>
-				} else if t.HasDifferentAmount() {
-					@BalanceBadge(t.AmountFixed.Mean(), false, "text-xs text-base-content/40")
+				if !isGroup {
+					if t.AmountType == model.TransferAmountPercent {
+						<span class="text-xs text-base-content/40">{ ui.FormatPercent(t.AmountPercent) }%</span>
+					} else if t.HasDifferentAmount() {
+						@BalanceBadge(t.AmountFixed.Mean(), false, "text-xs text-base-content/40")
+					}
 				}
 			</div>
 		</td>
 		<td class="text-right">
 			<div class="flex items-center justify-end gap-1 row-actions">
 				if t.Source.IsGenerated() {
-					<a class="btn btn-ghost btn-xs" title={ "Edit " + t.Source.Label } href={ sourceEditURL(t.Source) }>
+					<a class="btn btn-ghost btn-xs" title={ "Edit " + t.Source.Label } href={ sourceEditURL(t.Source) } onclick="event.stopPropagation()">
 						@IconPencil("w-4 h-4")
 					</a>
-				} else {
+				} else if !isGroup {
 					<form method="post" action={ "/transfers/" + t.ID + "/duplicate" } style="display:inline;">
 						<button type="submit" class="btn btn-ghost btn-xs" title="Duplicate">
 							@IconCopy("w-4 h-4")
@@ -508,9 +580,7 @@ templ TransferTemplatesContent(view *model.TransferTemplatesView) {
 									} else {
 										for _, row := range view.Rows {
 											@TransferTemplateTableRow(view, &row)
-											for _, member := range row.Members {
-												@TransferTemplateMemberRow(view, row.ID, &member)
-											}
+											@TransferTemplateMembers(view, &row, 1)
 										}
 									}
 								</tbody>
@@ -518,9 +588,89 @@ templ TransferTemplatesContent(view *model.TransferTemplatesView) {
 						</div>
 					</div>
 				</div>
+				if len(view.LeftOut) > 0 {
+					@LeftOutTransferTemplates(view)
+				}
 			</div>
 		</div>
 	</main>
+}
+
+// LeftOutTransferTemplates lists the Transfer Templates the Events leave out of the Baseline: those
+// of unplanned Events, at their Events' dates, and those that use their Accounts. They count in
+// nothing on this page.
+templ LeftOutTransferTemplates(view *model.TransferTemplatesView) {
+	<div class="card bg-base-100 shadow-sm border border-base-300">
+		<div class="card-body">
+			<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/60">Left out of the Baseline</h3>
+			<p class="text-sm text-base-content/60">In unplanned Events, or using their accounts. They count in no total, Forecast or budget.</p>
+			<div class="overflow-x-auto">
+				<table class="table table-sm w-full">
+					<thead class="bg-base-200/60">
+						<tr>
+							<th class="font-semibold">Name</th>
+							<th class="font-semibold">From → To</th>
+							<th class="font-semibold">Recurrence</th>
+							<th class="font-semibold text-right">Amount</th>
+							<th class="font-semibold text-right">Actions</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, t := range view.LeftOut {
+							<tr class="text-base-content/70">
+								<td>
+									<div class="flex items-center gap-2">
+										<span>{ t.Name }</span>
+										@EventBadge(view.GetEvent(t.EventID))
+									</div>
+									<div class="text-xs text-base-content/40">
+										{ t.StartDate.String() } —
+										if t.EndDate != nil {
+											{ t.EndDate.String() }
+										} else {
+											-
+										}
+									</div>
+								</td>
+								<td class="text-sm whitespace-nowrap">
+									if t.FromAccountID != "" {
+										{ view.GetAccount(t.FromAccountID).Name }
+									} else {
+										external
+									}
+									<span class="text-base-content/40 mx-1">→</span>
+									if t.ToAccountID != "" {
+										{ view.GetAccount(t.ToAccountID).Name }
+									} else {
+										external
+									}
+								</td>
+								<td class="font-mono text-sm">{ string(t.Recurrence) }</td>
+								<td class="text-right">
+									if t.AmountType == model.TransferAmountPercent {
+										<span class="text-xs">{ ui.FormatPercent(t.AmountPercent) }%</span>
+									} else {
+										@BalanceBadge(t.AmountFixed.Mean(), false, "")
+									}
+								</td>
+								<td class="text-right">
+									if t.Source.IsGenerated() {
+										<a class="btn btn-ghost btn-xs" title={ "Edit " + t.Source.Label } href={ sourceEditURL(t.Source) }>
+											@IconPencil("w-4 h-4")
+										</a>
+									} else {
+										<a class="btn btn-ghost btn-xs" title="Edit" href={ "/transfer-templates/" + t.ID + "/edit" }>
+											@IconPencil("w-4 h-4")
+										</a>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		</div>
+	</div>
 }
 
 // sourceEditURL is the edit page of what a generated Transfer Template is generated from: its Salary,

@@ -248,6 +248,7 @@ func SidebarContent(page string) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = NavGroup("Forecasting",
+			NavItem("/events", IconCalendarEvent("w-5 h-5"), "Events", page),
 			NavItem("/transfers/chart", IconChartSankey("w-5 h-5"), "Cashflows", page),
 			NavItem("/chart", IconTrendingUp("w-5 h-5"), "Forecast", page),
 		).Render(ctx, templ_7745c5c3_Buffer)
@@ -337,7 +338,7 @@ func Header(title string, btns ...templ.Component) templ.Component {
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/view_main.templ`, Line: 152, Col: 59}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/view/view_main.templ`, Line: 153, Col: 59}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 		if templ_7745c5c3_Err != nil {

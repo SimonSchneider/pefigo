@@ -11,7 +11,8 @@ SET name = ?,
   cash_flow_destination_id = ?,
   type_id = ?,
   budget_category_id = ?,
-  is_isk = ?
+  is_isk = ?,
+  event_id = ?
 WHERE id = ?
 RETURNING *;
 -- name: DeleteAccount :one
@@ -33,10 +34,11 @@ INSERT INTO account (
     type_id,
     budget_category_id,
     is_isk,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 -- name: GetSnapshotsByAccount :many
 SELECT *
@@ -81,16 +83,18 @@ INSERT INTO growth_model (
     annual_volatility,
     start_date,
     end_date,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET model_type = EXCLUDED.model_type,
   annual_growth_rate = EXCLUDED.annual_growth_rate,
   annual_volatility = EXCLUDED.annual_volatility,
   start_date = EXCLUDED.start_date,
   end_date = EXCLUDED.end_date,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
 RETURNING *;
 -- name: DeleteGrowthModel :exec
@@ -124,10 +128,11 @@ INSERT INTO transfer_template (
     end_date,
     enabled,
     budget_category_id,
+    event_id,
     created_at,
     updated_at
   )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO
 UPDATE
 SET name = EXCLUDED.name,
   from_account_id = EXCLUDED.from_account_id,
@@ -141,6 +146,7 @@ SET name = EXCLUDED.name,
   end_date = EXCLUDED.end_date,
   enabled = EXCLUDED.enabled,
   budget_category_id = EXCLUDED.budget_category_id,
+  event_id = EXCLUDED.event_id,
   updated_at = EXCLUDED.updated_at
 RETURNING *;
 -- name: DeleteTransferTemplate :exec
@@ -169,11 +175,17 @@ ORDER BY s.date,
   a.type_id,
   s.account_id;
 -- name: ListProjectedAccountTypeIDs :many
--- Returns the type_id of every account when there is a Forecast, which projects every account: when
--- an account other than a Startup Share account has a snapshot. Accounts without a type have ''.
+-- Returns the type_id of every account of the Baseline when there is a Forecast, which projects every
+-- such account: when an account other than a Startup Share account has a snapshot. An account of an
+-- unplanned Event isn't in the Baseline. Accounts without a type have ''.
 SELECT DISTINCT COALESCE(a.type_id, '') AS type_id
 FROM account a
-WHERE EXISTS (
+  LEFT JOIN event e ON e.id = a.event_id
+WHERE (
+    a.event_id IS NULL
+    OR e.planned
+  )
+  AND EXISTS (
     SELECT 1
     FROM account_snapshot s
     WHERE s.account_id NOT IN (
@@ -408,9 +420,3 @@ ORDER BY account_id,
 -- name: DeleteStartupShareOption :exec
 DELETE FROM startup_share_option
 WHERE id = ?;
--- name: GetBudgetAccounts :many
-SELECT *
-FROM account
-WHERE budget_category_id IS NOT NULL
-ORDER BY name,
-  id;

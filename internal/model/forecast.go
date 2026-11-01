@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/SimonSchneider/goslu/date"
 	"github.com/SimonSchneider/pefigo/pkg/finance"
@@ -10,11 +11,12 @@ import (
 	"github.com/SimonSchneider/pefigo/pkg/uncertain"
 )
 
-// forecast holds the Forecast Inputs every account of a Forecast is built from. They are loaded up
-// front, so building the accounts runs no queries. It is the only place that builds them, for the
-// Forecasts and for the Transfers page alike.
+// forecast holds the Forecast Inputs every account of a Forecast is built from, with the Events
+// placed. They are loaded up front, so building the accounts runs no queries. It is the only place
+// that builds them, for the Forecasts and for the Transfers page alike.
 type forecast struct {
-	accounts      []Account                      // by name and ID
+	events        []Event                        // the placed Events, at the dates they are placed at
+	accounts      []Account                      // by name and ID; none of a left-out Event
 	snapshots     map[string][]AccountSnapshot   // by account ID, each by date; none of a Startup Share account
 	growthModels  map[string]finance.GrowthModel // every account's, by account ID
 	startupShares map[string]*startupShares      // the Startup Share accounts, by account ID
@@ -22,7 +24,8 @@ type forecast struct {
 	schedule      *TransferSchedule
 
 	// start is the Forecast Start, the first of the Forecast Start Days on or after the latest
-	// Snapshot. Without a Snapshot, hasStart is false and there is no Forecast.
+	// Snapshot. Without a Snapshot, hasStart is false and there is no Forecast. Events never change
+	// it: the Snapshots of every account count, whether its Event is placed or not.
 	start    date.Date
 	hasStart bool
 }
@@ -31,12 +34,14 @@ type forecast struct {
 // for: four years hold every day of the year, February 29 included.
 const forecastStartDaysSearched = 4*date.Year + date.Day
 
-func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
-	accounts, err := s.ListAccounts(ctx)
+// loadForecast loads the Forecast Inputs with the Events placed as placements say: the Baseline's
+// without placements.
+func (s *Service) loadForecast(ctx context.Context, placements EventPlacements) (*forecast, error) {
+	p, err := s.placeEvents(ctx, placements)
 	if err != nil {
-		return nil, fmt.Errorf("listing accounts: %w", err)
+		return nil, fmt.Errorf("placing the events: %w", err)
 	}
-	startupShares, err := s.listStartupShares(ctx)
+	allStartupShares, err := s.listStartupShares(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -44,15 +49,11 @@ func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listing snapshots: %w", err)
 	}
-	growthModelRows, err := s.q.ListGrowthModels(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing growth models: %w", err)
-	}
 	sweParams, err := s.ListSweYearlyParams(ctx)
 	if err != nil {
 		return nil, err
 	}
-	schedule, err := s.TransferSchedule(ctx)
+	schedule, err := s.transferSchedule(ctx, p)
 	if err != nil {
 		return nil, fmt.Errorf("loading transfer schedule: %w", err)
 	}
@@ -67,36 +68,46 @@ func (s *Service) loadForecast(ctx context.Context) (*forecast, error) {
 		return nil, fmt.Errorf("the stored Forecast Settings: %w", err)
 	}
 	f := &forecast{
-		accounts:      accounts,
+		events:        p.events,
+		accounts:      p.accounts,
 		snapshots:     make(map[string][]AccountSnapshot),
-		growthModels:  make(map[string]finance.GrowthModel, len(accounts)),
-		startupShares: startupShares,
+		growthModels:  make(map[string]finance.GrowthModel, len(p.accounts)),
+		startupShares: make(map[string]*startupShares, len(allStartupShares)),
 		sweParams:     sweParams,
 		schedule:      schedule,
 	}
+	for accountID, ss := range allStartupShares {
+		if p.leftOutAccounts[accountID] {
+			continue
+		}
+		// An Option funded by a left-out Account is left out with it, as a Transfer Template from it is.
+		placed := *ss
+		placed.options = slices.DeleteFunc(slices.Clone(ss.options), func(o StartupShareOption) bool {
+			return p.leftOutAccounts[o.SourceAccountID]
+		})
+		f.startupShares[accountID] = &placed
+	}
 	// A Startup Share account's balance is derived, so its Snapshots are ignored.
 	for _, row := range snapshotRows {
-		if _, ok := startupShares[row.AccountID]; ok {
+		if _, ok := allStartupShares[row.AccountID]; ok {
 			continue
 		}
 		snap := accountSnapshotFromDB(row)
-		f.snapshots[row.AccountID] = append(f.snapshots[row.AccountID], snap)
 		if !f.hasStart || snap.Date.After(f.start) {
 			f.start, f.hasStart = snap.Date, true
+		}
+		if !p.leftOutAccounts[row.AccountID] {
+			f.snapshots[row.AccountID] = append(f.snapshots[row.AccountID], snap)
 		}
 	}
 	if f.hasStart {
 		f.start = firstForecastStartDay(f.start, settings.StartDays)
 	}
 	growthModels := make(map[string]GrowthModels)
-	for _, row := range growthModelRows {
-		gm, err := growthModelFromDB(row)
-		if err != nil {
-			return nil, fmt.Errorf("converting growth model from db: %w", err)
-		}
-		growthModels[row.AccountID] = append(growthModels[row.AccountID], gm)
+	for _, gm := range p.growthModels {
+		growthModels[gm.AccountID] = append(growthModels[gm.AccountID], gm)
 	}
-	for _, acc := range accounts {
+	for _, acc := range p.accounts {
 		if err := cashFlowError(acc.CashFlowFrequency, acc.CashFlowDestinationID); err != nil {
 			return nil, fmt.Errorf("account %s has invalid cash-flow frequency %q: %w", acc.ID, acc.CashFlowFrequency, err)
 		}
